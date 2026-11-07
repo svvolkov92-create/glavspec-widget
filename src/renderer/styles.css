@@ -5,6 +5,8 @@
 /* Layout: frameless glass window — draggable header (window controls + tabs), scrolling body, side drawer for records */
 :root {
   --alpha: .82;
+  /* In-page surfaces follow the window transparency; floating panels (card, messenger, menus, dialogs) stay solid to stay readable. */
+  --glass: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent);
   --bg: #eef1f4; --surface: #ffffff; --sunk: #f3f5f8; --ink: #141820; --muted: #536070; --line: #cfd5de;
   --accent: #23439b; --accent-ink: #ffffff; --accent-soft: #dfe6f8;
   --ok: #1d7a4c; --ok-soft: #dcf0e5; --warn: #a15e00; --warn-soft: #f9ecd3;
@@ -245,7 +247,7 @@ td.num { white-space: nowrap }
 .f { display: grid; gap: 4px; min-width: 0 }
 .f.wide { grid-column: 1 / -1 }
 .f label { font-size: 12px; color: var(--muted); font-weight: 500 }
-.f input, .f select, .f textarea { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 6px 9px; width: 100%; min-width: 0 }
+.f input, .f select, .f textarea { border: 1px solid var(--line); background: var(--glass); border-radius: 6px; padding: 6px 9px; width: 100%; min-width: 0 }
 .f textarea { min-height: 60px; resize: vertical }
 .err { color: var(--bad); font-size: 12px }
 .req::after { content: " *"; color: var(--bad) }
@@ -289,10 +291,7 @@ td.num { white-space: nowrap }
   .padd .f:nth-child(3) { grid-column: 1 / -1 }
   .stats { grid-template-columns: repeat(2, 1fr) }
 }
-@media (prefers-reduced-motion: no-preference) {
-  .drawer { animation: slide .16s ease-out }
-  @keyframes slide { from { transform: translateX(20px); opacity: .6 } to { transform: none; opacity: 1 } }
-}
+/* Animations: see the «Анимации» block at the end (on/off in the «Окно» menu). */
 
 /* ===== v1.3: cards with history, payments, timeline, trash, import ===== */
 .kpi.warn .v { color: var(--warn) }
@@ -310,7 +309,7 @@ td.num { white-space: nowrap }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0 }
 .menu-scope { display: grid; gap: 4px; padding: 6px 8px 8px }
 .menu-scope span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600 }
-.menu-scope select { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: var(--surface); width: 100% }
+.menu-scope select { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: var(--glass); width: 100% }
 .fmt-i { background: var(--idle) }
 
 /* reliability line in contractor cards */
@@ -332,7 +331,7 @@ td.num { white-space: nowrap }
 .shift-h { font-size: 13px }
 .qa { border-top: 1px dashed var(--line); padding-top: 10px }
 .qa-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
-.qa-row input { flex: 1; min-width: 180px; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 6px 9px }
+.qa-row input { flex: 1; min-width: 180px; border: 1px solid var(--line); background: var(--glass); border-radius: 6px; padding: 6px 9px }
 .okbtn { border-color: var(--ok); color: var(--ok) }
 .warnbtn { border-color: var(--warn); color: var(--warn) }
 .chk { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer }
@@ -351,7 +350,7 @@ td.num { white-space: nowrap }
 
 .ms-list, .plan-list { display: grid; gap: 6px }
 .ms-row { display: grid; grid-template-columns: auto 1fr 150px auto; gap: 6px; align-items: center }
-.ms-row input:not([type="checkbox"]), .plan-row input, .plan-row select { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 5px 8px; min-width: 0; width: 100% }
+.ms-row input:not([type="checkbox"]), .plan-row input, .plan-row select { border: 1px solid var(--line); background: var(--glass); border-radius: 6px; padding: 5px 8px; min-width: 0; width: 100% }
 .ms-row input[type="checkbox"] { accent-color: var(--ok); width: 16px; height: 16px; margin: 0 }
 .ms-row.done input[data-k="title"] { text-decoration: line-through; color: var(--muted) }
 .ms-row.late input[data-k="date"] { border-color: var(--bad); color: var(--bad) }
@@ -381,7 +380,7 @@ td.num { white-space: nowrap }
 /* import */
 .map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px }
 .map-grid .f span { font-size: 12px; color: var(--muted); font-weight: 500 }
-.map-grid select { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 5px 8px; width: 100% }
+.map-grid select { border: 1px solid var(--line); background: var(--glass); border-radius: 6px; padding: 5px 8px; width: 100% }
 table.mini { min-width: 640px; font-size: 12.5px }
 details summary { cursor: pointer; margin-top: 6px }
 
@@ -461,13 +460,13 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .kb-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 6px; align-content: start }
 .kb-empty { border: 1px dashed var(--line); border-radius: 6px; padding: 14px 8px; text-align: center; color: var(--muted); font-size: 12px }
 .kb-more { padding: 2px 4px; font-size: 12px }
-.kb-card { display: grid; gap: 4px; padding: 8px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); cursor: grab; text-shadow: none; min-width: 0 }
+.kb-card { display: grid; gap: 4px; padding: 8px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--glass); cursor: grab; text-shadow: none; min-width: 0 }
 .kb-card:hover { border-color: var(--muted) }
 .kb-card.dragging { opacity: .45 }
 .kb-card.late { box-shadow: inset 3px 0 0 var(--bad) }
 /* No contractor: hazard-tape border, black and yellow */
 .kb-card.noexec { border: 3px solid transparent; padding: 6px 7px;
-  background: linear-gradient(var(--surface), var(--surface)) padding-box,
+  background: linear-gradient(var(--glass), var(--glass)) padding-box,
               repeating-linear-gradient(45deg, #111 0 7px, #f5c400 7px 14px) border-box }
 .kb-noexec { color: #8a6d00; font-weight: 700 }
 @media (prefers-color-scheme: dark) { .kb-noexec { color: #f5c400 } }
@@ -516,7 +515,7 @@ tbody tr.row td[data-edit]:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb
 .dep-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--sunk); flex-wrap: wrap }
 .dep-row .dep-who { color: var(--muted); font-size: 12.5px }
 .dep-row .due { margin-left: auto }
-#dep-add { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--surface); width: 100%; margin-top: 6px }
+#dep-add { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--glass); width: 100%; margin-top: 6px }
 
 /* message tab */
 #msg-box { display: grid; gap: 10px }
@@ -581,7 +580,7 @@ tbody tr.row td[data-edit]:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb
 /* ---------- roles (1.7) ---------- */
 .user-wrap { align-self: center; -webkit-app-region: no-drag }
 .user-chip { appearance: none; display: inline-flex; align-items: center; gap: 4px; max-width: 280px; padding: 2px 8px; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--surface); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer }
+  border: 1px solid var(--line); background: var(--glass); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer }
 .user-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .user-chip svg { width: 12px; height: 12px; flex: none }
 .user-chip:hover { color: inherit; border-color: var(--accent) }
@@ -708,7 +707,7 @@ option.misfit { color: #b42318 }
 .rep-line { max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px }
 .quiet-sel select { padding: 1px 4px; font-size: 12px }
 .talk { display: grid; gap: 8px; max-height: 52vh; overflow-y: auto; padding: 2px 2px 8px }
-.msg-item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--surface); max-width: 88% }
+.msg-item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--glass); max-width: 88% }
 .msg-item.mine { justify-self: end; background: color-mix(in srgb, var(--accent) 8%, var(--surface)) }
 .msg-item.submit { border-color: color-mix(in srgb, var(--review) 60%, var(--line)) }
 .msg-h { display: flex; gap: 8px; align-items: center; font-size: 12.5px; margin-bottom: 3px }
@@ -724,7 +723,7 @@ option.misfit { color: #b42318 }
   border-left: 1px solid color-mix(in srgb, var(--warn) 60%, transparent); border-right: 1px solid color-mix(in srgb, var(--warn) 60%, transparent) }
 .tl-bar.away { box-shadow: inset -4px 0 0 var(--warn) }
 .presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
-.preset { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); overflow: hidden }
+.preset { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--glass); overflow: hidden }
 .preset button { appearance: none; border: 0; background: none; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12.5px; color: inherit }
 .preset .x { padding: 4px 8px 4px 2px; color: var(--muted) }
 .preset.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)) }
@@ -746,7 +745,7 @@ option.misfit { color: #b42318 }
 .nav-bottom .toast { bottom: 84px }
 /* sticky table header in the long «Все карточки» list */
 .tablewrap.tall { max-height: calc(100vh - 250px); overflow: auto }
-.tablewrap.tall thead th { position: sticky; top: 0; z-index: 2; background: var(--surface) }
+.tablewrap.tall thead th { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--surface) calc(max(var(--alpha), .92) * 100%), transparent) } /* sticky over scrolled rows: never too clear */
 /* dense rows */
 .dense td { padding-top: 4px; padding-bottom: 4px }
 .dense td .hint.role-hint, .dense .ctask .p { display: none }
@@ -793,7 +792,7 @@ button.ccount:hover { filter: brightness(.95); text-decoration: underline }
 .help-t { min-width: 0; width: 100% }
 .help-t td { padding: 4px 6px; border-bottom: 1px solid var(--line); font-size: 13px }
 .help-t td:first-child { width: 42%; white-space: nowrap }
-kbd { font: 12px var(--f-mono); padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--surface) }
+kbd { font: 12px var(--f-mono); padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--glass) }
 .empty-hint { border: 1px dashed var(--line); border-radius: 10px; padding: 14px 16px; color: var(--muted); font-size: 13px; line-height: 1.5 }
 .empty-hint b { color: var(--ink) }
 
@@ -903,7 +902,7 @@ section.panel[id^="p-"], .cards > .card, .kb-lane, #gantt > .tl-row:not(.tl-head
 
 /* header: attention button, «Окно» menu, create menu */
 .att-wrap { flex: none }
-.att-btn { appearance: none; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; cursor: pointer; background: var(--surface); color: var(--ink) }
+.att-btn { appearance: none; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; cursor: pointer; background: var(--glass); color: var(--ink) }
 .att-btn b { font-weight: 700 }
 .att-btn.tone-bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); color: var(--bad); background: var(--bad-soft) }
 .att-btn.tone-warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); color: var(--warn); background: var(--warn-soft) }
@@ -988,14 +987,14 @@ details.more[open] { padding-bottom: 10px }
 .st-v .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis }
 .st-grid > .st-c:nth-last-child(-n+5) { border-bottom: 0 }
 .st-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 16px }
-.st-acts .qa-in { flex: 1; min-width: 200px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--surface) }
+.st-acts .qa-in { flex: 1; min-width: 200px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--glass) }
 .st-acts .spacer { margin-left: auto }
 
 
 /* revisions */
 .rev-list { display: grid; gap: 6px; margin-bottom: 6px }
 .rev-row { display: grid; grid-template-columns: auto 150px 1fr auto; gap: 8px; align-items: center }
-.rev-row input { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--surface); min-width: 0 }
+.rev-row input { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--glass); min-width: 0 }
 .rev-no { display: inline-flex; align-items: center; gap: 4px; font-weight: 600 }
 .rev-no input { width: 46px; text-align: center }
 
@@ -1178,7 +1177,7 @@ details.more[open] { padding-bottom: 10px }
 .pd-t td { padding: 3px 6px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent) }
 .pd-t td.grow { width: 40% }
 .pd-t input:not([type="checkbox"]), .pd-t select, .comp-t input:not([type="checkbox"]), .comp-t select, .row-in .sm-in, .sub textarea, .sub .f input {
-  width: 100%; border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; min-width: 0 }
+  width: 100%; border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; background: var(--glass); color: var(--ink); font: inherit; font-size: 13px; min-width: 0 }
 .pd-t input[type="date"], .comp-t input[type="date"] { width: 136px }
 input.sm-in { width: 64px !important }
 .pd-t tr.gip-only { background: color-mix(in srgb, var(--accent) 6%, transparent) }
@@ -1214,9 +1213,9 @@ input.sm-in { width: 64px !important }
 .cab-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
 .cab-add { gap: 6px; margin-top: 6px }
 .cab-add input, .cab-add select { flex: 1; min-width: 0 }
-.cab-pw { margin: 10px 0; padding: 10px 12px; border: 1px dashed var(--accent); border-radius: 6px; background: var(--surface); display: grid; gap: 4px }
+.cab-pw { margin: 10px 0; padding: 10px 12px; border: 1px dashed var(--accent); border-radius: 6px; background: var(--glass); display: grid; gap: 4px }
 .cab-pw code { font-size: 14px; user-select: all; background: var(--accent-soft); padding: 1px 5px; border-radius: 3px }
-.cab-msg { border-left: 3px solid var(--accent); background: var(--surface); padding: 6px 10px; margin: 6px 0; border-radius: 0 4px 4px 0; display: grid; gap: 3px }
+.cab-msg { border-left: 3px solid var(--accent); background: var(--glass); padding: 6px 10px; margin: 6px 0; border-radius: 0 4px 4px 0; display: grid; gap: 3px }
 .cab-msg.read { border-left-color: var(--line); opacity: .8 }
 .cab-msg.urgent, .cust-alert.urgent { border-left: 3px solid var(--bad) }
 .cab-text { white-space: pre-wrap; overflow-wrap: anywhere }
@@ -1238,7 +1237,7 @@ input.sm-in { width: 64px !important }
 .rd-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 8px; background: var(--sunk); border-radius: 6px }
 .rd-pd { min-width: 240px; flex: 0 1 340px; font-size: 13px }
 .rd-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 }
-.rd-chip { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 2px 10px; cursor: pointer }
+.rd-chip { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--line); background: var(--glass); color: var(--muted); border-radius: 999px; padding: 2px 10px; cursor: pointer }
 .rd-chip:hover { border-color: var(--accent) }
 .rd-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
 .rd-chip.else { border-style: dashed }
@@ -1269,14 +1268,14 @@ input.sm-in { width: 64px !important }
 .pt-top h2 { margin: 0; font-size: 20px }
 .pt-sum { padding: 12px 14px; display: grid; gap: 10px }
 .pt-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px }
-.pt-kpi { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: grid; gap: 2px; background: var(--surface) }
+.pt-kpi { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: grid; gap: 2px; background: var(--glass) }
 .pt-kpi b { font-size: 20px; line-height: 1.1 }
 .pt-kpi span { font-size: 12px; color: var(--muted) }
 .pt-kpi.bad b { color: var(--bad) }
 .pt-kpi.warn b { color: var(--warn) }
 .pt-people { padding-bottom: 10px }
 .pt-members { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 14px }
-.pt-member { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 6px 3px 3px; background: var(--surface); font-size: 13px; line-height: 1.2 }
+.pt-member { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 6px 3px 3px; background: var(--glass); font-size: 13px; line-height: 1.2 }
 .pt-ava { width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; font-size: 12px; flex: none }
 .pt-add { padding: 6px 14px 0; flex-wrap: wrap; gap: 6px; align-items: center }
 .pt-add select { max-width: 320px }
@@ -1343,7 +1342,7 @@ input.sm-in { width: 64px !important }
 .ab-modal { width: min(1100px, 96vw); max-height: 92vh; display: flex; flex-direction: column }
 .ab-grid { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; min-height: 0; overflow: hidden; flex: 1 }
 .ab-people, .ab-tasks { overflow: auto; min-height: 0; display: grid; gap: 6px; align-content: start }
-.ab-person { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: grab }
+.ab-person { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--glass); cursor: grab }
 .ab-person:active { cursor: grabbing }
 .ab-people details { display: grid; gap: 6px }
 .ab-people summary { cursor: pointer; margin: 6px 0 }
@@ -1471,3 +1470,32 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .chat-msg.cust.urgent { border-color: color-mix(in srgb, #B3261E 45%, var(--line)) }
 .chat-msg.submit { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)) }
 .mc-note { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line) }
+
+
+/* ===== Animations (root class «anim»; switched in «Окно → Анимации», off by default when Windows asks for less motion) ===== */
+@keyframes a-slide-in { from { transform: translateX(28px); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes a-slide-out { from { transform: none; opacity: 1 } to { transform: translateX(48px); opacity: 0 } }
+@keyframes a-fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes a-fade-out { from { opacity: 1 } to { opacity: 0 } }
+@keyframes a-pop { from { transform: translateY(6px) scale(.98); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes a-drop { from { transform: translateY(-4px); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes a-rise { from { transform: translateY(8px); opacity: 0 } to { transform: none; opacity: 1 } }
+.anim .drawer { animation: a-slide-in .2s cubic-bezier(.2, .8, .2, 1) }
+.anim .scrim { animation: a-fade-in .2s ease-out }
+.anim .msg-panel.enter { animation: a-slide-in .22s cubic-bezier(.2, .8, .2, 1) }
+.anim .mp-back.enter { animation: a-fade-in .22s ease-out }
+/* A closing panel or card is a detached copy that slides out to the right and is then removed. */
+.leaving { pointer-events: none }
+.anim .drawer.leaving, .anim .msg-panel.leaving { animation: a-slide-out .18s ease-in forwards }
+.anim .scrim.leaving, .anim .mp-back.leaving { animation: a-fade-out .18s ease-in forwards }
+.anim .modal, .anim .palette { animation: a-pop .16s cubic-bezier(.2, .8, .2, 1) }
+.anim .modal-back, .anim .palette-back { animation: a-fade-in .16s ease-out }
+.anim .menu:not([hidden]) { animation: a-drop .14s ease-out }
+.anim .toast:not([hidden]) { animation: a-rise .18s ease-out }
+.anim .mc-ac:not([hidden]) { animation: a-drop .12s ease-out }
+.anim .btn, .anim .mc-tab, .anim .mc-item, .anim .kb-card, .anim .tab, .anim .dtab { transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s, transform .15s }
+.anim .kb-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(20, 24, 33, .12) }
+.anim .dpanel:not([hidden]) { animation: a-fade-in .14s ease-out }
+.anim .chat-msg.fresh { animation: a-rise .2s ease-out }
+/* Off: nothing moves (the Office has its own switch on top of this one). */
+:root:not(.anim) .office-wrap.anim * { animation: none !important }

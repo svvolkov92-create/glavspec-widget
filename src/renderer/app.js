@@ -105,6 +105,21 @@ function applyNav() {
   if (b) { b.title = nav.mini ? 'Развернуть панель' : 'Свернуть панель до значков'; b.setAttribute('aria-pressed', String(nav.mini)); }
 }
 let dense = !!loadLocal('dense', false);
+// Animations: panels slide, dialogs and menus fade in. On unless Windows asks for less motion; per computer.
+let anim = loadLocal('anim', null) ?? !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+function applyAnim() { document.documentElement.classList.toggle('anim', !!anim); }
+// A closing panel leaves as a detached copy (without ids, not clickable) that slides out, so the real one
+// can go at once and nothing waits for the animation.
+function leaveAnimated(...els) {
+  if (!anim) return;
+  for (const el of els.filter(Boolean)) {
+    const ghost = el.cloneNode(true);
+    ghost.removeAttribute('id'); ghost.querySelectorAll('[id]').forEach(x => x.removeAttribute('id'));
+    ghost.classList.remove('enter'); ghost.classList.add('leaving'); ghost.inert = true; ghost.setAttribute('aria-hidden', 'true');
+    document.body.append(ghost);
+    setTimeout(() => ghost.remove(), 220);
+  }
+}
 let searchTimer = null;
 function applyDense() { $('#shell').classList.toggle('dense', dense); }
 function setNav(patch) {
@@ -1301,7 +1316,8 @@ function renderMsg() {
     <button class="btn ghostbtn sm" type="button" data-act="msg-size" title="${msg.mode === 'full' ? 'Свернуть в боковую панель' : 'Открыть окно со всеми чатами'}">${msg.mode === 'full' ? '⇲' : '⤢'}</button><button class="btn ghostbtn sm" type="button" data-act="msg-close" aria-label="Свернуть">✕</button></div>`;
   const right = msg.chatId === 'new' ? msgNewHtml() : c ? msgChatHtml(c) : th?.type === 'task' ? msgTaskHtml(th.t) : th?.type === 'cust' ? msgCustHtml(th.pid, th.list) : '<div class="mc-chat"><p class="hint mc-empty">Выберите разговор слева или создайте новый чат.</p></div>';
   const body = msg.mode === 'full' ? `<div class="mp-full"><div class="mp-left">${msgListHtml()}</div><div class="mp-right">${right}</div></div>` : (msg.chatId ? right : msgListHtml());
-  root.innerHTML = `${msg.mode === 'full' ? '<div class="mp-back" data-act="msg-close"></div>' : ''}<section class="msg-panel ${msg.mode}" role="dialog" aria-label="Сообщения">${head}${body}</section>`;
+  const enter = msg.enter ? ' enter' : ''; msg.enter = false; // slide in only when the panel opens, not on every refresh
+  root.innerHTML = `${msg.mode === 'full' ? `<div class="mp-back${enter}" data-act="msg-close"></div>` : ''}<section class="msg-panel ${msg.mode}${enter}" role="dialog" aria-label="Сообщения">${head}${body}</section>`;
   const box = document.getElementById('mc-msgs');
   if (box) box.scrollTop = box.scrollHeight;
   if (focus) { const ta = document.getElementById('msg-text'); if (ta) { ta.focus(); try { ta.setSelectionRange(caret, caret); } catch { /* fine */ } } }
@@ -1317,7 +1333,7 @@ function msgSeenLater(c) {
   msgSeenLater.t = setTimeout(() => { if (msg.chatId === c.id && msg.mode !== 'pill') api.chatSeen(c.id); }, 900);
 }
 function msgOpen(chatId = msg.chatId) {
-  if (msg.mode === 'pill') msg.mode = 'side';
+  if (msg.mode === 'pill') { msg.mode = 'side'; msg.enter = true; }
   msg.chatId = chatId; msg.info = false; msg.mark = null; msg.edit = null;
   renderMsg();
   setTimeout(() => document.getElementById('msg-text')?.focus(), 30);
@@ -1371,6 +1387,13 @@ async function mcEditSave() {
   await refresh();
 }
 function mcEditCancel() { msg.edit = null; renderMsg(); }
+// Closing slides the panel out to the right (when animations are on).
+function msgClose() {
+  if (msg.mode === 'pill') return;
+  leaveAnimated(document.querySelector('#msg-root .mp-back'), document.querySelector('#msg-root .msg-panel'));
+  msg.mode = 'pill';
+  renderMsg();
+}
 // «@» autocomplete: the chat's people by surname; Enter/Tab or a click inserts «@Фамилия ».
 function msgAutocomplete(ta) {
   const box = document.getElementById('mc-ac'), c = chatById(msg.chatId);
@@ -2805,7 +2828,12 @@ function renderNow() {
 }
 
 /* ---------- drawer shell ---------- */
-function closeDrawer() { state.drawer = null; state.draft = null; state.dirtyBase = null; state.importData = null; $('#drawer-root').innerHTML = ''; }
+function closeDrawer() {
+  state.drawer = null; state.draft = null; state.dirtyBase = null; state.importData = null;
+  const root = $('#drawer-root');
+  leaveAnimated(root.querySelector('.scrim'), root.querySelector('.drawer'));
+  root.innerHTML = '';
+}
 function formSnapshot() {
   const f = $('#dform');
   if (!f) return null;
@@ -3751,8 +3779,10 @@ function openTask(id, preset = {}, tab = 'main') {
         <details class="msg-details"${tab === 'msg' ? ' open' : ''}><summary>Написать подрядчику — готовые тексты для почты и мессенджеров</summary><div id="msg-box"></div></details></div>
       <div class="dpanel" data-panel="log" data-transient ${tab === 'log' ? '' : 'hidden'}><div id="tlog-box"><div class="hint">Загружаем…</div></div></div>`}
       <div class="err" id="form-err" hidden></div>`,
-    footer: `<button class="btn primary" type="submit">${isNew ? 'Добавить' : 'Сохранить'}</button>
-      <button class="btn" data-act="discard" type="button">Отмена</button>
+    // «Сохранить» keeps the card open (Ctrl+S), «Сохранить и выйти» closes it (Enter in a field), «Выйти без сохранения» drops edits.
+    footer: `<button class="btn primary" data-act="save-stay" type="button" title="Ctrl+S">${isNew ? 'Добавить' : 'Сохранить'}</button>
+      <button class="btn" type="submit">${isNew ? 'Добавить и выйти' : 'Сохранить и выйти'}</button>
+      <button class="btn" data-act="discard" type="button">Выйти без сохранения</button>
       <span class="spacer"></span>
       ${isNew || isSpec() ? '' : '<button class="btn danger" data-act="ask-delete" type="button">В корзину</button>'}`,
   });
@@ -3864,7 +3894,7 @@ function cleanPlan() {
   return { list: out };
 }
 
-async function submitTask(quick = null) {
+async function submitTask(quick = null, { stay = false } = {}) {
   const id = state.drawer.id;
   const old = id ? state.tasks.get(id) : null;
   formError('');
@@ -3926,13 +3956,13 @@ async function submitTask(quick = null) {
     if (!canMoney()) for (const k of A.MONEY_FIELDS) delete data[k];
   }
 
-  const tab = state.drawer.tab;
+  const tab = state.drawer.tab, savedId = old ? id : newId();
   const ok = old
     ? await write(op.update('tasks', id, data), quick ? QUICK[quick].okMsg : 'Карточка сохранена')
-    : await write(op.set('tasks', newId(), { ...data, payments: [], createdAt: now.toISOString() }), 'Карточка добавлена');
+    : await write(op.set('tasks', savedId, { ...data, payments: [], createdAt: now.toISOString() }), 'Карточка добавлена');
   if (!ok) return false;
   if (quick === 'accept' && old) celebrateAccept(id);
-  if (quick) { await refresh(); openTask(id, {}, tab); } else closeDrawer();
+  if (quick || stay) { await refresh(); openTask(savedId, {}, tab); } else closeDrawer();
   return true;
 }
 // After acceptance: «с первого раза» when there were no remarks; the project's goal when its last mark is accepted.
@@ -4958,7 +4988,8 @@ function viewSectionsHtml(full) {
       <div class="vm-zoom"><button class="btn sm" type="button" data-act="zoom-step" data-dir="-1" title="Ctrl + −" ${zoom <= ZOOM_STEPS[0] ? 'disabled' : ''}>−</button>
         <b class="num">${Math.round(zoom * 100)}%</b>
         <button class="btn sm" type="button" data-act="zoom-step" data-dir="1" title="Ctrl + =" ${zoom >= ZOOM_STEPS.at(-1) ? 'disabled' : ''}>+</button>
-        <button class="btn ghostbtn sm" type="button" data-act="zoom-step" data-dir="0" title="Ctrl + 0">Сбросить</button></div></div>`;
+        <button class="btn ghostbtn sm" type="button" data-act="zoom-step" data-dir="0" title="Ctrl + 0">Сбросить</button></div></div>
+    <div class="vm-sec"><span class="vm-h">Анимации</span><div class="seg"><button class="btn sm ${anim ? 'on' : ''}" type="button" data-act="set-anim" data-v="1">Включены</button><button class="btn sm ${anim ? '' : 'on'}" type="button" data-act="set-anim" data-v="0">Выключены</button></div></div>`;
   if (!full) return theme + zoomHtml;
   return theme + zoomHtml + `
     <div class="vm-sec"><span class="vm-h">Панель вкладок</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div>
@@ -5516,6 +5547,7 @@ document.addEventListener('click', e => {
     case 'fold-all': setFold(el.dataset.keys.split(' ').filter(Boolean), el.dataset.on === '1'); break;
     case 'move-task': e.stopPropagation(); reassign(id, el.dataset.kind, el.dataset.from); break;
     case 'set-dense': dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); break;
+    case 'set-anim': anim = el.dataset.v === '1'; saveLocal('anim', anim); applyAnim(); renderViewMenu(); break;
     case 'kb-lanes': state.kanban.lanes = el.dataset.v; saveLocal('kbLanes', el.dataset.v); renderNow(); break;
     case 'nav-pos': setNav({ pos: el.dataset.v }); break;
     case 'nav-mini': setNav({ mini: !nav.mini }); break;
@@ -5531,20 +5563,20 @@ document.addEventListener('click', e => {
     case 'project-back': state.openProjectId = null; render(); break;
     case 'open-project-tab': openProject(id, el.dataset.tab); break;
     case 'msg-open': msgOpen(); break;
-    case 'msg-close': msg.mode = 'pill'; renderMsg(); break;
+    case 'msg-close': msgClose(); break;
     case 'msg-size': msg.mode = msg.mode === 'full' ? 'side' : 'full'; renderMsg(); break;
     case 'msg-chat': msgOpen(id); break;
     case 'msg-back': msg.chatId = ''; renderMsg(); break;
     case 'msg-filter': msg.filter = el.dataset.v; renderMsg(); break;
     case 'msg-pin': msgTogglePin(id); break;
-    case 'msg-cust-project': msg.mode = 'pill'; renderMsg(); openProject(id, 'cust'); break;
+    case 'msg-cust-project': msgClose(); openProject(id, 'cust'); break;
     case 'mc-send': msgSend(); break;
     case 'mc-edit': mcEditStart(id); break;
     case 'mc-edit-save': mcEditSave(); break;
     case 'mc-edit-cancel': mcEditCancel(); break;
     case 'msg-info': msg.info = !msg.info; renderMsg(); break;
     case 'msg-project': msgOpen(projectChatId(id)); break;
-    case 'msg-new': msg.chatId = 'new'; msg.newKind = 'direct'; if (msg.mode === 'pill') msg.mode = 'side'; renderMsg(); break;
+    case 'msg-new': msg.chatId = 'new'; msg.newKind = 'direct'; if (msg.mode === 'pill') { msg.mode = 'side'; msg.enter = true; } renderMsg(); break;
     case 'msg-newkind': msg.newKind = el.dataset.v; renderMsg(); break;
     case 'msg-pick': if (el.checked) msg.newPick.add(el.value); else msg.newPick.delete(el.value); msg.newTitle = $('#mc-title')?.value || msg.newTitle; renderMsg(); break;
     case 'msg-ac': msgAcPick(Number(el.dataset.i)); break;
@@ -5573,6 +5605,7 @@ document.addEventListener('click', e => {
     case 'request-close': requestClose(); break;
     case 'discard': closeDrawer(); break;
     case 'save-close': $('#dform').requestSubmit(); break;
+    case 'save-stay': saveStay(); break;
     case 'ask-delete': askDelete(); break;
     case 'cancel-delete': $('#confirm-slot').innerHTML = ''; break;
     case 'do-delete': el.disabled = true; doDelete(); break;
@@ -5684,6 +5717,7 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); mcEditCancel(); return; }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); mcEditSave(); return; }
   }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyS' && state.drawer?.kind === 'task' && $('#dform')) { e.preventDefault(); saveStay(); return; }
   if (e.key === 'Escape' && !$('#view-menu').hidden) { setViewMenu(false); $('#btn-view').focus(); return; }
   if (e.key === 'Escape' && !$('#user-menu').hidden) { setUserMenu(false); $('#btn-user').focus(); return; }
   if (e.key === 'Escape' && !$('#file-menu').hidden) { setFileMenu(false); $('#btn-file').focus(); return; }
@@ -5702,6 +5736,12 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); msgSend(); return; }
   }
 });
+// «Сохранить» in a card: the same checks as the form submit, but the card stays open.
+function saveStay() {
+  const f = $('#dform');
+  if (!f || state.drawer?.kind !== 'task') return f?.requestSubmit();
+  submitTask(null, { stay: true });
+}
 document.addEventListener('submit', e => {
   if (e.target.id !== 'dform') return;
   e.preventDefault();
@@ -5814,6 +5854,7 @@ window.AppBridge = { state, toast, esc, TABS, setFileMenu: open => setFileMenu(o
 try { const m = sessionStorage.getItem('glavspec.toast'); if (m) { sessionStorage.removeItem('glavspec.toast'); setTimeout(() => toast(m), 600); } } catch { /* optional */ }
 applyNav();
 applyDense();
+applyAnim();
 state.kanban.lanes = loadLocal('kbLanes', '') || '';
 $('#app').addEventListener('scroll', rememberScroll, { passive: true });
 api.onData(setData);
