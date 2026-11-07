@@ -1,0 +1,11 @@
+{
+  "name": "glavspec-widget",
+  "productName": "Пульт главспеца",
+  "version": "3.8.0",
+  "description": "Полупрозрачный виджет для отслеживания разделов ЭОМ/СС, исполнителей, сроков и оплаты",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}

@@ -1,0 +1,6 @@
+# Caddy gets and renews the https certificate by itself (Let's Encrypt).
+# Replace the domain, put this file to /etc/caddy/Caddyfile and run: sudo systemctl reload caddy
+cabinet.example.ru {
+	encode gzip
+	reverse_proxy 127.0.0.1:8080
+}

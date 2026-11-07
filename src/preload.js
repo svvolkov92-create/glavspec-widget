@@ -1,0 +1,82 @@
+'use strict';
+
+const { contextBridge, ipcRenderer } = require('electron');
+
+function subscribe(channel, cb) {
+  const handler = (_e, payload) => cb(payload);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
+contextBridge.exposeInMainWorld('api', {
+  getData: () => ipcRenderer.invoke('data:get'),
+  write: (ops, meta) => ipcRenderer.invoke('data:write', ops, meta),
+  onData: cb => subscribe('data:changed', cb),
+
+  getWindowState: () => ipcRenderer.invoke('win:get-state'),
+  onWindowState: cb => subscribe('win:state', cb),
+  setOpacity: v => ipcRenderer.send('win:set-opacity', v),
+  setAlwaysOnTop: on => ipcRenderer.send('win:set-always-on-top', on),
+  setClickThrough: on => ipcRenderer.send('win:set-click-through', on),
+  hoverUnlock: over => ipcRenderer.send('win:hover-unlock', over),
+  setCompact: on => ipcRenderer.send('win:set-compact', on),
+  setSize: (w, h) => ipcRenderer.send('win:set-size', w, h),
+  minimize: () => ipcRenderer.send('win:minimize'),
+  setMaximized: on => ipcRenderer.send('win:set-maximized', on),
+  hide: () => ipcRenderer.send('win:hide'),
+  openDataFolder: () => ipcRenderer.send('app:open-data-folder'),
+
+  exportReport: (format, scope) => ipcRenderer.invoke('report:export', format, scope),
+  openLastReport: () => ipcRenderer.send('report:open-last'),
+  importPick: () => ipcRenderer.invoke('import:pick'),
+  openProjectFolder: id => ipcRenderer.invoke('project:open-folder', id),
+  pickFolder: current => ipcRenderer.invoke('project:pick-folder', current),
+  openContact: req => ipcRenderer.invoke('contact:open', req),
+  backupSave: () => ipcRenderer.invoke('backup:save'),
+  backupRestore: () => ipcRenderer.invoke('backup:restore'),
+  autoBackupGet: () => ipcRenderer.invoke('autobackup:get'),
+  autoBackupSet: off => ipcRenderer.invoke('autobackup:set', off),
+  getJournal: since => ipcRenderer.invoke('journal:get', { since }),
+  setLevel: level => ipcRenderer.send('win:set-level', level),
+  setTheme: theme => ipcRenderer.send('win:set-theme', theme),
+  setZoom: z => ipcRenderer.send('win:set-zoom', z),
+  switchUser: id => ipcRenderer.invoke('user:switch', id),
+  reloadWindow: () => ipcRenderer.invoke('win:reload'),
+  clearDemo: () => ipcRenderer.invoke('demo:clear'),
+  fbList: () => ipcRenderer.invoke('fb:list'),
+  fbAdd: note => ipcRenderer.invoke('fb:add', note),
+  fbUpdate: (id, text) => ipcRenderer.invoke('fb:update', id, text),
+  fbDelete: id => ipcRenderer.invoke('fb:delete', id),
+  fbClear: () => ipcRenderer.invoke('fb:clear'),
+  fbExport: () => ipcRenderer.invoke('fb:export'),
+  taskSeen: id => ipcRenderer.invoke('task:seen', id),
+  addComment: (id, text) => ipcRenderer.invoke('task:comment', id, text),
+  chatSend: (chatId, text, projectId) => ipcRenderer.invoke('chat:send', chatId, text, projectId),
+  chatSeen: chatId => ipcRenderer.invoke('chat:seen', chatId),
+  chatDirect: uid => ipcRenderer.invoke('chat:direct', uid),
+  chatCreate: input => ipcRenderer.invoke('chat:create', input),
+  chatUpdate: (chatId, input) => ipcRenderer.invoke('chat:update', chatId, input),
+  chatLeave: chatId => ipcRenderer.invoke('chat:leave', chatId),
+  chatSeedDemo: () => ipcRenderer.invoke('chat:seed-demo'),
+  thankComment: (id, commentId) => ipcRenderer.invoke('task:thank', id, commentId),
+  openTaskFolder: id => ipcRenderer.invoke('task:open-folder', id),
+  customerPage: (projectId, opts) => ipcRenderer.invoke('report:customer-page', projectId, opts),
+  exportComposition: (projectId, format, opts) => ipcRenderer.invoke('report:composition', projectId, format, opts),
+  docDefaults: () => ipcRenderer.invoke('report:doc-defaults'),
+  openTemplates: () => ipcRenderer.invoke('report:open-templates'),
+
+  cabinetGet: () => ipcRenderer.invoke('cabinet:get'),
+  onCabinet: cb => subscribe('cabinet:changed', cb),
+  cabinetConfigure: cfg => ipcRenderer.invoke('cabinet:configure', cfg),
+  cabinetLocalStart: () => ipcRenderer.invoke('cabinet:local-start'),
+  cabinetLocalStop: () => ipcRenderer.invoke('cabinet:local-stop'),
+  cabinetSync: () => ipcRenderer.invoke('cabinet:sync'),
+  cabinetPublish: projectId => ipcRenderer.invoke('cabinet:publish', projectId),
+  cabinetUnpublish: projectId => ipcRenderer.invoke('cabinet:unpublish', projectId),
+  cabinetCustomers: () => ipcRenderer.invoke('cabinet:customers'),
+  cabinetCustomerCreate: c => ipcRenderer.invoke('cabinet:customer-create', c),
+  cabinetCustomerUpdate: (id, patch) => ipcRenderer.invoke('cabinet:customer-update', id, patch),
+  cabinetCustomerDelete: id => ipcRenderer.invoke('cabinet:customer-delete', id),
+  cabinetRead: (ids, read) => ipcRenderer.invoke('cabinet:read', ids, read),
+  cabinetOpen: projectId => ipcRenderer.invoke('cabinet:open', projectId),
+});

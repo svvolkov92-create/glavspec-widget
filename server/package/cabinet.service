@@ -1,0 +1,24 @@
+# systemd unit for a Linux server (VPS). Copy to /etc/systemd/system/cabinet.service, then:
+#   sudo useradd --system --home /opt/cabinet cabinet && sudo chown -R cabinet /opt/cabinet
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cabinet
+#   journalctl -u cabinet -n 20      # shows the team key printed at start
+[Unit]
+Description=Кабинет заказчика
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/cabinet
+ExecStart=/usr/bin/node /opt/cabinet/cabinet-server.js
+Environment=CABINET_HOST=127.0.0.1
+Environment=CABINET_TRUST_PROXY=1
+User=cabinet
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/cabinet/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

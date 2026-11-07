@@ -1,0 +1,10 @@
+{
+  "port": 8080,
+  "host": "0.0.0.0",
+  "title": "Кабинет заказчика",
+  "font": "golos",
+  "timeZone": "Europe/Moscow",
+  "trustProxy": false,
+  "sessionDays": 30,
+  "tls": null
+}
