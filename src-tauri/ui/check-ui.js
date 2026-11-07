@@ -9,6 +9,10 @@ const disk = { data: null, settings: { fullBounds: { x: 200, y: 100, width: 1200
 const sysCalls = [];
 const fsMem = {}; // path → Buffer (stand-in for the disk behind the Rust file commands)
 const dialogs = []; let nextPath = null, confirmAnswer = true;
+// A real cabinet server for the cabinet part (the window reaches it through the http_request stand-in).
+const { createServer } = require(require('path').resolve('server/cabinet-server.js'));
+const cabDir = fs.mkdtempSync(require('path').join(require('os').tmpdir(), 'tauri-cab-'));
+let cab = null, localCab = null;
 const log = []; const check = (n, ok, x = '') => log.push(`${ok ? 'OK  ' : 'FAIL'} ${n}${x ? ' — ' + x : ''}`);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
@@ -42,6 +46,17 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       case 'open_path': sysCalls.push('open:' + args.path); return '';
       case 'open_url': sysCalls.push('url:' + args.url); return null;
       case 'print_html': sysCalls.push('print'); fsMem.__printed = Buffer.from(args.html); return null;
+      case 'http_request': {
+        const r = await fetch(args.url, { method: args.method, headers: args.headers, body: args.body ?? undefined });
+        return { status: r.status, body: await r.text() };
+      }
+      case 'secret_protect': return Buffer.from('X' + args.text).toString('base64');
+      case 'secret_unprotect': return Buffer.from(args.data, 'base64').toString().slice(1);
+      case 'cabinet_local_start': {
+        if (!localCab) { localCab = createServer({ dataDir: cabDir, port: 0, host: '127.0.0.1', configFile: cabDir + '/none.json' }); await new Promise(r => localCab.server.listen(0, '127.0.0.1', r)); }
+        return { port: localCab.server.address().port, lan: [], teamKey: localCab.teamKey() };
+      }
+      case 'cabinet_local_stop': return null;
       default: throw 'unknown command ' + cmd;
     }
   });
@@ -126,7 +141,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const pid = await js(() => [...window.AppBridge.state.projects.keys()][0]);
   const pr = disk.data.projects[pid];
   check('ИРД request saved (request + ИРД row)', (pr.requests || []).some(r => /ТУ на водоснабжение/.test(r.title)) && (pr.ird || []).some(r => /ТУ на водоснабжение/.test(r.title)), JSON.stringify({ req: pr.requests, ird: pr.ird }).slice(0, 300));
-  const r5 = await js(() => window.api.cabinetSync());
+  const r5 = await js(() => window.api.fbExport());
   check('not moved yet → clear message', !r5.ok && /следующем этапе/.test(r5.message));
   // Files through the shared module (src/core/files.js) and the report code of the Electron version.
   {
@@ -174,6 +189,35 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('cancel in the dialog → nothing written', rn.canceled === true);
   }
 
+  // The customer cabinet: built-in server, publish with a file for approval, the customer's verdict back.
+  {
+    const docs = 'C:\\Users\\gip\\Documents';
+    const st = await js(() => window.api.cabinetLocalStart());
+    check('cabinet: built-in server started, key kept encrypted', st.ok && /^dpapi:/.test(disk.settings.cabinetKey || '') && disk.settings.cabinetLocal === true, JSON.stringify(st));
+    const port = st.port, base = `http://127.0.0.1:${port}`;
+    await js(p => window.api.cabinetConfigure({ url: `http://127.0.0.1:${p}` }), port);
+    const pid2 = await js(() => [...window.AppBridge.state.projects.keys()][0]);
+    fsMem[docs + '\\План.pdf'] = Buffer.from('%PDF-план');
+    nextPath = docs + '\\План.pdf';
+    const att = await js(id => window.api.attachAdd(id), pid2);
+    check('file attached from disk into the data folder', att.ok && Object.keys(fsMem).some(k => k.endsWith('\\attachments\\' + pid2 + '\\' + att.file.id)), JSON.stringify(att));
+    await js(([id, f]) => { const p = window.AppBridge.state.projects.get(id); return window.api.write([{ type: 'update', col: 'projects', id, data: { requests: [...(p.requests || []), { id: 'rq-tauri', title: 'Согласовать план', due: '', why: '', done: false, irdId: '', files: [f] }] } }], {}); }, [pid2, att.file]); await wait(300);
+    const pub = await js(id => window.api.cabinetPublish(id), pid2);
+    check('published with the file uploaded', pub.ok && fs.existsSync(require('path').join(cabDir, 'files', pid2, att.file.id)), JSON.stringify(pub));
+    const cust = await js(id => window.api.cabinetCustomerCreate({ name: 'Иван', login: 'ivan', projectIds: [id] }), pid2);
+    let cookie = '';
+    const web = async (method, p, form) => { const r = await fetch(base + p, { method, redirect: 'manual', headers: { ...(cookie ? { Cookie: cookie } : {}), ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) }, body: form ? new URLSearchParams(form).toString() : undefined }); const sc = r.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0]; return { status: r.status, text: await r.text() }; };
+    await web('POST', '/login', { login: 'ivan', password: cust.password });
+    const page = await web('GET', '/p/' + pid2);
+    const dl = await web('GET', `/p/${pid2}/f/${att.file.id}`);
+    check('customer downloads the file', dl.status === 200 && dl.text === '%PDF-план');
+    await web('POST', '/c/answer', { csrf: page.text.match(/name="csrf" value="([^"]+)"/)[1], project: pid2, request: 'rq-tauri', decision: 'approve' });
+    const sy = await js(() => window.api.cabinetSync()); await wait(300);
+    const v = await js(() => window.api.cabinetGet());
+    check('verdict back in the window', sy.ok && v.messages.some(m => m.decision === 'approve' && m.requestTitle === 'Согласовать план'), JSON.stringify(sy));
+    check('cabinet state kept in cabinet.json', Object.keys(fsMem).some(k => k.endsWith('\\cabinet.json')));
+  }
+
   // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
   const w0 = await js(() => window.__win);
   check('window shown at its saved place', w0.visible && w0.calls.includes('show') && w0.x === 200 && w0.width === 1200, JSON.stringify(w0));
@@ -199,5 +243,6 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-check.png' });
   check('no page errors', errs.length === 0, errs.join(' | '));
   console.log(log.join('\n')); process.exitCode = log.some(l => l.startsWith('FAIL')) ? 1 : 0;
+  if (localCab) { localCab.store.flush(); localCab.server.closeAllConnections?.(); localCab.server.close(); }
   await b.close(); srv.close();
 })();

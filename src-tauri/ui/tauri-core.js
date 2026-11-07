@@ -14,7 +14,9 @@
   };
   const CONFLICT_MESSAGE = 'Данные изменились в другом окне Пульта — показаны свежие. Повторите последнее действие.';
 
-  async function init({ onChanged }) {
+  let onCabinet = null;
+  async function init({ onChanged, cabinetChanged }) {
+    onCabinet = cabinetChanged;
     const loaded = await invoke('store_load');
     const savedSettings = await invoke('settings_load');
 
@@ -97,6 +99,7 @@
       io: tauriIo(dirs), appVersion: 'Tauri', R: reportCode(),
       currentUser: () => core.currentUser(), userView: () => core.userView(), changed: () => onChanged(),
     });
+    const cabinetRules = await cabinetOf({ store, settings, files, core, dirs, onCabinet: () => onCabinet?.() });
     core.migrateUsers();
     try { chats.migrateProjectChats(); } catch (e) { console.error('Не удалось перенести чаты проектов:', e); }
     try { core.purgeTrash(); } catch (e) { console.error('Не удалось очистить корзину:', e); }
@@ -105,7 +108,56 @@
     const copied = loaded.copiedFrom
       ? `Проба Tauri работает на своей копии данных (${loaded.dir}), взятой из обычного Пульта. Обычный Пульт она не меняет.`
       : '';
-    return { core, chats, files, store, settings, flush, warning: store.warning || copied || null };
+    return { core, chats, files, cabinet: cabinetRules, store, settings, flush, warning: store.warning || copied || null };
+  }
+
+  // The customer cabinet: the client of the Electron version (src/cabinet.js) and the shared rules
+  // (src/core/cabinet-rules.js). HTTP, the team key and the built-in server go through Rust (src-tauri/src/cabinet.rs).
+  async function cabinetOf({ store, settings, files, core, dirs, onCabinet }) {
+    const { Cabinet, normalizeUrl, isLocalHost, KINDS } = window.NodeModules.load('cabinet.js');
+    const { pageModel } = window.NodeModules.load('report/customer.js');
+    const stateFile = dirs.userData + '\\cabinet.json';
+    let saved = null;
+    try { if (await invoke('fs_exists', { path: stateFile })) saved = JSON.parse(window.Buffer.from(await invoke('fs_read', { path: stateFile }), 'base64').toString('utf8')); } catch { /* start over */ }
+    // The team key: 'dpapi:' — encrypted for this Windows user; an Electron key ('enc:') cannot be read here.
+    let key = '';
+    const stored = settings.get('cabinetKey') || '';
+    if (stored.startsWith('dpapi:')) { try { key = await invoke('secret_unprotect', { data: stored.slice(6) }); } catch { key = ''; } }
+    else if (stored.startsWith('plain:')) key = stored.slice(6);
+    const keyStore = {
+      get: () => key,
+      async set(k) {
+        key = k || '';
+        if (!key) return settings.set({ cabinetKey: '' });
+        try { settings.set({ cabinetKey: 'dpapi:' + await invoke('secret_protect', { text: key }) }); }
+        catch { settings.set({ cabinetKey: 'plain:' + key }); }
+      },
+    };
+    const fetchImpl = async (url, o = {}) => {
+      const r = await invoke('http_request', { method: o.method || 'GET', url, headers: o.headers || {}, body: o.body ?? null, timeoutMs: o.timeoutMs || 15000 });
+      return { status: r.status, json: async () => JSON.parse(r.body) };
+    };
+    let saving = Promise.resolve();
+    const cabinet = new Cabinet('', {
+      url: () => settings.get('cabinetUrl'), key: () => key, fetchImpl,
+      storage: { load: () => saved, save: state => { const text = JSON.stringify(state); saving = saving.then(() => invoke('fs_write', { path: stateFile, text, base64: null })).catch(e => console.error('cabinet.json:', e)); } },
+    });
+    let running = null;
+    const local = {
+      running: () => running,
+      async start() { const r = await invoke('cabinet_local_start', { port: Number(settings.get('cabinetLocalPort')) || 8080 }); running = { port: r.port, lan: r.lan }; return r; },
+      async stop() { await invoke('cabinet_local_stop'); running = null; },
+    };
+    const rules = window.createCabinetRules({
+      store, settings, A: window.Access, L: window.Logic, cabinet, files, keyStore, local,
+      R: { pageModel, normalizeUrl, isLocalHost, KINDS },
+      currentUser: () => core.currentUser(), userView: () => core.userView(),
+      notify: text => invoke('notify', { body: text }).catch(() => {}), openExternal: url => invoke('open_url', { url }).catch(e => console.error(e)),
+      changed: () => onCabinet(),
+    });
+    // The built-in server comes back with the app when it was on (as in Electron).
+    if (settings.get('cabinetLocal')) local.start().then(() => onCabinet()).catch(e => console.error('Кабинет на этом компьютере:', e));
+    return rules;
   }
 
   // The report, template and import code written for Node, loaded in the window (see prepare-ui.js).

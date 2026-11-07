@@ -14,14 +14,14 @@ fs.cpSync(from, to, { recursive: true });
 fs.copyFileSync(path.join(__dirname, 'tauri-api.js'), path.join(to, 'tauri-api.js'));
 fs.copyFileSync(path.join(__dirname, 'tauri-core.js'), path.join(to, 'tauri-core.js'));
 // The shared rules of the Electron main process (src/core), loaded after logic.js / access.js / composition.js.
-const CORE = ['store-core.js', 'journal-diff.js', 'handlers.js', 'chats.js', 'files.js'];
+const CORE = ['store-core.js', 'journal-diff.js', 'handlers.js', 'chats.js', 'files.js', 'cabinet-rules.js'];
 fs.mkdirSync(path.join(to, 'core'));
 for (const f of CORE) fs.copyFileSync(path.join(root, 'src', 'core', f), path.join(to, 'core', f));
 
 // The shared report and import code (CommonJS, written for Node) for the window: a small module loader with
 // browser stand-ins for node:zlib (pako), node:path and node:fs; Buffer comes from shims/buffer.js.
 const NODE_MODULES = ['report/model.js', 'report/xlsx.js', 'report/docx.js', 'report/customer.js', 'report/doc-template.js', 'report/zip.js',
-  'import/read.js', 'contact.js', 'renderer/logic.js', 'renderer/access.js', 'renderer/composition.js', 'renderer/calendar.js'];
+  'import/read.js', 'contact.js', 'cabinet.js', 'renderer/logic.js', 'renderer/access.js', 'renderer/composition.js', 'renderer/calendar.js'];
 const SHIMS = {
   'node:zlib': `module.exports = {
     deflateRawSync: (buf, o) => Buffer.from(window.pako.deflateRaw(buf, { level: (o && o.level) || 6 })),
@@ -35,6 +35,28 @@ const SHIMS = {
     dirname: p => { const s = norm(p); const i = s.lastIndexOf('/'); return i < 0 ? '.' : String(p).slice(0, i); },
     extname: p => { const b = norm(p).split('/').pop(); const i = b.lastIndexOf('.'); return i > 0 ? b.slice(i) : ''; },
   };`,
+  // Only createHash('sha1') — the cabinet client's fingerprint of a published project.
+  'node:crypto': `function sha1(bytes) {
+    const ml = bytes.length, words = new Uint32Array((((ml + 8) >> 6) + 1) * 16);
+    for (let i = 0; i < ml; i++) words[i >> 2] |= bytes[i] << (24 - (i % 4) * 8);
+    words[ml >> 2] |= 0x80 << (24 - (ml % 4) * 8);
+    words[words.length - 1] = ml * 8;
+    let h0 = 0x67452301, h1 = 0xefcdab89, h2 = 0x98badcfe, h3 = 0x10325476, h4 = 0xc3d2e1f0;
+    const w = new Uint32Array(80);
+    for (let i = 0; i < words.length; i += 16) {
+      for (let t = 0; t < 80; t++) w[t] = t < 16 ? words[i + t] : ((x => (x << 1) | (x >>> 31))(w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]));
+      let a = h0, b = h1, c = h2, d = h3, e = h4;
+      for (let t = 0; t < 80; t++) {
+        const f = t < 20 ? (b & c) | (~b & d) : t < 40 ? b ^ c ^ d : t < 60 ? (b & c) | (b & d) | (c & d) : b ^ c ^ d;
+        const k = t < 20 ? 0x5a827999 : t < 40 ? 0x6ed9eba1 : t < 60 ? 0x8f1bbcdc : 0xca62c1d6;
+        const tmp = (((a << 5) | (a >>> 27)) + f + e + k + w[t]) >>> 0;
+        e = d; d = c; c = (b << 30) | (b >>> 2); b = a; a = tmp;
+      }
+      h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0; h4 = (h4 + e) >>> 0;
+    }
+    return [h0, h1, h2, h3, h4].map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+  module.exports = { createHash: algo => { if (algo !== 'sha1') throw new Error('только sha1'); let data = ''; const h = { update: s => { data += s; return h; }, digest: () => sha1(new TextEncoder().encode(data)) }; return h; } };`,
   'node:fs': `const no = () => { throw new Error('В окне Tauri файлы читает и пишет ядро программы.'); };
   module.exports = { readFileSync: no, writeFileSync: no, existsSync: () => false, statSync: no };`,
 };

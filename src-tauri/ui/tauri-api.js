@@ -2,7 +2,7 @@
 // Bridge: gives the unchanged interface the same `window.api` the Electron preload gives, on top of Tauri.
 // Data and settings go through the shared core (tauri-core.js → src/core/handlers.js → Rust files).
 // The window, the tray, notifications: Tauri window API + Rust commands (src-tauri/src/system.rs).
-// What is not moved yet (the customer cabinet) answers with a clear message.
+// Anything not provided here answers with a clear message.
 (function () {
   const T = window.__TAURI__;
   const win = T.window.getCurrentWindow();
@@ -23,7 +23,9 @@
   const dataListeners = [];
   const emitData = () => { if (!ctx) return; const view = ctx.core.userView(); for (const cb of dataListeners) cb(view); trayLater(); };
   let ctx = null, starting = null;
-  const ready = () => (starting ||= window.TauriCore.init({ onChanged: emitData }).then(c => { ctx = c; return c; }));
+  const cabListeners = [];
+  const emitCabinet = () => { if (!ctx) return; const v = ctx.cabinet.view(); for (const cb of cabListeners) cb(v); };
+  const ready = () => (starting ||= window.TauriCore.init({ onChanged: emitData, cabinetChanged: emitCabinet }).then(c => { ctx = c; return c; }));
 
   // Same mapping as themeSource() in src/main.js: «Графит» is dark, «Тандем» is light.
   const schemeOf = t => (t === 'graphite' ? 'dark' : t === 'tandem' ? 'light' : t === 'light' || t === 'dark' ? t : 'system');
@@ -230,6 +232,9 @@
     digestStarted = true;
     setTimeout(() => morningDigest(), 15 * 1000);
     setInterval(() => { morningDigest(); trayLater(); }, 5 * 60 * 1000);
+    // The cabinet: new messages and changed projects, as in Electron — after 20 s, then every 2 minutes.
+    setTimeout(() => ctx.cabinet.sync(), 20 * 1000);
+    setInterval(() => ctx.cabinet.sync(), 2 * 60 * 1000);
     // The automatic copy into the GIP's folder, as in Electron: shortly after start, then every 30 minutes.
     setTimeout(() => ctx.files.autoBackup(), 30 * 1000);
     setInterval(() => ctx.files.autoBackup(), 30 * 60 * 1000);
@@ -284,6 +289,23 @@
     autoBackupGet: async () => (await ready()).files.autoBackupGet(),
     autoBackupSet: async off => (await ready()).files.autoBackupSet(off),
     importPick: async () => (await ready()).files.importPick(),
+    attachAdd: async projectId => (await ready()).files.attachAdd(projectId),
+    attachOpen: async (projectId, fileId) => (await ready()).files.attachOpen(projectId, fileId),
+    // Customer cabinet: the shared rules (src/core/cabinet-rules.js).
+    cabinetGet: async () => (await ready()).cabinet.view(),
+    onCabinet: cb => { cabListeners.push(cb); return () => cabListeners.splice(cabListeners.indexOf(cb), 1); },
+    cabinetConfigure: async cfg => (await ready()).cabinet.configure(cfg),
+    cabinetLocalStart: async () => (await ready()).cabinet.localStart(),
+    cabinetLocalStop: async () => (await ready()).cabinet.localStop(),
+    cabinetSync: async () => (await ready()).cabinet.sync({ quiet: true }),
+    cabinetPublish: async projectId => (await ready()).cabinet.publish(projectId),
+    cabinetUnpublish: async projectId => (await ready()).cabinet.unpublish(projectId),
+    cabinetCustomers: async () => (await ready()).cabinet.customers(),
+    cabinetCustomerCreate: async c => (await ready()).cabinet.customerCreate(c),
+    cabinetCustomerUpdate: async (id, patch) => (await ready()).cabinet.customerUpdate(id, patch),
+    cabinetCustomerDelete: async id => (await ready()).cabinet.customerDelete(id),
+    cabinetRead: async (ids, read) => (await ready()).cabinet.read(ids, read),
+    cabinetOpen: async projectId => (await ready()).cabinet.open(projectId),
 
     getWindowState: async () => { await startLook(); return windowState(); },
     onWindowState: cb => { winListeners.push(cb); return () => winListeners.splice(winListeners.indexOf(cb), 1); },
@@ -301,7 +323,6 @@
     setCompact: on => { ready().then(() => setCompact(on)); },
     hoverUnlock: () => {},
     fbList: async () => [],
-    cabinetGet: async () => null,
   };
 
   window.api = new Proxy(known, {

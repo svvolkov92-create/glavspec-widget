@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+mod cabinet;
 mod files;
 mod io;
 mod system;
@@ -66,6 +67,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(files)
+        .manage(cabinet::LocalServer(std::sync::Mutex::new(None)))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
@@ -108,8 +110,16 @@ fn main() {
             system::tray_set, system::notify, system::autostart_get, system::autostart_set,
             system::window_to_bottom, system::desktop_supported, system::open_data_folder, system::app_quit,
             io::dialog_save, io::dialog_open, io::dialog_confirm, io::fs_write, io::fs_read, io::fs_exists, io::fs_mkdir,
-            io::fs_list, io::fs_remove, io::open_path, io::open_url, io::known_dirs, io::print_html
+            io::fs_list, io::fs_remove, io::open_path, io::open_url, io::known_dirs, io::print_html,
+            cabinet::http_request, cabinet::secret_protect, cabinet::secret_unprotect,
+            cabinet::cabinet_local_start, cabinet::cabinet_local_stop, cabinet::cabinet_local_running
         ])
-        .run(tauri::generate_context!())
-        .expect("Пульт (проба Tauri) не запустился");
+        .build(tauri::generate_context!())
+        .expect("Пульт (проба Tauri) не запустился")
+        // The built-in cabinet server is a child process: it stops with the app.
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                cabinet::stop(&app.state::<cabinet::LocalServer>());
+            }
+        });
 }

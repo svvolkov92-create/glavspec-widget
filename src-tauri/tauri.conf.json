@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PultGlavspeca",
-  "version": "3.99.3",
+  "version": "3.99.4",
   "identifier": "ru.tandem.glavspeca.probe",
   "build": {
     "frontendDist": "../build/tauri-ui"
@@ -45,6 +45,16 @@
           "Russian"
         ]
       }
+    },
+    "resources": {
+      "../server/cabinet-server.js": "cabinet/cabinet-server.js",
+      "../src/report/customer.js": "cabinet/lib/report/customer.js",
+      "../src/renderer/logic.js": "cabinet/lib/renderer/logic.js",
+      "../src/renderer/composition.js": "cabinet/lib/renderer/composition.js",
+      "../src/renderer/calendar.js": "cabinet/lib/renderer/calendar.js",
+      "../src/renderer/brand/tandem-logo.svg": "cabinet/lib/renderer/brand/tandem-logo.svg",
+      "../src/renderer/fonts/GolosText.ttf": "cabinet/lib/renderer/fonts/GolosText.ttf",
+      "../src/renderer/fonts/Montserrat.ttf": "cabinet/lib/renderer/fonts/Montserrat.ttf"
     }
   }
 }
