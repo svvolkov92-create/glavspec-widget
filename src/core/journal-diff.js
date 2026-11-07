@@ -35,7 +35,7 @@ const FIELDS = {
     coOwnerIds: ['Соисполнители', (v, ctx) => (Array.isArray(v) && v.length ? v.map(id => ctx.users?.[id]?.name || '?').join(', ') : 'нет')],
     profileOk: ['Назначено не по специальности', yesNo],
     projectId: ['Проект', (v, ctx) => ctx.projects[v]?.name || '—'],
-    sections: ['Марки', v => (Array.isArray(v) ? v.join(', ') : '—')],
+    sections: ['Разделы', v => (Array.isArray(v) ? v.join(', ') : '—')],
     title: ['Уточнение', v => v || '—'],
     budget: ['Бюджет', money],
     contractNo: ['Договор', v => v || '—'],

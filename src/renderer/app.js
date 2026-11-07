@@ -306,10 +306,34 @@ async function refresh() { try { setData((await api.getData()).data); } catch { 
 // Mark chips: a colour stripe and the direction icon, in the italic «drawing» face.
 const markChip = m => { const k = A.markKind(m); return `<span class="code${k ? ' k-' + k : ''}">${k ? kindIcon(k) : ''}${esc(m)}</span>`; };
 function marksHtml(t) {
+  // A card of the composition shows its section (ИОС1.1 · ПД, ЭОМ · РД); the codes behind it only colour the chip.
+  const place = t?.id && placeIndex().get(t.id);
+  if (place) { const k = A.markKind(sectionsOf(t)[0] || ''); return `<span class="marks" title="${esc(`${place.stage} · ${place.code} · ${place.title}`)}"><span class="code${k ? ' k-' + k : ''}">${k ? kindIcon(k) : ''}${esc(place.short)}</span><span class="st-stage">${place.stage === 'ПД' ? 'П' : 'Р'}</span></span>`; }
   const list = sectionsOf(t);
   return `<span class="marks">${list.length ? list.map(markChip).join('') : '<span class="code">—</span>'}</span>`;
 }
-const marksText = t => sectionsOf(t).join(', ') || t.title || '—';
+// A card is a section of the project's documentation: a volume of ПД (ИОС1.1, АР…) or a section of РД (ЭОМ…)
+// from the project composition. Index card id → its place, rebuilt when the data changes.
+let placeIdx = null, placeIdxFor = null;
+function placeIndex() {
+  if (placeIdxFor === state.projects) return placeIdx;
+  const m = new Map();
+  for (const p of state.projects.values()) {
+    const comp = p.composition;
+    if (!comp) continue;
+    try {
+      for (const v of Composition.volumes(comp, p.code || '')) {
+        const n = comp.nodes.find(x => x.id === v.id);
+        if (n?.taskId) m.set(n.taskId, { stage: 'ПД', ref: 'pd:' + v.id, short: v.abbr || v.code, code: v.code, title: v.title, tom: v.tom });
+      }
+      for (const r of Composition.rdRows(comp, p.code || '')) if (r.item.taskId) m.set(r.item.taskId, { stage: 'РД', ref: 'rd:' + r.id, short: r.mark, code: r.code, title: r.title, tom: r.tom });
+    } catch (e) { console.error('Состав проекта', p.id, e); }
+  }
+  placeIdx = m; placeIdxFor = state.projects;
+  return m;
+}
+// Short name of a card's section: ИОС1.1, ЭОМ… (cards outside the composition: their codes or the task text).
+const marksText = t => (t?.id && placeIndex().get(t.id)?.short) || sectionsOf(t).join(', ') || t.title || '—';
 function statusChip(t) {
   if (timing(t).overdue) return `<span class="chip tone-bad" title="Статус: ${esc(STATUSES[t.status]?.label)}">Срок сорван</span>`;
   const s = STATUSES[t.status] || STATUSES.not_started;
@@ -703,7 +727,7 @@ function emptyState() {
     <ol>
       <li>Добавьте исполнителей с контактами.</li>
       <li>Заведите проект (объект, шифр, заказчик).</li>
-      <li>Добавьте в проект карточки: отметьте галками марки (ЭОМ, СС, АПС…), назначьте ответственного, подрядчика, сроки и бюджет.</li>
+      <li>Добавьте в проект карточки: выберите разделы из состава проекта (ИОС1, АР, ЭОМ…), назначьте ответственного, подрядчика, сроки и бюджет.</li>
       <li>По мере оплаты вносите платежи — остаток посчитается сам.</li>
     </ol>
     <div class="acts">
@@ -750,7 +774,7 @@ function progressDashboard(list) {
   const all = P(list);
   const projects = liveProjects().map(pr => ({ pr, p: P(list.filter(t => t.projectId === pr.id)) })).filter(x => x.p.count).sort((a, b) => b.p.lag - a.p.lag);
   const dirOf = t => A.directionOfMark(sectionsOf(t)[0])?.id || '';
-  const dirs = [...A.DIRECTIONS.map(d => ({ id: d.id, label: d.label })), { id: '', label: 'Прочие марки' }]
+  const dirs = [...A.DIRECTIONS.map(d => ({ id: d.id, label: d.label })), { id: '', label: 'Прочие разделы' }]
     .map(d => ({ d, p: P(list.filter(t => dirOf(t) === d.id)) })).filter(x => x.p.count);
   const chiefOf = t => { const o = ownerOf(t); return !o ? '' : o.role === 'specialist' ? o.chiefId || '' : o.role === 'chief' ? o.id : ''; };
   const groups = [...usersByRole('chief').map(c => ({ id: c.id, label: `Группа: ${c.name}` })), { id: '', label: 'ГИП / без группы' }]
@@ -856,7 +880,7 @@ function viewOverview() {
   ${hiddenWithCards.length ? `<div class="ov-hidden hint">Скрытые панели, в которых есть карточки: ${hiddenWithCards.map(([k, t, items]) => `<button class="linkbtn" type="button" data-act="ov-show" data-id="${k}" title="Показать панель в сводке">${esc(t)} (${items.length})</button>`).join(', ')}
     · <button class="linkbtn" type="button" data-act="ov-show-all">показать все</button></div>` : ''}
   ${projectsHidden ? '' : `<section class="panel${isFolded('o:projects') ? ' folded' : ''}"><div class="panel-h">${foldBtn('o:projects', isFolded('o:projects'))}<h3>Проекты</h3><span class="meta">${projects.length}</span></div>
-    ${isFolded('o:projects') ? '' : `<div class="tablewrap"><table><thead><tr><th>Проект</th><th>Стадия</th><th>${game ? 'Цель: марки приняты' : 'Марки приняты'}</th><th>Сорвано</th><th>На проверке</th>${canMoney() ? '<th class="r">Бюджет</th><th class="r">Оплачено</th><th class="r">Остаток</th>' : ''}</tr></thead>
+    ${isFolded('o:projects') ? '' : `<div class="tablewrap"><table><thead><tr><th>Проект</th><th>Стадия</th><th>${game ? 'Цель: разделы приняты' : 'Разделы приняты'}</th><th>Сорвано</th><th>На проверке</th>${canMoney() ? '<th class="r">Бюджет</th><th class="r">Оплачено</th><th class="r">Остаток</th>' : ''}</tr></thead>
     <tbody>${projRows || '<tr class="empty-row"><td colspan="8">Проектов пока нет.</td></tr>'}</tbody></table></div>`}</section>`}`;
 }
 // Customer side of projects: documents running out (within «напомнить за N дн.») and overdue requests to the customer.
@@ -1897,7 +1921,7 @@ function viewOffice() {
       <button class="btn ghostbtn sm ${officePrefs.anim !== false ? 'on' : ''}" type="button" data-act="office-anim" aria-pressed="${officePrefs.anim !== false}" title="Человечки печатают, кран поворачивается">Анимация</button>
       <button class="btn ghostbtn sm ${officePrefs.labels ? 'on' : ''}" type="button" data-act="office-labels" aria-pressed="${officePrefs.labels}">Подписи</button>
       <span class="seg"><button class="btn sm" type="button" data-act="office-zoom" data-dir="out" title="Мельче">−</button><button class="btn sm" type="button" data-act="office-fit" title="Обычный масштаб">${Math.round((officePrefs.zoom || 1) * 100)}%</button><button class="btn sm" type="button" data-act="office-zoom" data-dir="in" title="Крупнее">+</button></span></div>
-    ${tip('office', 'Каждый штатный — человечек за своим столом: чем он занят, показывает состояние его карточек. Проекты — здания: этаж — карточка, цвет — статус, флаг — все марки приняты, конус — сорван срок. Подрядчики здесь не показываются. Щелчок по человечку — его карточки, перетаскивание на коллегу — передать работу.')}
+    ${tip('office', 'Каждый штатный — человечек за своим столом: чем он занят, показывает состояние его карточек. Проекты — здания: этаж — карточка, цвет — статус, флаг — все разделы приняты, конус — сорван срок. Подрядчики здесь не показываются. Щелчок по человечку — его карточки, перетаскивание на коллегу — передать работу.')}
     ${bdays.length ? `<div class="note-box office-bday">🎉 Сегодня день рождения: <b>${bdays.map(u => esc(u.name.replace(/^Пример:\s*/, ''))).join(', ')}</b></div>` : ''}
     <div class="office-wrap${officePrefs.anim !== false ? ' anim' : ''}" id="office">${svg}</div>
     <div class="tl-legend hint office-legend"><span class="ol ol-late"></span>срок сорван <span class="ol ol-check"></span>проверяет <span class="ol ol-carry"></span>сдал на проверку <span class="ol ol-rev"></span>доработка <span class="ol ol-free"></span>свободен (у кулера) <span class="ol ol-away"></span>отпуск — пустой стол · 👑 больше всех принято за 30 дней · колпак — день рождения
@@ -2126,7 +2150,7 @@ function viewGantt() {
     <div class="panel-h"><h3>Диаграмма Ганта</h3>${ganttModeSeg()}<span class="meta">${fmtDate(from)} — ${fmtDate(to)} · ${span} дн. · незавершённые карточки</span></div>
     <div class="gantt-bar one-row">
       <select id="gq-project" aria-label="Проект" class="sm-sel"><option value="">Все проекты</option>${liveProjects().map(p => `<option value="${esc(p.id)}"${gq.project === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
-      <select id="gq-mark" aria-label="Марка" class="sm-sel"><option value="">Все марки</option>${normalizeMarks(tasksArr().filter(t => t.status !== 'done').flatMap(sectionsOf)).map(m => `<option value="${esc(m)}"${gq.mark === m ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select>
+      <select id="gq-mark" aria-label="Раздел" class="sm-sel"><option value="">Все разделы</option>${normalizeMarks(tasksArr().filter(t => t.status !== 'done').flatMap(sectionsOf)).map(m => `<option value="${esc(m)}"${gq.mark === m ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select>
       <button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="1" data-keys="${esc(groups.map(g => 'g:' + g.key).join(' '))}" title="Свернуть все строки">▸ все</button><button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="0" data-keys="${esc(groups.map(g => 'g:' + g.key).join(' '))}" title="Развернуть все строки">▾ все</button>
       <div class="seg" role="group" aria-label="Группировка"><button class="btn sm ${byProject || byOwner ? '' : 'on'}" type="button" data-act="g-group" data-group="contractor">По подрядчикам</button>${isSpec() ? '' : `<button class="btn sm ${byOwner ? 'on' : ''}" type="button" data-act="g-group" data-group="owner">По ответственным</button>`}<button class="btn sm ${byProject ? 'on' : ''}" type="button" data-act="g-group" data-group="project">По проектам</button></div>
       <div class="seg" role="group" aria-label="Масштаб">${preset}</div>
@@ -2134,7 +2158,7 @@ function viewGantt() {
       <div class="seg"><button class="btn sm" type="button" data-act="g-shift" data-dir="-1" title="Назад">←</button><button class="btn sm" type="button" data-act="g-today">Сегодня</button><button class="btn sm" type="button" data-act="g-shift" data-dir="1" title="Вперёд">→</button></div>
       <span class="help-dot" tabindex="0" title="Фон диаграммы тяните мышью — прокрутка по датам; полоску — сдвиг работы; край полоски — старт или финиш. Ctrl + колесо — масштаб.">?</span>
     </div>
-    <div class="tablewrap"><div class="tl" id="gantt" style="--tl-name:${g.nameW}px">${head}${rows || `<div class="none">${gq.project || gq.mark ? 'Под выбранный проект и марку незавершённых карточек нет — сбросьте фильтр над диаграммой.' : 'Нет незавершённых карточек. Когда у карточек появятся старт и финиш, здесь будет видно, кто чем занят и где пересекаются сроки.'}</div>`}</div></div>
+    <div class="tablewrap"><div class="tl" id="gantt" style="--tl-name:${g.nameW}px">${head}${rows || `<div class="none">${gq.project || gq.mark ? 'Под выбранный проект и раздел незавершённых карточек нет — сбросьте фильтр над диаграммой.' : 'Нет незавершённых карточек. Когда у карточек появятся старт и финиш, здесь будет видно, кто чем занят и где пересекаются сроки.'}</div>`}</div></div>
     <div class="tl-legend hint"><span class="tl-key tone-work"></span>в работе <span class="tl-key tone-idle"></span>не начат <span class="tl-key tone-review"></span>на проверке
       <span class="tl-key tone-warn"></span>на доработке <span class="tl-key tone-bad"></span>срок сорван <span class="tq-ms"></span>контрольная точка
       <span class="tl-arrow"></span>зависимость <span class="tl-key tl-key-hol"></span>выходные и праздники
@@ -2729,8 +2753,8 @@ function viewTasks() {
       <select id="f-project" aria-label="Проект">${opt('', 'Все проекты', f.project)}${liveProjects().map(p => opt(p.id, p.name, f.project)).join('')}</select>
       <select id="f-contractor" aria-label="Подрядчик">${opt('', 'Все подрядчики', f.contractor)}${opt('__none', 'Без подрядчика', f.contractor)}${contractorsArr().map(c => opt(c.id, c.name, f.contractor)).join('')}</select>
       <select id="f-status" aria-label="Статус">${opt('', 'Любой статус', f.status)}${opt('overdue', 'Срок сорван', f.status)}${opt('new', 'Новое для меня', f.status)}${opt('att:week', 'Сдача ≤ 7 дней', f.status)}${opt('att:milestones', 'Сорваны КТ', f.status)}${opt('att:pay', 'Пора платить', f.status)}${opt('quiet', 'Тишина', f.status)}${Object.entries(STATUSES).map(([k, s]) => opt(k, s.label, f.status)).join('')}</select>
-      <select id="f-mark" aria-label="Марка">${opt('', 'Любая марка', f.mark)}${normalizeMarks(tasksArr().flatMap(sectionsOf)).map(m => opt(m, m, f.mark)).join('')}</select>
-      <input id="f-q" type="search" placeholder="Поиск: марка, проект, подрядчик, договор" value="${esc(f.q)}">
+      <select id="f-mark" aria-label="Раздел">${opt('', 'Любой раздел', f.mark)}${normalizeMarks(tasksArr().flatMap(sectionsOf)).map(m => opt(m, m, f.mark)).join('')}</select>
+      <input id="f-q" type="search" placeholder="Поиск: раздел, проект, подрядчик, договор" value="${esc(f.q)}">
     </div>
     <section class="panel"><div class="panel-h"><h3>Карточки</h3><span class="meta">${tt.count}${canMoney() ? ` · бюджет ${money(tt.budget)} · оплачено ${money(tt.paid)} · остаток ${money(tt.rest)}` : ''}</span><span class="spacer"></span>${canEditFields() ? `<button class="btn ghostbtn sm${state.bulk ? ' on' : ''}" type="button" data-act="bulk-toggle" title="Отметить несколько карточек и изменить их разом">${state.bulk ? 'Готово' : 'Выбрать несколько'}</button>` : ''}${colsMenu()}</div>
     ${state.bulk ? bulkBar() : ''}
@@ -3107,12 +3131,7 @@ async function submitUser() {
 
 // The task's place in the composition: a section/volume of ПД or a set of РД.
 function compPlaceOf(t) {
-  const p = t && state.projects.get(t.projectId), comp = p?.composition;
-  if (!comp || !t.id) return null;
-  const v = Composition.volumes(comp, p.code || '').find(x => comp.nodes.find(n => n.id === x.id)?.taskId === t.id);
-  if (v) return { stage: 'ПД', code: v.code, title: v.title, tom: v.tom };
-  const r = Composition.rdRows(comp, p.code || '').find(x => x.item.taskId === t.id);
-  return r ? { stage: 'РД', code: r.code, title: r.title, tom: r.tom } : null;
+  return t?.id ? placeIndex().get(t.id) || null : null;
 }
 // «Марка» in the task card: no checkbox grid any more. A section of the composition shows where it sits;
 // an assignment shows from whom to whom; any other task gets one text field (marks are optional there).
@@ -3128,15 +3147,59 @@ function marksField(t) {
         <div class="f"><label for="t-off-by">Подписывает</label><input id="t-off-by" name="officialBy" value="${esc(t.officialBy || '')}" maxlength="80" placeholder="ГИП, главспец ОВ"></div></div>
       <span class="hint">Получатель видит это задание у себя как входящее. Пока задание не выдано, смежник ждёт его${state.tasks.get(t.toTaskIds?.[0])?.dependsOn?.includes(t.id) ? ' — срок его старта связан с этим заданием' : ''}.</span></div>`;
   }
-  const place = compPlaceOf(t);
-  if (place) return taskAssignsBlock(t) + `<div class="f wide">${hidden}<span class="lbl">Раздел состава</span><div class="comp-place"><span class="chip tone-idle">${place.stage}</span> <b class="mono">${esc(place.code)}</b> · ${esc(place.title)} <span class="hint">том ${esc(String(place.tom))}${marks.length ? ' · марка ' + esc(marks.join(', ')) : ''}</span></div>
-    <span class="hint">Раздел меняется в составе проекта, а не в карточке.</span></div>`;
-  // Suggestions: the marks of the directions plus the working-documentation marks of the generator.
-  const known = [...new Map([...MARK_GROUPS.flatMap(g => g.marks), ...Object.entries(Composition.RD_MARKS).map(([m, [t]]) => [m, t])]).entries()];
-  return `<div class="f wide"><label for="t-marks-extra">Марка</label>
-    <input id="t-marks-extra" name="marksExtra" value="${esc(marks.join(', '))}" placeholder="ЭОМ или пусто — для задачи без марки (согласование, сбор ИРД)" maxlength="200" autocomplete="off" list="marks-dl">
+  return taskAssignsBlock(t) + `<div class="f wide" id="t-doc-box">${docFieldHtml(t.projectId, t)}</div>`;
+}
+// «Раздел» of a card: chosen from the project composition (ПД volumes and РД sections not yet taken by another
+// card). Without a composition — a code typed by hand. Without a section — a task with an explanation
+// (согласование, сбор ИРД). The composition itself is edited on the project's «Состав» tab.
+function docFieldHtml(projectId, t, typed = null) {
+  const p = state.projects.get(projectId), comp = p?.composition;
+  const place = t.projectId === projectId ? compPlaceOf(t) : null;
+  const marks = typed ?? sectionsOf(t);
+  // Suggestions: ПД sections (ПП РФ № 87) and РД sections (ГОСТ Р 21.101 and practice).
+  const known = [...new Map([...Composition.BASES.nonprod.sections.flatMap(([, abbr, title, , subs]) => [[abbr, title], ...(subs || []).map(([a, tl]) => [a, tl])]),
+    ...MARK_GROUPS.flatMap(g => g.marks), ...Object.entries(Composition.RD_MARKS).map(([m, [tl]]) => [m, tl])]).entries()];
+  const freeInput = (show, value) => `<div class="doc-free"${show ? '' : ' hidden'}><input id="t-marks-extra" name="marksExtra" value="${esc(value)}" placeholder="Шифр раздела: ЭОМ, ИОС1, АР…" maxlength="200" autocomplete="off" aria-label="Шифр раздела" list="marks-dl">
     <datalist id="marks-dl">${known.map(([c, n]) => `<option value="${esc(c)}">${esc(n)}</option>`).join('')}</datalist>
-    <span class="hint" id="marks-count">Можно несколько через запятую. Без марки задача обязательно с уточнением.</span></div>`;
+    <span class="hint">Несколько — через запятую.</span></div>`;
+  if (!comp) {
+    return `<label for="t-marks-extra">Раздел</label>${freeInput(true, marks.join(', '))}
+      <span class="hint">${p ? 'У проекта нет состава документации — разделы можно выбрать из списка, если сформировать состав на вкладке проекта «Состав».' : 'Сначала выберите проект.'} Без раздела — задача с уточнением (согласование, сбор ИРД).</span>`;
+  }
+  const taken = id => id && id !== t.id && state.tasks.has(id);
+  const vols = Composition.volumes(comp, p.code || ''), rds = Composition.rdRows(comp, p.code || '');
+  const cur = place?.ref || (marks.length ? 'free' : '');
+  const opt = (v, l, dis = false) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(l)}</option>`;
+  const pdOpts = vols.map(v => { const n = comp.nodes.find(x => x.id === v.id); return opt('pd:' + v.id, `${v.abbr || v.code} · ${v.title}${taken(n?.taskId) ? ' — уже есть карточка' : ''}`, taken(n?.taskId)); }).join('');
+  const rdOpts = rds.map(r => opt('rd:' + r.id, `${r.mark} · ${r.title}${taken(r.item.taskId) ? ' — уже есть карточка' : ''}`, taken(r.item.taskId))).join('');
+  return `<label for="t-doc">Раздел</label>
+    <select id="t-doc" name="docRef">${opt('', '— без раздела: задача (согласование, сбор ИРД…)')}
+      ${pdOpts ? `<optgroup label="Проектная документация · стадия П">${pdOpts}</optgroup>` : ''}${rdOpts ? `<optgroup label="Рабочая документация · стадия Р">${rdOpts}</optgroup>` : ''}
+      <optgroup label="Другое">${opt('free', 'Свой раздел — вписать шифр…')}</optgroup></select>
+    ${freeInput(cur === 'free', place ? '' : marks.join(', '))}
+    <span class="hint">${place ? `Том ${esc(String(place.tom))} · ${esc(place.code)}. ` : ''}Разделы берутся из состава проекта (вкладка «Состав»).</span>`;
+}
+// Codes of the chosen composition section, for directions and contractor suggestions (ИОС1 → ЭС, ЭН, ЭОМ, ЭО).
+function docRefSections(projectId, ref) {
+  const p = state.projects.get(projectId), comp = p?.composition;
+  if (!comp || !ref) return [];
+  const [kind, id] = ref.split(':');
+  if (kind === 'pd') { const v = Composition.volumes(comp, p.code || '').find(x => x.id === id); return v ? normalizeMarks(v.node.marks?.length ? v.node.marks : [v.abbr]) : []; }
+  if (kind === 'rd') { const r = Composition.rdRows(comp, p.code || '').find(x => x.id === id); return r ? normalizeMarks([r.mark]) : []; }
+  return [];
+}
+// The composition with this card linked to `ref` (and unlinked from where it was). null — nothing to change.
+function compWithLink(projectId, taskId, ref) {
+  const p = state.projects.get(projectId), comp = p?.composition;
+  if (!comp) return null;
+  const next = JSON.parse(JSON.stringify(comp));
+  let changed = false;
+  for (const n of next.nodes || []) if (n.taskId === taskId && 'pd:' + n.id !== ref) { n.taskId = ''; changed = true; }
+  for (const x of next.rd || []) if (x.taskId === taskId && 'rd:' + x.id !== ref) { x.taskId = ''; changed = true; }
+  const [kind, id] = (ref || '').split(':');
+  const target = kind === 'pd' ? (next.nodes || []).find(n => n.id === id) : kind === 'rd' ? (next.rd || []).find(x => x.id === id) : null;
+  if (target && target.taskId !== taskId) { target.taskId = taskId; changed = true; }
+  return changed ? next : null;
 }
 // In a section's card: its outgoing assignments (subtasks) and the incoming ones it waits for.
 function taskAssignsBlock(t) {
@@ -3153,11 +3216,11 @@ function marksPicker(selected) {
   const groups = MARK_GROUPS.map((g, i) => `<fieldset class="mk-group" data-dir="${esc(A.DIRECTIONS[i]?.id || '')}"><legend>${esc(g.title)}</legend><div class="mk-grid">${g.marks.map(([code, name]) =>
     `<label class="mk" title="${esc(name)}"><input type="checkbox" name="mark" value="${esc(code)}"${selected.includes(code) ? ' checked' : ''}><span class="code">${esc(code)}</span><small>${esc(name)}</small></label>`).join('')}</div></fieldset>`).join('');
   return `<div class="f wide marks-f">
-    <div class="mk-head"><span class="lbl req" id="marks-lbl">Разделы (марки)</span><span class="hint" id="marks-count"></span></div>
-    <div class="mk-tools" data-transient><input id="mk-search" type="search" placeholder="Найти марку: ЭО, вент, пожар…" autocomplete="off">
+    <div class="mk-head"><span class="lbl req" id="marks-lbl">Разделы</span><span class="hint" id="marks-count"></span></div>
+    <div class="mk-tools" data-transient><input id="mk-search" type="search" placeholder="Найти раздел: ЭО, вент, пожар…" autocomplete="off">
       <button class="btn ghostbtn sm" type="button" data-act="mk-all" id="mk-all"></button></div>
     <div class="mk-groups" role="group" aria-labelledby="marks-lbl">${groups}</div>
-    <label for="t-marks-extra">Другие марки, через запятую</label>
+    <label for="t-marks-extra">Другие разделы, через запятую</label>
     <input id="t-marks-extra" name="marksExtra" value="${esc(custom.join(', '))}" placeholder="ЭОМ1, АИИС КУЭ" maxlength="200" autocomplete="off">
   </div>`;
 }
@@ -3188,6 +3251,9 @@ function applyMarksFilter() {
   }
 }
 function selectedMarks() {
+  const doc = $('#t-doc');
+  if (doc && doc.value && doc.value !== 'free') return docRefSections(val('projectId'), doc.value);
+  if (doc && !doc.value) return [];
   const checked = $$('#dform input[name="mark"]:checked').map(i => i.value);
   return normalizeMarks([...checked, ...splitMarks(val('marksExtra'))]);
 }
@@ -3430,7 +3496,7 @@ function taskMainPanel(t, isNew) {
       <fieldset class="f wide who-box"><legend>Кто делает</legend>
         <div class="who-grid">
           <div class="f"><label class="req" for="t-owner" title="${A.isGip(state.me) ? 'ГИП может спустить карточку любому главспецу или специалисту.' : A.isChief(state.me) ? 'Главспец спускает карточки только своим специалистам.' : 'Карточку спустил вам руководитель.'}">Ответственный в команде</label><select id="t-owner" name="ownerId">${ownerOptions(t.ownerId || state.me?.id, marks)}</select></div>
-          <div class="f"><label for="t-contractor" title="${contractorsArr().length ? 'Сверху — те, у кого отмеченные марки есть в специализации.' : 'Подрядчиков пока нет — добавьте их через «Создать → Подрядчик».'}">Подрядчик (внештатный)</label><select id="t-contractor" name="contractorId">${contractorOptions(marks, t.contractorId || '')}</select></div>
+          <div class="f"><label for="t-contractor" title="${contractorsArr().length ? 'Сверху — те, у кого этот раздел есть в специализации.' : 'Подрядчиков пока нет — добавьте их через «Создать → Подрядчик».'}">Подрядчик (внештатный)</label><select id="t-contractor" name="contractorId">${contractorOptions(marks, t.contractorId || '')}</select></div>
         </div>
         <div class="co-owners" id="co-box"></div>
         <div class="warnline soft" id="abs-warn" hidden></div>
@@ -3458,7 +3524,7 @@ function taskMainPanel(t, isNew) {
         <div class="f wide"><label for="t-title">Уточнение</label><input id="t-title" name="title" value="${esc(t.title || '')}" placeholder="Корпус 2, стадия Р" maxlength="120"></div>
         <div class="f wide"><label for="t-folder">Папка раздела</label>
           <div class="row-in"><input id="t-folder" name="folder" value="${esc(t.folder || '')}" placeholder="\\\\server\\Проекты\\0425-24\\ЭОМ" maxlength="400">
-            <button class="btn" data-act="pick-task-folder" type="button">Выбрать…</button>${projectOf(t)?.folder ? '<button class="btn ghostbtn" data-act="suggest-task-folder" type="button" title="Папка проекта + марка">Из папки проекта</button>' : ''}</div>
+            <button class="btn" data-act="pick-task-folder" type="button">Выбрать…</button>${projectOf(t)?.folder ? '<button class="btn ghostbtn" data-act="suggest-task-folder" type="button" title="Папка проекта + раздел">Из папки проекта</button>' : ''}</div>
           <span class="hint">Чертежи и файлы раздела. Кнопка «📁 Папка» в шапке карточки откроет её в Проводнике.</span></div>
         <div class="f wide"><label for="t-note">Примечание</label><textarea id="t-note" name="note" maxlength="2000">${esc(t.note || '')}</textarea></div>
       </div></details>
@@ -3720,7 +3786,7 @@ function taskStrip(t) {
   return `<div class="stamp">
     <div class="st-grid">
       ${cell('Объект', `${esc(p?.name || '—')}${p?.code ? ` <span class="mono hint">${esc(p.code)}</span>` : ''}`, 'st-obj')}
-      ${cell('Марка', marksHtml(t), 'st-mark')}
+      ${cell('Раздел', marksHtml(t), 'st-mark')}
       ${cell('Стадия', p ? projectStageChip(p) : '—', 'st-stage')}
       ${cell('Ответственный', o ? `${userIcons(o)}<b>${esc(o.name)}</b>${coOwnersOf(t).length ? ` +${coOwnersOf(t).length}` : ''}` : '<span class="hint">не назначен</span>', 'st-owner')}
       ${cell('Подрядчик', c ? esc(c.name) : '<span class="hint">—</span>', 'st-contr')}
@@ -3898,7 +3964,9 @@ async function submitTask(quick = null, { stay = false } = {}) {
   const id = state.drawer.id;
   const old = id ? state.tasks.get(id) : null;
   formError('');
-  const sections = selectedMarks();
+  const docRef = $('#t-doc') ? val('docRef') : null; // null: no composition picker in this card
+  const linkRef = docRef && docRef !== 'free' ? docRef : '';
+  const sections = linkRef ? docRefSections(val('projectId'), linkRef) : docRef === '' ? [] : selectedMarks();
   const status = quick ? QUICK[quick].to : old ? old.status : checked('startNow') ? 'in_progress' : 'not_started';
   const data = {
     // `section` keeps a readable copy for older versions of the app that read only this field.
@@ -3909,7 +3977,7 @@ async function submitTask(quick = null, { stay = false } = {}) {
     invoiceReceived: checked('invoiceReceived'), actSigned: checked('actSigned'), folder: val('folder'),
   };
   if (!data.projectId) return formError('Выберите проект.', 'main');
-  if (!sections.length && !data.title) return formError('Укажите марку (например, ЭОМ) или, для задачи без марки, уточнение в «Дополнительно».', 'main');
+  if (!sections.length && !data.title) return formError('Выберите раздел или, для задачи без раздела, напишите уточнение в «Дополнительно».', 'main');
   if (old?.kind === 'assign' || $('#dform input[name="official"]')) Object.assign(data, { official: checked('official'), officialNo: val('officialNo'), officialBy: val('officialBy') });
   if (Number.isNaN(data.budget)) return formError('Бюджет — неотрицательное число, например 150000 или 150 000,50.', 'main');
   if (data.start && data.finish && data.finish < data.start) return formError('Финиш не может быть раньше старта.', 'main');
@@ -3957,9 +4025,15 @@ async function submitTask(quick = null, { stay = false } = {}) {
   }
 
   const tab = state.drawer.tab, savedId = old ? id : newId();
-  const ok = old
-    ? await write(op.update('tasks', id, data), quick ? QUICK[quick].okMsg : 'Карточка сохранена')
-    : await write(op.set('tasks', savedId, { ...data, payments: [], createdAt: now.toISOString() }), 'Карточка добавлена');
+  const taskOp = old ? op.update('tasks', id, data) : op.set('tasks', savedId, { ...data, payments: [], createdAt: now.toISOString() });
+  // Linking the card to a composition section (or off it) changes the project in the same step.
+  const ops = [taskOp];
+  if (docRef !== null) {
+    const comp = compWithLink(data.projectId, savedId, linkRef);
+    if (comp) ops.push(op.update('projects', data.projectId, { composition: comp }));
+    if (old && old.projectId !== data.projectId) { const back = compWithLink(old.projectId, savedId, ''); if (back) ops.push(op.update('projects', old.projectId, { composition: back })); }
+  }
+  const ok = await write(ops.length > 1 ? ops : taskOp, old ? (quick ? QUICK[quick].okMsg : 'Карточка сохранена') : 'Карточка добавлена');
   if (!ok) return false;
   if (quick === 'accept' && old) celebrateAccept(id);
   if (quick || stay) { await refresh(); openTask(savedId, {}, tab); } else closeDrawer();
@@ -3972,7 +4046,7 @@ function celebrateAccept(id) {
     const t = state.tasks.get(id);
     if (!t || t.status !== 'done') return;
     const goal = L.projectGoal(tasksArr().filter(x => x.projectId === t.projectId));
-    if (goal.complete) toast(`⚑ Все марки проекта «${projectOf(t)?.name || ''}» приняты — комплект готов!`);
+    if (goal.complete) toast(`⚑ Все разделы проекта «${projectOf(t)?.name || ''}» приняты — комплект готов!`);
     else if (L.reviewStats(t, state.today).rounds === 0) toast(`✓ ${marksText(t)}: принято с первого раза · проект ${goal.done} из ${goal.total} марок`);
   }, 400);
 }
@@ -4279,7 +4353,7 @@ function renderComposition() {
   const p = state.projects.get(state.drawer.id) || {};
   const code = (val('code') || p.code || '').trim();
   if (!d.composition) {
-    box.innerHTML = `<div class="comp-empty"><h3>Генератор состава проекта</h3><p>Проектная документация — по Постановлению Правительства РФ № 87 (ред. от 21.10.2025). К её разделам программа предложит разделы рабочей документации (марки основных комплектов по ГОСТ Р 21.101-2026 и принятые на практике). Всё можно выключить, переименовать, добавить своё.</p>
+    box.innerHTML = `<div class="comp-empty"><h3>Генератор состава проекта</h3><p>Проектная документация — по Постановлению Правительства РФ № 87 (ред. от 21.10.2025). К её разделам программа предложит разделы рабочей документации (основные комплекты по ГОСТ Р 21.101-2026 и принятые на практике). Всё можно выключить, переименовать, добавить своё.</p>
       <p><b>Вид объекта:</b></p><div class="comp-bases">${Object.entries(Composition.BASES).map(([k, b]) => `<button class="btn" type="button" data-act="comp-base" data-v="${k}"><b>${esc(b.label)}</b><small>${b.sections.length} разделов${k === 'nonprod' ? ', ТХ — по заданию' : ''}</small></button>`).join('')}</div></div>`;
     return;
   }
@@ -4299,7 +4373,7 @@ function renderComposition() {
     const own = cur && !groups.some(g => g.node.id === cur) ? comp.nodes.find(n => n.id === cur) : null; // e.g. a switched-off section
     return `<option value="">— вне разделов ПД —</option>${own ? `<option value="${esc(own.id)}" selected>${esc(own.abbr || own.title)} (выключен)</option>` : ''}${groups.map(g => `<option value="${esc(g.node.id)}"${g.node.id === cur ? ' selected' : ''}>${esc(g.node.abbr)}</option>`).join('')}`;
   };
-  const srcTag = src => src === 'gost' ? '<span class="src gost" title="Марка есть в таблице В.1 ГОСТ Р 21.101-2026">ГОСТ</span>' : '<span class="src" title="Принято на практике, в таблице ГОСТ Р 21.101-2026 не найдено">практика</span>';
+  const srcTag = src => src === 'gost' ? '<span class="src gost" title="Обозначение есть в таблице В.1 ГОСТ Р 21.101-2026">ГОСТ</span>' : '<span class="src" title="Принято на практике, в таблице ГОСТ Р 21.101-2026 не найдено">практика</span>';
 
   box.innerHTML = `<div class="cust-top"><span class="hint">База ПД: ${esc(Composition.BASES[comp.base]?.label || '')}. Обозначения — от шифра проекта${code ? ` «${esc(code)}»` : ' (шифр не задан — впишите на вкладке «Основное»)'}.</span><span class="spacer"></span>
       <button class="btn" type="button" data-act="comp-export" data-format="sp">Состав ПД → Word</button><button class="btn" type="button" data-act="comp-export" data-format="vok"${rdRows.size ? '' : ' disabled'}>ВОК → Word</button><button class="btn ghostbtn" type="button" data-act="comp-export" data-format="xlsx">Excel</button></div>
@@ -4330,8 +4404,8 @@ function renderComposition() {
       const here = rdList.some(x => x.pdId === g.node.id && Composition.markBase(x.mark) === it.mark);
       const other = !here && rdList.some(x => Composition.markBase(x.mark) === it.mark);
       return `<button class="rd-chip${here ? ' on' : ''}${other ? ' else' : ''}" type="button" data-act="rd-chip" data-pd="${esc(g.node.id)}" data-mark="${esc(it.mark)}" title="${esc(it.title)}${other ? ' — уже есть в другом разделе' : ''}">${here ? '✓ ' : '+ '}${esc(it.mark)}</button>`;
-    }).join('')}<button class="rd-chip own" type="button" data-act="rd-add" data-pd="${esc(g.node.id)}" title="Своя марка в этом разделе">+ своя</button></span></div>`).join('')}</div>
-    <div class="tablewrap"><table class="comp-t rd-t"><thead><tr><th></th><th>Том</th><th>Марка</th><th>Наименование</th><th>К разделу ПД</th><th>Обозначение</th><th>Примечание</th><th>Ответственный</th><th>Подрядчик</th><th>Задача</th><th>Вкл.</th><th></th></tr></thead><tbody>
+    }).join('')}<button class="rd-chip own" type="button" data-act="rd-add" data-pd="${esc(g.node.id)}" title="Свой раздел РД к этому разделу ПД">+ своя</button></span></div>`).join('')}</div>
+    <div class="tablewrap"><table class="comp-t rd-t"><thead><tr><th></th><th>Том</th><th>Раздел РД</th><th>Наименование</th><th>К разделу ПД</th><th>Обозначение</th><th>Примечание</th><th>Ответственный</th><th>Подрядчик</th><th>Задача</th><th>Вкл.</th><th></th></tr></thead><tbody>
     ${rdList.map((x, i) => { const r = rdRows.get(x.id), base = Composition.RD_MARKS[Composition.markBase(x.mark)];
       const pdOff = x.pdId && !r && x.on !== false && x.mark;
       return `<tr class="${x.on === false || pdOff ? 'off' : 'vol'}"${pdOff ? ' title="Раздел ПД, к которому относится этот раздел, выключен — в ВОК не попадёт"' : ''}><td class="nowrap"><button class="btn ghostbtn sm" type="button" data-act="rd-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'} aria-label="Выше">↑</button><button class="btn ghostbtn sm" type="button" data-act="rd-move" data-id="${x.id}" data-dir="1"${i < rdList.length - 1 ? '' : ' disabled'} aria-label="Ниже">↓</button></td>
@@ -4343,8 +4417,8 @@ function renderComposition() {
         <td><input class="note-in" data-rd="${x.id}" data-k="note" value="${esc(x.note || '')}" placeholder="Выдано, дата…" maxlength="60"></td>
         <td>${ownerSel(`data-rd="${x.id}"`, x.ownerId)}</td><td>${contrSel(`data-rd="${x.id}"`, x.contractorId)}</td><td>${cardCell(x.taskId, true)}</td>
         <td><input type="checkbox" data-rd="${x.id}" data-k="on"${x.on !== false ? ' checked' : ''} aria-label="Включить"></td>
-        <td><button class="btn ghostbtn sm" type="button" data-act="rd-del" data-id="${x.id}" aria-label="Удалить">✕</button></td></tr>`; }).join('') || '<tr><td colspan="12" class="hint">Отметьте марки выше или добавьте свой раздел.</td></tr>'}</tbody></table></div>
-    <div class="comp-foot"><button class="btn sm" type="button" data-act="rd-add" data-pd="">+ свой раздел РД</button><span class="hint">Том — по порядку строк, обозначение — «шифр-марка»; впишите своё, чтобы переопределить (например КЖ1.1). Примечание попадает в ВОК («Выдано», дата выдачи).</span></div></section>`;
+        <td><button class="btn ghostbtn sm" type="button" data-act="rd-del" data-id="${x.id}" aria-label="Удалить">✕</button></td></tr>`; }).join('') || '<tr><td colspan="12" class="hint">Отметьте разделы выше или добавьте свой раздел.</td></tr>'}</tbody></table></div>
+    <div class="comp-foot"><button class="btn sm" type="button" data-act="rd-add" data-pd="">+ свой раздел РД</button><span class="hint">Том — по порядку строк, обозначение — «шифр-раздел»; впишите своё, чтобы переопределить (например КЖ1.1). Примечание попадает в ВОК («Выдано», дата выдачи).</span></div></section>`;
 }
 // Working documentation rows: chips toggle a suggested mark for a section; own rows; order.
 const rdItem = id => (state.draft.composition.rd || []).find(x => x.id === id);
@@ -4510,8 +4584,8 @@ function techcardBody(sec) {
   }
   if (sec === 'assign') return `<p class="hint">При генерации состава каждое задание становится подзадачей раздела-источника и видно получателю как входящее. Задание «вперёд» (в раздел следующей волны) задаёт старт получателя: «начать после».</p>`
     + tbl(['От', 'Кому', 'Что передаётся'], T.ASSIGN.map(([f, to, w]) => [esc(f === 'ИОС*' ? 'каждый ИОС' : lbl(f)), esc(to.map(x => (x === 'ИОС*' ? 'все ИОС' : lbl(x))).join(', ')), esc(w)]));
-  if (sec === 'rd') return `<p class="hint">Что генератор предлагает в рабочую документацию к разделу ПД (✓ — включено по умолчанию). Марки — по ГОСТ Р 21.101-2026 и принятые на практике.</p>`
-    + tbl(['Раздел ПД', 'Марки РД'], Object.entries(Composition.RD_SUGGEST).map(([k, list]) => [`<b>${esc(lbl(k))}</b>`, list.map(([m, on]) => `<span class="chip ${on ? 'tone-work' : 'tone-idle'}" title="${esc(Composition.RD_MARKS[m]?.[0] || '')}">${on ? '✓ ' : ''}${esc(m)}</span>`).join(' ')]));
+  if (sec === 'rd') return `<p class="hint">Что генератор предлагает в рабочую документацию к разделу ПД (✓ — включено по умолчанию). Обозначения разделов РД — по ГОСТ Р 21.101-2026 и принятые на практике.</p>`
+    + tbl(['Раздел ПД', 'Разделы РД'], Object.entries(Composition.RD_SUGGEST).map(([k, list]) => [`<b>${esc(lbl(k))}</b>`, list.map(([m, on]) => `<span class="chip ${on ? 'tone-work' : 'tone-idle'}" title="${esc(Composition.RD_MARKS[m]?.[0] || '')}">${on ? '✓ ' : ''}${esc(m)}</span>`).join(' ')]));
   if (sec === 'summary') return tbl(['Раздел', 'Что получает', 'Что отдаёт', 'Когда'], T.SUMMARY.map(r => r.map(esc)));
   return '';
 }
@@ -4617,7 +4691,7 @@ function openProject(id, tab = 'main') {
         <div class="f wide"><label for="pr-note">Примечание</label><textarea id="pr-note" name="note" maxlength="2000">${esc(p.note || '')}</textarea></div>
       </div></details>
     </div>
-    ${id ? `<div class="sub"><h3>Состав проекта</h3><p class="hint">${p.composition ? `Проектная документация: томов ${Composition.volumes(p.composition, p.code || '').length} · рабочая документация: разделов ${Composition.rdRows(p.composition, p.code || '').length}.` : 'Ещё не сформирован. Генератор предложит разделы по ПП РФ № 87 и марки рабочей документации к ним.'}</p>
+    ${id ? `<div class="sub"><h3>Состав проекта</h3><p class="hint">${p.composition ? `Проектная документация: томов ${Composition.volumes(p.composition, p.code || '').length} · рабочая документация: разделов ${Composition.rdRows(p.composition, p.code || '').length}.` : 'Ещё не сформирован. Генератор предложит разделы по ПП РФ № 87 и разделы рабочей документации к ним.'}</p>
       <div><button class="btn primary" type="button" data-act="dtab" data-id="comp">Открыть генератор состава (ПД и РД)</button></div></div>` : ''}
     ${id ? `<p class="hint">Карточек в проекте: ${n}.${p.archived ? ' Проект в архиве: его карточки не видны в сводке, загрузке и уведомлениях.' : ''}</p>` : ''}</div>
     ${id ? `<div class="dpanel" data-panel="comp"${ptab === 'comp' ? '' : ' hidden'}><div id="comp-box"></div></div>
@@ -4649,8 +4723,8 @@ function openContractor(id) {
     title: id ? 'Подрядчик' : 'Новый подрядчик',
     body: `${id ? '' : kindSwitch('outside')}<div class="fgrid">
       <div class="f wide"><label class="req" for="c-name">ФИО или название</label><input id="c-name" name="name" value="${esc(c.name || '')}" placeholder="Петров Алексей Сергеевич" maxlength="160"></div>
-      <div class="f wide"><label for="c-spec">Специализация (марки)</label><input id="c-spec" name="specialty" value="${esc(c.specialty || '')}" placeholder="ЭОМ, ЭС, ЭН" maxlength="160">
-        <span class="hint">Перечислите марки через запятую — по ним подрядчик будет предлагаться в карточках.</span></div>
+      <div class="f wide"><label for="c-spec">Специализация (разделы)</label><input id="c-spec" name="specialty" value="${esc(c.specialty || '')}" placeholder="ЭОМ, ЭС, ЭН" maxlength="160">
+        <span class="hint">Перечислите разделы через запятую — по ним подрядчик будет предлагаться в карточках.</span></div>
       <div class="f"><label for="c-phone">Телефон</label><input id="c-phone" name="phone" type="tel" value="${esc(c.phone || '')}" placeholder="+7 900 123-45-67" maxlength="40"></div>
       <div class="f"><label for="c-email">Почта</label><input id="c-email" name="email" type="email" value="${esc(c.email || '')}" maxlength="120"></div>
       <div class="f wide"><label for="c-msg">Мессенджер</label><input id="c-msg" name="messenger" value="${esc(c.messenger || '')}" placeholder="Telegram @petrov_eom" maxlength="120"></div>
@@ -4941,7 +5015,7 @@ function renderImportPreview() {
       <div><span class="k">Новых подрядчиков</span><span class="v">${r.contractors.length}</span></div>
       <div><span class="k">Пропущено строк</span><span class="v ${r.skipped.length ? 'warnv' : ''}">${r.skipped.length}</span></div></div>
     ${r.error ? `<div class="err">${esc(r.error)}</div>` : ''}
-    ${sample.length ? `<div class="tablewrap"><table class="mini"><thead><tr><th>Проект</th><th>Марки</th><th>Подрядчик</th><th>Старт</th><th>Финиш</th><th>Статус</th><th class="r">Бюджет</th><th class="r">Оплачено</th></tr></thead><tbody>
+    ${sample.length ? `<div class="tablewrap"><table class="mini"><thead><tr><th>Проект</th><th>Разделы</th><th>Подрядчик</th><th>Старт</th><th>Финиш</th><th>Статус</th><th class="r">Бюджет</th><th class="r">Оплачено</th></tr></thead><tbody>
       ${sample.map(t => `<tr><td>${esc(r.projectName(t.projectId))}</td><td>${esc(t.sections.join(', '))}</td><td>${esc(r.contractorName(t.contractorId) || '—')}</td>
         <td class="num">${fmtDate(t.start)}</td><td class="num">${fmtDate(t.finish)}</td><td>${esc(STATUSES[t.status].label)}</td>
         <td class="r num">${money(t.budget)}</td><td class="r num">${money(paidOf(t))}</td></tr>`).join('')}</tbody></table></div>
@@ -5150,7 +5224,7 @@ function parseQuick(text) {
   }
   if (best) { out.projectId = best.id; const hay = norm(`${best.name} ${best.code}`); out.title = left.filter(w => !(w.length > 1 && hay.includes(norm(w)))).join(' '); }
   else { out.title = left.join(' '); out.problems.push('проект не найден — напишите часть названия или шифр'); }
-  if (!out.marks.length && !out.title) out.problems.push('нужна марка или текст задачи');
+  if (!out.marks.length && !out.title) out.problems.push('нужен раздел или текст задачи');
   return out;
 }
 async function quickCreate(q, full) {
@@ -5170,7 +5244,7 @@ function openPalette() {
   const root = document.createElement('div');
   root.className = 'palette-back';
   root.innerHTML = `<div class="palette" role="dialog" aria-modal="true" aria-label="Поиск">
-    <input id="pal-q" placeholder="Поиск: марка, объект, подрядчик… · «+ ЭОМ Корпус 3 до 15.12 @Орлов» — новая карточка" autocomplete="off" spellcheck="false">
+    <input id="pal-q" placeholder="Поиск: раздел, объект, подрядчик… · «+ ЭОМ Корпус 3 до 15.12 @Орлов» — новая карточка" autocomplete="off" spellcheck="false">
     <div class="pal-list" id="pal-list" role="listbox"></div>
     <div class="pal-foot hint">↑↓ — выбор · Enter — открыть · Esc — закрыть · начните с «+», чтобы быстро добавить карточку</div>
   </div>`;
@@ -5778,7 +5852,14 @@ document.addEventListener('change', e => {
   if (t.id === 'rep-scope') { state.reportScope = t.value; updateScopeLabels(); return; }
   if (t.name === 'vm-level') { api.setLevel(t.value); return; }
   if (t.id === 'dep-add' && t.value) { state.draft.dependsOn.push(t.value); renderDeps(); return; }
-  if (t.id === 't-project') { renderDeps(); return; }
+  if (t.id === 't-project') {
+    // Another project: its composition; a hand-typed section stays typed.
+    const box = $('#t-doc-box');
+    if (box) { const typed = $('#t-doc')?.value === 'free' || !$('#t-doc') ? splitMarks($('#t-marks-extra')?.value || '') : $('#t-doc')?.value ? selectedMarks() : [];
+      box.innerHTML = docFieldHtml(t.value, state.tasks.get(state.drawer?.id) || {}, normalizeMarks(typed)); }
+    renderDeps(); onMarksChanged(); return;
+  }
+  if (t.id === 't-doc') { const free = $('#dform .doc-free'); if (free) free.hidden = t.value !== 'free'; onMarksChanged(); return; }
   if (t.id === 'msg-sign') { saveLocal('signature', t.value.trim()); renderMessage(state.msgKind); return; }
   if (t.dataset.ms !== undefined && t.dataset.k === 'done') {
     const m = state.draft.milestones[Number(t.dataset.ms)];

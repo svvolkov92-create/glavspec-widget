@@ -12,7 +12,7 @@
     { key: 'project', label: 'Проект / объект', required: true, syn: ['проект', 'объект', 'наименование объекта', 'название объекта', 'объект строительства', 'название проекта'] },
     { key: 'code', label: 'Шифр', syn: ['шифр', 'шифр проекта', 'код проекта'] },
     { key: 'client', label: 'Заказчик / ГИП', syn: ['заказчик', 'заказчик гип', 'гип'] },
-    { key: 'marks', label: 'Разделы (марки)', required: true, syn: ['разделы марки', 'разделы', 'раздел', 'марки', 'марка', 'марка раздела', 'марки разделов'] },
+    { key: 'marks', label: 'Разделы', required: true, syn: ['разделы марки', 'разделы', 'раздел', 'марки', 'марка', 'марка раздела', 'марки разделов'] },
     { key: 'title', label: 'Уточнение', syn: ['уточнение', 'этап', 'стадия', 'описание', 'состав работ'] },
     { key: 'contractor', label: 'Подрядчик', syn: ['исполнитель', 'подрядчик', 'субподрядчик', 'проектировщик', 'фио', 'фио исполнителя'] },
     { key: 'phone', label: 'Телефон подрядчика', syn: ['телефон', 'тел', 'телефон исполнителя', 'контактный телефон'] },
@@ -104,7 +104,7 @@
     result.projectName = id => projById.get(id)?.name || '';
     result.contractorName = id => conById.get(id)?.name || '';
     if (!(mapping.project >= 0) || !(mapping.marks >= 0)) {
-      result.error = 'Укажите, в каком столбце проект и в каком разделы (марки).';
+      result.error = 'Укажите, в каком столбце проект и в каком разделы.';
       return result;
     }
     const projByName = new Map(projects.filter(p => !p.deletedAt).map(p => [nameKey(p.name), p]));
@@ -125,7 +125,7 @@
       else projectName = lastProject;
       if (!projectName) { result.skipped.push({ row: rowNo, reason: 'не указан проект' }); continue; }
       const marks = L.normalizeMarks(String(cell(row, 'marks') ?? '').split(/[,;\n/+]+/));
-      if (!marks.length) { result.skipped.push({ row: rowNo, reason: 'не указаны разделы (марки)' }); continue; }
+      if (!marks.length) { result.skipped.push({ row: rowNo, reason: 'не указаны разделы' }); continue; }
 
       let project = projByName.get(nameKey(projectName));
       if (!project) {

@@ -1499,3 +1499,4 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .anim .chat-msg.fresh { animation: a-rise .2s ease-out }
 /* Off: nothing moves (the Office has its own switch on top of this one). */
 :root:not(.anim) .office-wrap.anim * { animation: none !important }
+.marks .st-stage { font-size: 10px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 3px; align-self: center }

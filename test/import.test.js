@@ -47,7 +47,7 @@ test('build: fill-down of merged project cells, dedupe, existing records, paymen
   });
   assert.equal(r.error, null);
   assert.equal(r.tasks.length, 3);
-  assert.deepEqual(r.skipped, [{ row: 4, reason: 'не указаны разделы (марки)' }]);
+  assert.deepEqual(r.skipped, [{ row: 4, reason: 'не указаны разделы' }]);
   assert.deepEqual(r.projects.map(p => p.name), ['Склад']);
   assert.deepEqual(r.contractors.map(c => [c.name, c.specialty]), [['Петров', 'ЭОМ, ЭО, АПС']]);
   const [a, b, c] = r.tasks;
@@ -68,7 +68,7 @@ test('build: fill-down of merged project cells, dedupe, existing records, paymen
 
 test('build reports missing required columns', () => {
   const r = I.build([['a', 'b']], 0, { project: 0, marks: -1 }, {});
-  assert.match(r.error, /марки/);
+  assert.match(r.error, /разделы/);
 });
 
 test('status words', () => {
