@@ -52,7 +52,14 @@ app.on('browser-window-created', (_e, win) => {
       });
 
       await step('animations: switch and slide-out', async () => {
-        check('on by default', await js(`document.documentElement.classList.contains('anim')`));
+        // On by default, unless Windows asks for less motion (as on the CI runners).
+        const reduced = await js(`matchMedia('(prefers-reduced-motion: reduce)').matches`);
+        check(`default follows Windows (less motion: ${reduced})`, (await js(`document.documentElement.classList.contains('anim')`)) === !reduced);
+        if (reduced) {
+          await click('#btn-view'); await wait(150); await click('[data-act="set-anim"][data-v="1"]'); await wait(150);
+          await js(`if (!document.querySelector('#view-menu').hidden) document.querySelector('#btn-view').click()`); await wait(100);
+          check('switched on by hand', await js(`document.documentElement.classList.contains('anim')`));
+        }
         await click('[data-act="msg-open"]'); await wait(300);
         check('messenger slides in', await js(`document.querySelector('.msg-panel').classList.contains('enter')`));
         await click('[data-act="msg-close"]'); await wait(40);
