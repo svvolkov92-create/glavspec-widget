@@ -13,6 +13,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const dayMonth = iso => (L.isDate(iso) ? `${Number(iso.slice(8))} ${MONTHS_GEN[Number(iso.slice(5, 7)) - 1]}` : '');
+const fileSize = n => (Number(n) >= 1048576 ? `${(Number(n) / 1048576).toFixed(1).replace('.', ',')} МБ` : `${Math.max(1, Math.round(Number(n || 0) / 1024))} КБ`);
 const plural = (n, a, b, c) => { const m = Math.abs(n) % 100, k = m % 10; return m > 10 && m < 20 ? c : k === 1 ? a : k >= 2 && k <= 4 ? b : c; };
 const days = n => `${n} ${plural(n, 'день', 'дня', 'дней')}`;
 const rub = n => `${Math.round(Number(n) || 0).toLocaleString('ru-RU').replace(/ /g, ' ')} ₽`;
@@ -77,7 +78,7 @@ function pageModel({ project: p, tasks, contact, today, team = [] }) {
     project: {
       id: p.id, name: p.name || '', code: p.code || '', client: p.client || '', status: p.status || '',
       phases: pick(p.phases, ['key', 'start', 'finish', 'done']), milestones: pick(p.milestones, ['id', 'title', 'date', 'done']),
-      requests: pick((p.requests || []).filter(r => !r.done && r.title), ['id', 'title', 'due', 'why', 'irdId']),
+      requests: (p.requests || []).filter(r => !r.done && r.title).map(r => ({ ...pick([r], ['id', 'title', 'due', 'why', 'irdId'])[0], ...(Array.isArray(r.files) && r.files.length ? { files: r.files.map(f => ({ id: f.id, name: f.name, size: f.size })) } : {}) })),
       protocol: p.protocol ? { no: p.protocol.no || '', date: p.protocol.date || '', items: pick(p.protocol.items, ['id', 'text', 'status', 'pct', 'who', 'due']) } : null,
       docs: pick(p.docs, ['id', 'title', 'until']), advice: p.advice ? { title: p.advice.title || '', text: p.advice.text || '' } : null,
       ird: show.ird ? pick((p.ird || []).filter(x => x.title), ['id', 'title', 'kind', 'who', 'status', 'due', 'note']) : [],
@@ -200,12 +201,18 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
     : `<div class="lbl ac"><i class="dot ac"></i>${esc(stage || 'Проект')}</div><h2 class="state">Готовность разделов <span class="hl">${pdSecs.length ? Math.round(pdSecs.reduce((a, s) => a + (s.st.tone === 'ok' ? 100 : s.ready), 0) / pdSecs.length) : 0}%</span></h2>`;
   const meetLine = nextMeet ? `<a class="meetline" href="#meet">${ic('cal')}<span><b>${esc(dayMonth(nextMeet.date))}</b>${nextMeet.from ? ', ' + esc(nextMeet.from) : ''} · ${esc(nextMeet.title || 'Встреча')}</span></a>` : '';
   // Answer to a request: a button that opens the form in place (no scripts: <details>).
-  const answerForm = r => (cab ? (cab.sent?.[r.id] ? `<p class="sent">✓ Ваш ответ отправлен: «${esc(cab.sent[r.id])}»</p>` : `<details class="inl"><summary class="btn pri">Ответить</summary>${form('/c/answer', `<input type="hidden" name="request" value="${esc(r.id)}"><textarea name="text" required maxlength="2000" placeholder="Ответ или ссылка на документ: где лежит, как передали"></textarea>`, 'Отправить ответ')}</details>`) : '');
+  // Files the GIP sent for approval: links in the cabinet, names on a saved page (no server to download from).
+  const filesOf = r => (Array.isArray(r.files) && r.files.length ? `<ul class="files">${r.files.map(f => `<li>${cab ? `<a href="${esc(cab.base || '')}/p/${encodeURIComponent(m.project.id)}/f/${encodeURIComponent(f.id)}" download>${esc(f.name)}</a>` : esc(f.name)} <span class="mu">${fileSize(f.size)}</span></li>`).join('')}</ul>` : '');
+  // With files: «Согласовано» in one click, or remarks with a text; without: a free answer.
+  const answerForm = r => (cab ? (cab.sent?.[r.id] ? `<p class="sent">✓ Ваш ответ отправлен: «${esc(cab.sent[r.id])}»</p>`
+    : r.files?.length ? `<div class="approve">${form('/c/answer', `<input type="hidden" name="request" value="${esc(r.id)}"><input type="hidden" name="decision" value="approve">`, 'Согласовано')}
+        <details class="inl"><summary class="btn ghost">Есть замечания</summary>${form('/c/answer', `<input type="hidden" name="request" value="${esc(r.id)}"><input type="hidden" name="decision" value="remarks"><textarea name="text" required maxlength="2000" placeholder="Что поправить"></textarea>`, 'Отправить замечания')}</details></div>`
+    : `<details class="inl"><summary class="btn pri">Ответить</summary>${form('/c/answer', `<input type="hidden" name="request" value="${esc(r.id)}"><textarea name="text" required maxlength="2000" placeholder="Ответ или ссылка на документ: где лежит, как передали"></textarea>`, 'Отправить ответ')}</details>`) : '');
   const dueText = r => (L.isDate(r.due) ? `до ${esc(dayMonth(r.due))}${r.due >= today ? ` · ${days(L.dayNum(r.due) - L.dayNum(today))}` : ' · срок прошёл'}` : '');
   const needCard = requests.length ? `<section class="card need"><div class="row"><span class="lbl ac">Нужно от вас</span><span class="badge">${requests.length}</span></div>
       ${requests.map((r, i) => i === 0
-        ? `<div class="req"><h3>${esc(r.title)}</h3>${dueText(r) ? `<span class="pill">${dueText(r)}</span>` : ''}${r.why ? `<p class="mu">${esc(r.why)}</p>` : ''}${answerForm(r)}${!cab && mailHref() ? `<a class="btn pri" href="${mailHref(r.title)}">Ответить ГИПу</a>` : ''}</div>`
-        : `<div class="req more"><div class="row"><span><b>${esc(r.title)}</b>${dueText(r) ? `<br><span class="mu">${dueText(r)}</span>` : ''}</span>${cab ? (cab.sent?.[r.id] ? '<span class="chip ok">ответ отправлен</span>' : pop('Ответить', 'sm ghost', answerForm(r))) : ''}</div></div>`).join('')}</section>` : '';
+        ? `<div class="req"><h3>${esc(r.title)}</h3>${dueText(r) ? `<span class="pill">${dueText(r)}</span>` : ''}${r.why ? `<p class="mu">${esc(r.why)}</p>` : ''}${filesOf(r)}${answerForm(r)}${!cab && mailHref() ? `<a class="btn pri" href="${mailHref(r.title)}">Ответить ГИПу</a>` : ''}</div>`
+        : `<div class="req more"><div class="row"><span><b>${esc(r.title)}</b>${dueText(r) ? `<br><span class="mu">${dueText(r)}</span>` : ''}${filesOf(r)}</span>${cab ? (cab.sent?.[r.id] ? '<span class="chip ok">ответ отправлен</span>' : pop('Ответить', 'sm ghost', answerForm(r))) : ''}</div></div>`).join('')}</section>` : '';
   const protoCard = proto ? `<section class="card"><div class="lbl">Последняя договорённость</div><a class="proto" href="#meet">Протокол${proto.no ? ` № ${esc(proto.no)}` : ''}${L.isDate(proto.date) ? ` · ${esc(L.fmtDate(proto.date))}` : ''}</a>
       ${proto.items.filter(i => i.text).slice(0, 5).map(i => { const [lbl, tone] = PROTO[i.status] || PROTO.work; return `<div class="li"><span><i class="dot ${tone}"></i>${esc(i.text)}</span><b class="${tone}">${i.status === 'work' && Number(i.pct) ? `${Number(i.pct)} %` : lbl}</b></div>`; }).join('')}</section>` : '';
   const docsCard = docs.length ? `<section class="card"><div class="row"><span class="lbl">Сроки документов</span></div>${docs.map(d => {
@@ -263,7 +270,7 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
   const sentQ = msgs.filter(x => ['question', 'urgent', 'call', 'meeting'].includes(x.kind));
   const sentA = msgs.filter(x => x.kind === 'answer');
   const qItems = [
-    ...requests.map((r, i) => ({ cls: 'wait', html: `<div class="qi wait"><div class="row"><span><span class="mu">#${requests.length - i}</span> <b>${esc(r.title)}</b></span><span class="st ac">Ждёт вас</span></div><p class="mu">${esc(contact?.name || 'ГИП')} → вам${L.isDate(r.due) ? ` · до ${esc(L.fmtDate(r.due).slice(0, 5))}` : ''}${r.why ? ` · ${esc(r.why)}` : ''}</p>${answerForm(r)}</div>` })),
+    ...requests.map((r, i) => ({ cls: 'wait', html: `<div class="qi wait"><div class="row"><span><span class="mu">#${requests.length - i}</span> <b>${esc(r.title)}</b></span><span class="st ac">Ждёт вас</span></div><p class="mu">${esc(contact?.name || 'ГИП')} → вам${L.isDate(r.due) ? ` · до ${esc(L.fmtDate(r.due).slice(0, 5))}` : ''}${r.why ? ` · ${esc(r.why)}` : ''}</p>${filesOf(r)}${answerForm(r)}</div>` })),
     ...sentQ.map(x => ({ cls: 'tandem', html: `<div class="qi tandem"><div class="row"><b>${esc(x.text.slice(0, 160))}</b><span class="st wk">${x.kind === 'urgent' ? 'Горящий · ждёт «Тандем»' : x.kind === 'call' ? 'Просьба перезвонить' : x.kind === 'meeting' ? 'Перенос встречи' : 'Ждёт «Тандем»'}</span></div><p class="mu">Вы → ${esc(x.to || contact?.name || 'ГИП')} · ${esc(L.fmtDate(String(x.ts).slice(0, 10)))}</p></div>` })),
     ...sentA.map(x => ({ cls: 'answered', html: `<div class="qi answered"><div class="row"><b>${esc(x.requestTitle || 'Ответ на запрос')}</b><span class="st ok">Ответ отправлен</span></div><p class="mu">Вы → ${esc(contact?.name || 'ГИП')} · ${esc(L.fmtDate(String(x.ts).slice(0, 10)))}</p><div class="ans">${esc(x.text)}</div></div>` })),
   ];
@@ -409,7 +416,7 @@ textarea,input[name=text]{width:100%;border:1px solid var(--ln);background:var(-
 .ms.done i{background:var(--slate)}.ms:not(.done) i{background:var(--s);border:1.5px solid var(--slate)}.ms.up i{background:var(--ac);border-color:var(--ac);box-shadow:0 0 0 3px var(--acl)}.ms.up,.ms.up b{color:var(--act)}.ms.alt{top:46px}.ms.end{transform:translateX(calc(-100% + 6px));text-align:right}.ms.end i{margin-left:auto}
 .plist{display:none}
 /* home cards */
-.need{background:var(--acs);border-color:var(--acl)}.req{display:flex;flex-direction:column;gap:10px;align-items:flex-start}.req h3{font-size:19px}.req .btn{align-self:flex-start}.req.more{border-top:1px solid var(--acl);padding-top:12px}.req.more .row{width:100%;align-items:center}
+.files{list-style:none;margin:0;padding:0;display:grid;gap:4px}.files li{font-size:14px}.files a{color:var(--act);font-weight:600}.approve{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}.approve .fm{margin:0}.need{background:var(--acs);border-color:var(--acl)}.req{display:flex;flex-direction:column;gap:10px;align-items:flex-start}.req h3{font-size:19px}.req .btn{align-self:flex-start}.req.more{border-top:1px solid var(--acl);padding-top:12px}.req.more .row{width:100%;align-items:center}
 .proto{color:var(--act);font-weight:600;text-decoration:underline;text-underline-offset:3px}.li{display:flex;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--ln2);font-size:13.5px}.li b{white-space:nowrap}.li span{display:flex;gap:10px;align-items:baseline}.li .dot{transform:translateY(-1px)}
 .doc{padding:4px 0 10px;border-bottom:1px solid var(--ln2)}.doc:last-child{border:0}.doc .mu{font-size:12px}
 .pb{height:5px;background:var(--ln);margin:8px 0 3px}.pb.big{height:7px}.pb i{display:block;height:100%}.pb i.bd{background:var(--bd)}.pb i.wr{background:var(--ac)}.pb i.ok{background:var(--ok)}

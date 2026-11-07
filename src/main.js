@@ -22,6 +22,7 @@ const { Feedback } = require('./feedback'); // testing aid: notes on the interfa
 const createCore = require('./core/handlers');
 const createChats = require('./core/chats');
 const createFiles = require('./core/files');
+const createCabinetRules = require('./core/cabinet-rules');
 
 const APP_TITLE = 'Пульт главспеца';
 const APP_ID = 'ru.glavspec.widget';
@@ -373,14 +374,6 @@ function electronIo() {
 let chats = null;
 
 
-function cabinetModel(projectId) {
-  const me = currentUser();
-  if (!me || A.isSpecialist(me)) return null;
-  const view = userView();
-  const p = store.data.projects[projectId];
-  if (!p || p.deletedAt || !view.projects.some(x => x.id === projectId)) return null;
-  return pageModel({ project: { ...p, id: projectId }, tasks: view.tasks, contact: customerContact(p), team: customerTeam(p), today: L.todayStr() });
-}
 // The team key is kept encrypted with Windows DPAPI when available (safeStorage), never sent to the window.
 function cabinetKey() {
   const v = settings.get('cabinetKey') || '';
@@ -393,54 +386,6 @@ function storeCabinetKey(key) {
   if (!key) return settings.set({ cabinetKey: '' });
   const enc = safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(key).toString('base64') : 'plain:' + key;
   settings.set({ cabinetKey: enc });
-}
-const canUseCabinet = me => !!me && !A.isSpecialist(me);
-// The window's view of the cabinet: messages only for projects the user sees.
-function cabinetView() {
-  const me = currentUser();
-  if (!canUseCabinet(me)) return { allowed: false };
-  const visible = new Set(userView().projects.map(p => p.id));
-  const url = normalizeUrl(settings.get('cabinetUrl')) || '';
-  const st = cabinet.state;
-  return {
-    allowed: true, url, hasKey: !!cabinetKey(), local: localCab ? { port: localCab.port, lan: lanUrls(localCab.port) } : null,
-    // The address to give customers: for the built-in server the office-network address, not «localhost».
-    publicUrl: localCab ? (lanUrls(localCab.port)[0] || url) : url, configured: cabinet.configured(), insecure: !!url && url.startsWith('http:') && !isLocalHost(url),
-    lastSync: st.lastSync, lastError: st.lastError, published: st.published,
-    messages: st.messages.filter(m => visible.has(m.projectId)).slice(-300).reverse(),
-  };
-}
-function sendCabinet() { if (win && !win.isDestroyed()) win.webContents.send('cabinet:changed', cabinetView()); }
-let cabinetBusy = false;
-// Every two minutes: re-send changed published projects, take new messages, notify about them.
-async function cabinetSync({ quiet = false } = {}) {
-  if (!cabinet?.configured() || cabinetBusy) return { ok: false, message: 'Кабинет не настроен.' };
-  cabinetBusy = true;
-  try {
-    const me = currentUser();
-    if (canUseCabinet(me)) await cabinet.refreshPublished(cabinetModel);
-    const fresh = await cabinet.poll();
-    const visible = new Set(userView().projects.map(p => p.id));
-    const mine = canUseCabinet(me) ? fresh.filter(m => visible.has(m.projectId)) : [];
-    if (mine.length && !quiet) {
-      const urgent = mine.find(m => m.kind === 'urgent');
-      const m = urgent || mine[0];
-      notify(mine.length === 1 ? `${CAB_KINDS[m.kind]} — ${m.projectName}: ${m.text.slice(0, 120)}` : `От заказчиков: ${mine.length} новых сообщения${urgent ? ', есть горящий вопрос' : ''}.`, { silent: false });
-    }
-    return { ok: true, fresh: mine.length };
-  } catch (e) {
-    return { ok: false, message: e.message };
-  } finally {
-    cabinetBusy = false;
-    sendCabinet();
-  }
-}
-// Runs a team-API call on behalf of the window with the same guard and error shape everywhere.
-async function cabinetCall(fn) {
-  if (!canUseCabinet(currentUser())) return { ok: false, message: 'Кабинетом заказчика управляют ГИП и главспецы.' };
-  try { return { ok: true, ...(await fn()) }; }
-  catch (e) { return { ok: false, message: e.message }; }
-  finally { sendCabinet(); }
 }
 // «Кабинет на этом компьютере»: the same server, started inside the app. Customers in the office network
 // open http://<this PC's address>:<port>; Windows asks once whether to allow the app in the firewall.
@@ -463,8 +408,6 @@ async function startLocalCabinet() {
     }
   }
   if (!localCab) throw new Error(`Не удалось запустить кабинет: ${lastError?.code === 'EADDRINUSE' ? `порты ${first}–${first + 9} заняты другими программами` : lastError?.message}.`);
-  settings.set({ cabinetLocal: true, cabinetLocalPort: localCab.port, cabinetUrl: `http://localhost:${localCab.port}` });
-  storeCabinetKey(localCab.teamKey());
   return localCab;
 }
 async function stopLocalCabinet() {
@@ -475,77 +418,24 @@ async function stopLocalCabinet() {
   await new Promise(r => { s.server.close(() => r()); s.server.closeAllConnections?.(); });
 }
 
+// Customer cabinet rules: src/core/cabinet-rules.js (shared with the Tauri version).
+let cabinetRules = null;
+const sendCabinet = () => { if (win && !win.isDestroyed() && cabinetRules) win.webContents.send('cabinet:changed', cabinetRules.view()); };
 function registerCabinetIpc() {
-  ipcMain.handle('cabinet:local-start', async () => {
-    if (!canUseCabinet(currentUser())) return { ok: false, message: 'Кабинет запускают ГИП и главспецы.' };
-    try {
-      const prevUrl = normalizeUrl(settings.get('cabinetUrl'));
-      const s = await startLocalCabinet();
-      if (prevUrl && prevUrl !== `http://localhost:${s.port}`) cabinet.forgetPublished();
-      cabinetSync({ quiet: true });
-      return { ok: true, port: s.port, lan: lanUrls(s.port) };
-    } catch (e) { return { ok: false, message: e.message }; } finally { sendCabinet(); }
-  });
-  ipcMain.handle('cabinet:local-stop', async () => {
-    if (!canUseCabinet(currentUser())) return { ok: false, message: 'Кабинет останавливают ГИП и главспецы.' };
-    await stopLocalCabinet();
-    settings.set({ cabinetLocal: false, cabinetUrl: '' });
-    storeCabinetKey('');
-    sendCabinet();
-    return { ok: true };
-  });
-  ipcMain.handle('cabinet:get', () => cabinetView());
-  ipcMain.handle('cabinet:configure', async (_e, { url, key } = {}) => {
-    if (!canUseCabinet(currentUser())) return { ok: false, message: 'Кабинет настраивают ГИП и главспецы.' };
-    const norm = normalizeUrl(url);
-    if (url && !norm) return { ok: false, message: 'Адрес сервера не похож на адрес сайта.' };
-    const prevUrl = settings.get('cabinetUrl'), prevKey = settings.get('cabinetKey');
-    if (localCab && norm !== `http://localhost:${localCab.port}`) { await stopLocalCabinet(); settings.set({ cabinetLocal: false }); }
-    settings.set({ cabinetUrl: norm || '' });
-    if (key !== undefined && key !== null && String(key).trim() !== '') storeCabinetKey(String(key).trim());
-    if (!norm) { storeCabinetKey(''); sendCabinet(); return { ok: true, off: true }; }
-    try {
-      const r = await cabinet.ping();
-      if (prevUrl && normalizeUrl(prevUrl) !== norm) cabinet.forgetPublished(); // another server: start over
-      sendCabinet();
-      cabinetSync({ quiet: true });
-      return { ok: true, version: r.version, projects: r.projects, customers: r.customers };
-    } catch (e) {
-      settings.set({ cabinetUrl: prevUrl, cabinetKey: prevKey }); // keep the working settings
-      sendCabinet();
-      return { ok: false, message: e.message };
-    }
-  });
-  ipcMain.handle('cabinet:sync', () => cabinetSync({ quiet: true }));
-  ipcMain.handle('cabinet:publish', (_e, projectId) => cabinetCall(async () => {
-    const m = cabinetModel(projectId);
-    if (!m) throw new Error('Проект не найден или недоступен.');
-    return { published: await cabinet.publish(projectId, m) };
-  }));
-  ipcMain.handle('cabinet:unpublish', (_e, projectId) => cabinetCall(async () => { await cabinet.unpublish(projectId); return {}; }));
-  ipcMain.handle('cabinet:customers', () => cabinetCall(async () => ({ customers: await cabinet.customers() })));
-  ipcMain.handle('cabinet:customer-create', (_e, c = {}) => cabinetCall(() => cabinet.createCustomer({ name: String(c.name || '').slice(0, 120), login: String(c.login || '').slice(0, 80), projectIds: (c.projectIds || []).map(String) })));
-  ipcMain.handle('cabinet:customer-update', (_e, id, patch = {}) => cabinetCall(() => {
-    const allowed = {};
-    if (Array.isArray(patch.projectIds)) allowed.projectIds = patch.projectIds.map(String);
-    if (patch.name !== undefined) allowed.name = String(patch.name).slice(0, 120);
-    if (patch.disabled !== undefined) allowed.disabled = !!patch.disabled;
-    if (patch.resetPassword) allowed.resetPassword = true;
-    return cabinet.updateCustomer(String(id), allowed);
-  }));
-  ipcMain.handle('cabinet:customer-delete', (_e, id) => cabinetCall(() => cabinet.deleteCustomer(String(id))));
-  ipcMain.handle('cabinet:read', (_e, ids, read = true) => {
-    if (!canUseCabinet(currentUser())) return { ok: false };
-    cabinet.markRead((Array.isArray(ids) ? ids : []).map(String), read !== false);
-    sendCabinet();
-    return { ok: true };
-  });
-  ipcMain.handle('cabinet:open', (_e, projectId) => {
-    const url = normalizeUrl(settings.get('cabinetUrl'));
-    if (!url) return { ok: false, message: 'Кабинет не настроен.' };
-    shell.openExternal(projectId ? `${url}/p/${encodeURIComponent(projectId)}` : url);
-    return { ok: true };
-  });
+  const c = () => cabinetRules;
+  ipcMain.handle('cabinet:local-start', () => c().localStart());
+  ipcMain.handle('cabinet:local-stop', () => c().localStop());
+  ipcMain.handle('cabinet:get', () => c().view());
+  ipcMain.handle('cabinet:configure', (_e, args) => c().configure(args));
+  ipcMain.handle('cabinet:sync', () => c().sync({ quiet: true }));
+  ipcMain.handle('cabinet:publish', (_e, projectId) => c().publish(projectId));
+  ipcMain.handle('cabinet:unpublish', (_e, projectId) => c().unpublish(projectId));
+  ipcMain.handle('cabinet:customers', () => c().customers());
+  ipcMain.handle('cabinet:customer-create', (_e, x) => c().customerCreate(x));
+  ipcMain.handle('cabinet:customer-update', (_e, id, patch) => c().customerUpdate(id, patch));
+  ipcMain.handle('cabinet:customer-delete', (_e, id) => c().customerDelete(id));
+  ipcMain.handle('cabinet:read', (_e, ids, read) => c().read(ids, read));
+  ipcMain.handle('cabinet:open', (_e, projectId) => c().open(projectId));
 }
 
 /* ---------- IPC ---------- */
@@ -622,6 +512,8 @@ function registerIpc() {
   // Defaults for the export dialog: the director last typed, the folder with the user's own templates.
   ipcMain.handle('report:doc-defaults', () => files.docDefaults());
   ipcMain.handle('report:open-templates', () => files.openTemplates());
+  ipcMain.handle('attach:add', (_e, projectId) => files.attachAdd(projectId));
+  ipcMain.handle('attach:open', (_e, projectId, fileId) => files.attachOpen(projectId, fileId));
   ipcMain.handle('project:pick-folder', (_e, current) => files.pickFolder(current));
 
   // Opens mail / WhatsApp / Telegram for a stored contractor; the URL is built here, never taken from the page.
@@ -701,6 +593,15 @@ if (!app.requestSingleInstanceLock()) {
     try { core.purgeTrash(); } catch (e) { console.error('Не удалось очистить корзину:', e); }
     ensureStartMenuShortcut();
     cabinet = new Cabinet(app.getPath('userData'), { url: () => settings.get('cabinetUrl'), key: cabinetKey });
+    cabinetRules = createCabinetRules({ store, settings, A, L, cabinet, files, currentUser, userView,
+      R: { pageModel, normalizeUrl, isLocalHost, KINDS: CAB_KINDS },
+      keyStore: { get: cabinetKey, set: storeCabinetKey },
+      local: {
+        running: () => (localCab ? { port: localCab.port, lan: lanUrls(localCab.port) } : null),
+        start: async () => { const s = await startLocalCabinet(); return { port: s.port, lan: lanUrls(s.port), teamKey: s.teamKey() }; },
+        stop: () => stopLocalCabinet(),
+      },
+      notify: text => notify(text, { silent: false }), openExternal: url => shell.openExternal(url), changed: sendCabinet });
     registerIpc();
     registerCabinetIpc();
     createWindow();
@@ -713,10 +614,10 @@ if (!app.requestSingleInstanceLock()) {
     setInterval(() => { morningDigest(); updateTrayTooltip(); }, 5 * 60 * 1000);
     // Customer cabinet: the built-in server comes back with the app; first look soon after start, then every two minutes.
     if (settings.get('cabinetLocal')) startLocalCabinet().then(sendCabinet).catch(e => console.error('Кабинет на этом компьютере:', e.message));
-    setTimeout(() => cabinetSync(), 20 * 1000);
+    setTimeout(() => cabinetRules.sync(), 20 * 1000);
     setTimeout(() => files.autoBackup(), 30 * 1000);
     setInterval(() => files.autoBackup(), 30 * 60 * 1000);
-    setInterval(() => cabinetSync(), 2 * 60 * 1000);
+    setInterval(() => cabinetRules.sync(), 2 * 60 * 1000);
   });
 
   app.on('before-quit', () => { quitting = true; });

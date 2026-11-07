@@ -298,6 +298,49 @@
     return { ok: r.ok, dir, message: r.message };
   }
 
+  /* ---------- files attached to requests to the customer (for approval) ---------- */
+  // Kept on this computer in <data folder>/attachments/<project>/<file id>; the request stores { id, name, size, type }.
+  const ATTACH_MAX = 30 * 1024 * 1024;
+  const attachDir = projectId => io.join(io.dirs().userData, 'attachments', safeId(projectId));
+  const safeId = id => String(id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+  const TYPES = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    dwg: 'image/vnd.dwg', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', zip: 'application/zip', txt: 'text/plain' };
+  async function attachAdd(projectId) {
+    const me = currentUser();
+    if (!me || A.isSpecialist(me)) return { ok: false, message: 'Файлы к запросам прикладывают ГИП и главспецы.' };
+    if (!store.data.projects[projectId]) return { ok: false, message: 'Проект не найден.' };
+    const file = await io.openDialog({ title: 'Файл для согласования заказчиком', defaultPath: await startDir('attachDir'),
+      filters: [{ name: 'Документы и чертежи', extensions: ['pdf', 'docx', 'xlsx', 'dwg', 'jpg', 'jpeg', 'png', 'zip'] }, { name: 'Все файлы', extensions: ['*'] }] });
+    if (!file) return { canceled: true };
+    settings.set({ attachDir: io.dirname(file) });
+    try {
+      const bytes = await io.readFile(file);
+      if (bytes.length > ATTACH_MAX) return { ok: false, message: 'Файл больше 30 МБ — заказчику удобнее передать его ссылкой или по частям.' };
+      const id = 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const dir = attachDir(projectId);
+      await io.mkdir(dir);
+      await io.writeFile(io.join(dir, id), bytes);
+      const name = io.basename(file).slice(0, 200), ext = io.extname(name).slice(1).toLowerCase();
+      return { ok: true, file: { id, name, size: bytes.length, type: TYPES[ext] || 'application/octet-stream' } };
+    } catch (e) { return { ok: false, message: `Не удалось взять файл: ${msgOf(e)}` }; }
+  }
+  // Opens the local copy: saved next to the others under its own name, so Windows picks the right program.
+  async function attachOpen(projectId, fileId) {
+    const f = (store.data.projects[projectId]?.requests || []).flatMap(r => r.files || []).find(x => x.id === fileId);
+    if (!f) return { ok: false, message: 'Файл не найден.' };
+    const src = io.join(attachDir(projectId), safeId(fileId));
+    if (!(await io.exists(src))) return { ok: false, message: 'Файла нет на этом компьютере — его приложили на другом.' };
+    const view = io.join(attachDir(projectId), 'open', `${safeId(fileId)}-${safeName(f.name)}`);
+    await io.mkdir(io.dirname(view));
+    if (!(await io.exists(view))) await io.writeFile(view, await io.readFile(src));
+    const err = await io.openPath(view);
+    return err ? { ok: false, message: `Не удалось открыть: ${err}` } : { ok: true };
+  }
+  async function attachmentBytes(projectId, fileId) {
+    const src = io.join(attachDir(projectId), safeId(fileId));
+    return (await io.exists(src)) ? io.readFile(src) : null;
+  }
+
   /* ---------- import from a table ---------- */
   async function importPick() {
     if (noTools()) return { ok: false, message: 'Импорт и резервные копии доступны только ГИПу.' };
@@ -315,5 +358,5 @@
   }
 
   return { exportReport, customerPage, composition, docDefaults, openTemplates, openLast, openProjectFolder, openTaskFolder, pickFolder, contactOpen,
-    backupSave, backupRestore, autoBackup, autoBackupGet, autoBackupSet, importPick, safeName, customerTeam, customerContact };
+    backupSave, backupRestore, autoBackup, autoBackupGet, autoBackupSet, importPick, safeName, customerTeam, customerContact, attachAdd, attachOpen, attachmentBytes };
 });

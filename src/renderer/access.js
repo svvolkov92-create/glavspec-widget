@@ -167,6 +167,7 @@
     if (p.contract !== undefined && p.contract !== null && (typeof p.contract !== 'object' || !isDateStr(p.contract.date) || !(Number(p.contract.sum) >= 0))) return 'Проверьте договор проекта.';
     for (const ph of p.phases || []) if (!ph || typeof ph.key !== 'string' || ![ph.start, ph.finish, ph.done].every(isDateStr)) return 'Проверьте даты этапов проекта.';
     for (const m of [...(p.milestones || []), ...(p.requests || [])]) if (!m || typeof m.title !== 'string' || m.title.length > 300 || !isDateStr(m.date ?? m.due)) return 'Проверьте вехи и запросы заказчику.';
+    for (const r of p.requests || []) if (r.files !== undefined && (!Array.isArray(r.files) || r.files.length > 20 || r.files.some(f => !f || typeof f.id !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(f.id) || typeof f.name !== 'string' || f.name.length > 200 || !(Number(f.size) >= 0)))) return 'Файлы запроса повреждены.';
     for (const d of p.docs || []) if (!d || typeof d.title !== 'string' || !isDateStr(d.until)) return 'Проверьте сроки документов.';
     if (p.protocol !== undefined && p.protocol !== null && (typeof p.protocol !== 'object' || !list(p.protocol.items, 60))) return 'Протокол повреждён.';
     return null;

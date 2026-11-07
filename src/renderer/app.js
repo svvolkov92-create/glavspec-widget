@@ -9,6 +9,7 @@ const A = window.Access;
 
 // Tab icons: 16×16 strokes in currentColor.
 const ICON = {
+  file: '<path d="M4 1.8h5.4L12.6 5v9.2H4z" stroke-linejoin="round"/><path d="M9.2 1.8V5.2h3.4" stroke-linejoin="round"/>',
   pin: '<path d="M6 2h4l-.6 4 2.4 2.2v1.2H4.2V8.2L6.6 6z" stroke-linejoin="round"/><path d="M8 9.4V14" stroke-linecap="round"/>',
   chat: '<path d="M2 3.2h12v7.6H7.2L4.4 13.2v-2.4H2z" stroke-linejoin="round"/><path d="M4.8 6.2h6.4M4.8 8.2h4" stroke-linecap="round"/>',
   overview: '<rect x="2" y="2" width="5" height="6" rx="1"/><rect x="9" y="2" width="5" height="3.5" rx="1"/><rect x="2" y="10" width="5" height="4" rx="1"/><rect x="9" y="7.5" width="5" height="6.5" rx="1"/>',
@@ -33,6 +34,7 @@ const kindIcon = (k, cls = '') => (KIND[k] ? `<svg class="kico ${cls}" viewBox="
 const userKinds = u => (u?.directions || []).map(d => (d === 'vk' ? 'water' : d)).filter(k => KIND[k]);
 const userIcons = u => userKinds(u).map(k => kindIcon(k)).join('');
 const icon = id => `<svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">${ICON[id] || ''}</svg>`;
+const fileSize = n => (n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`);
 const TABS = [
   { id: 'overview', label: 'Сводка' },
   { id: 'projects', label: 'Проекты' },
@@ -747,7 +749,7 @@ const projectStageChip = p => { const s = L.PROJECT_STATUSES[p?.status]; return 
 function goalHtml(list, compact = false) {
   const g = L.projectGoal(list);
   if (!g.total) return compact ? '<span class="hint">—</span>' : '';
-  return `<span class="goal${g.complete ? ' done' : ''}" title="Принято марок: ${g.done} из ${g.total}${g.complete ? ' — комплект готов' : ''}"><span class="goal-bar"><i style="width:${g.pct}%"></i></span><b class="num">${g.done}/${g.total}</b>${compact ? '' : ` <span class="hint">марок принято</span>`}${g.complete && game ? '<span class="goal-flag" aria-hidden="true">⚑</span>' : ''}</span>`;
+  return `<span class="goal${g.complete ? ' done' : ''}" title="Принято разделов: ${g.done} из ${g.total}${g.complete ? ' — комплект готов' : ''}"><span class="goal-bar"><i style="width:${g.pct}%"></i></span><b class="num">${g.done}/${g.total}</b>${compact ? '' : ` <span class="hint">разделов принято</span>`}${g.complete && game ? '<span class="goal-flag" aria-hidden="true">⚑</span>' : ''}</span>`;
 }
 
 /* ---------- completion dashboard (GIP) ---------- */
@@ -1307,7 +1309,7 @@ function msgTaskHtml(t) {
 function msgCustHtml(pid, list) {
   const sorted = [...list].sort((a, b) => a.ts.localeCompare(b.ts));
   const rows = sorted.map(m => `<div class="chat-msg in cust${m.kind === 'urgent' ? ' urgent' : ''}${m.read ? '' : ' fresh'}"><div class="chat-meta"><b>${esc(m.customerName || 'Заказчик')}</b> <span class="hint">${fmtDate(localTs(m.ts).slice(0, 10))} ${localTs(m.ts).slice(11, 16)}</span>
-      <span class="chip ${m.kind === 'urgent' ? 'tone-bad' : 'tone-idle'}">${esc(CAB_KINDS[m.kind] || 'Сообщение')}</span></div>
+      <span class="chip ${m.kind === 'urgent' ? 'tone-bad' : 'tone-idle'}">${esc(CAB_KINDS[m.kind] || 'Сообщение')}</span>${decisionChip(m)}</div>
     ${m.requestTitle || m.meetingTitle || m.to ? `<div class="hint">${esc(m.requestTitle || m.meetingTitle || '')}${m.to ? ` → ${esc(m.to)}` : ''}</div>` : ''}<div class="chat-text">${esc(m.text || '')}</div></div>`).join('');
   const name = state.projects.get(pid)?.name || sorted.at(-1)?.projectName || 'Проект';
   return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку">←</button>' : ''}<span class="mc-ic cust">З</span><span class="mc-ht"><b>${esc(name)}</b><span class="hint">от заказчика · через кабинет</span></span>
@@ -1903,8 +1905,8 @@ function officeModel() {
     }).sort((a, b) => rank[a.state] - rank[b.state]);
     const goal = L.projectGoal(pt), late = floors.filter(f => f.state === 'late').length;
     return { id: p.id, name: p.name.replace(/^Пример:\s*/, ''), floors, crane: floors.some(f => ['work', 'revision', 'late'].includes(f.state)), late: late > 0, complete: goal.complete, more: Math.max(0, floors.length - 14),
-      sub: `${goal.done}/${goal.total} марок${late ? ` · сорвано ${late}` : ''}`, subTone: late ? 'bad' : goal.complete ? 'ok' : '',
-      tip: `${p.name}${p.code ? ' · ' + p.code : ''}\n${L.PROJECT_STATUSES[p.status]?.label || 'стадия не задана'} · принято марок ${goal.done} из ${goal.total}\nЩелчок по зданию — проект, по этажу — карточка` };
+      sub: `${goal.done}/${goal.total} разделов${late ? ` · сорвано ${late}` : ''}`, subTone: late ? 'bad' : goal.complete ? 'ok' : '',
+      tip: `${p.name}${p.code ? ' · ' + p.code : ''}\n${L.PROJECT_STATUSES[p.status]?.label || 'стадия не задана'} · принято разделов ${goal.done} из ${goal.total}\nЩелчок по зданию — проект, по этажу — карточка` };
   }).filter(Boolean);
   return { rooms, buildings };
 }
@@ -2536,12 +2538,21 @@ function askCustomer(p) {
       <div class="fgrid"><div class="f"><label for="aq-due">Срок</label><input id="aq-due" type="date" value="${addDays(state.today, 10)}"></div>
         <div class="f"><label for="aq-who">Кто готовит</label><input id="aq-who" value="Заказчик" maxlength="60"></div></div>
       <div class="f"><label for="aq-why">Зачем (увидит заказчик)</label><input id="aq-why" maxlength="200" placeholder="Без них экспертиза не примет раздел ИОС1"></div>
+      <div class="f"><span class="lbl">Файлы для согласования</span><div class="aq-files" id="aq-files"></div>
+        <div class="row-in"><button class="btn sm" type="button" data-m="attach">Приложить файл…</button><span class="hint">Заказчик скачает их в кабинете и ответит «Согласовано» или «Есть замечания».</span></div></div>
       <p class="neg" id="aq-err"></p>
       <div class="modal-f"><button class="btn primary" type="submit">Запросить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
     document.body.append(root);
     const q = s => root.querySelector(s), close = v => { root.remove(); resolve(v); };
+    const files = [];
+    const drawFiles = () => { q('#aq-files').innerHTML = files.map((f, i) => `<span class="aq-file">${icon('file')}${esc(f.name)} <span class="hint">${fileSize(f.size)}</span><button type="button" class="linkbtn" data-m="unattach" data-i="${i}" aria-label="Убрать">✕</button></span>`).join(''); };
     q('#aq-title').focus();
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(false); });
+    root.addEventListener('click', async e => {
+      if (e.target === root || e.target.dataset.m === 'cancel') return close(false);
+      const m = e.target.closest('[data-m]')?.dataset.m;
+      if (m === 'attach') { const r = await api.attachAdd(p.id); if (r?.ok) { files.push(r.file); drawFiles(); } else if (r && !r.canceled) q('#aq-err').textContent = r.message; }
+      if (m === 'unattach') { files.splice(Number(e.target.closest('[data-m]').dataset.i), 1); drawFiles(); }
+    });
     root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } });
     root.addEventListener('change', e => { if (e.target.id === 'aq-title' && !root.querySelector('input[name="aq-kind"]:checked').dataset.touched) { const k = irdKindOf(e.target.value); root.querySelector(`input[name="aq-kind"][value="${k}"]`).checked = true; } if (e.target.name === 'aq-kind') e.target.dataset.touched = '1'; });
     q('form').addEventListener('submit', async e => {
@@ -2551,7 +2562,7 @@ function askCustomer(p) {
       const lbl = kinds.find(k => k[0] === kind)[1];
       const reqTitle = kind === 'decision' || kind === 'doc' || new RegExp('^' + lbl, 'i').test(title) ? title : `${lbl}: ${title}`;
       const requests = [...(p.requests || [])], ird = [...(p.ird || [])];
-      const r = { id: newId(), title: reqTitle, due: isDate(due) ? due : '', why: why || (kind === 'decision' ? '' : IRD_WHY[kind]), done: false, irdId: '' };
+      const r = { id: newId(), title: reqTitle, due: isDate(due) ? due : '', why: why || (kind === 'decision' ? '' : IRD_WHY[kind]), done: false, irdId: '', ...(files.length ? { files } : {}) };
       if (kind !== 'decision') {
         const same = ird.find(x => x.title.trim().toLowerCase() === title.toLowerCase());
         const row = same ? { ...same, status: ['accepted', 'done'].includes(same.status) ? same.status : 'wait', due: r.due || same.due } : { id: newId(), title, kind, who: q('#aq-who').value.trim() || 'Заказчик', status: 'wait', due: r.due, note: why };
@@ -4047,7 +4058,7 @@ function celebrateAccept(id) {
     if (!t || t.status !== 'done') return;
     const goal = L.projectGoal(tasksArr().filter(x => x.projectId === t.projectId));
     if (goal.complete) toast(`⚑ Все разделы проекта «${projectOf(t)?.name || ''}» приняты — комплект готов!`);
-    else if (L.reviewStats(t, state.today).rounds === 0) toast(`✓ ${marksText(t)}: принято с первого раза · проект ${goal.done} из ${goal.total} марок`);
+    else if (L.reviewStats(t, state.today).rounds === 0) toast(`✓ ${marksText(t)}: принято с первого раза · проект ${goal.done} из ${goal.total} разделов`);
   }, 400);
 }
 
@@ -4127,7 +4138,8 @@ function renderCustomer() {
         return `<tr${ph.key === 'contract' ? ' class="gip-only" title="Видят только ГИПы"' : ''}><td><b>${esc(L.phaseLabel(ph.key))}</b>${ph.key === 'contract' ? ' <span class="chip tone-idle">только ГИП</span>' : ''}</td><td>${pdDate(`phases.${i}.start`, ph.start)}</td><td>${pdDate(`phases.${i}.finish`, ph.finish)}</td><td>${pdDate(`phases.${i}.done`, ph.done)}</td>
           <td>${has ? `<span class="chip tone-${{ done: 'ok', late: 'bad', now: 'work', next: 'idle' }[st]}">${{ done: 'завершён', late: 'просрочен', now: 'идёт', next: 'впереди' }[st]}</span>` : '<span class="hint">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>
     <div class="sub"><h3>Вехи</h3>${list('milestones', (x, i) => `<td class="grow">${pdIn(`milestones.${i}.title`, x.title, 'placeholder="Заключение экспертизы" maxlength="120"')}</td><td>${pdDate(`milestones.${i}.date`, x.date)}</td><td>${pdChk(`milestones.${i}.done`, x.done, ' пройдена')}</td>`, ['Веха', 'Дата', ''], 'Ключевые даты для заказчика: договор, ПД на экспертизу, заключение, выдача РД.')}</div>
-    <div class="sub"><h3>Нужно от заказчика</h3>${list('requests', (x, i) => `<td class="grow">${pdIn(`requests.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}</td><td>${pdDate(`requests.${i}.due`, x.due)}</td><td class="grow">${pdIn(`requests.${i}.why`, x.why, 'placeholder="Зачем: без них экспертиза не примет ИОС1" maxlength="200"')}</td><td>${pdChk(`requests.${i}.done`, x.done, ' получено')}</td>`, ['Что', 'Срок', 'Зачем', ''], 'Исходные данные, решения и ответы, которые ждём от заказчика. «Получено» убирает строку со страницы.')}</div>
+    <div class="sub"><h3>Нужно от заказчика</h3>${list('requests', (x, i) => `<td class="grow">${pdIn(`requests.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}
+        <div class="req-files">${(x.files || []).map((f, k) => `<span class="aq-file"><button class="linkbtn" type="button" data-act="att-open" data-fid="${esc(f.id)}" title="Открыть">${icon('file')}${esc(f.name)}</button><button class="linkbtn" type="button" data-act="req-unattach" data-i="${i}" data-k="${k}" aria-label="Убрать файл">✕</button></span>`).join('')}<button class="linkbtn" type="button" data-act="req-attach" data-i="${i}">+ файл для согласования</button></div></td><td>${pdDate(`requests.${i}.due`, x.due)}</td><td class="grow">${pdIn(`requests.${i}.why`, x.why, 'placeholder="Зачем: без них экспертиза не примет ИОС1" maxlength="200"')}</td><td>${pdChk(`requests.${i}.done`, x.done, ' получено')}</td>`, ['Что', 'Срок', 'Зачем', ''], 'Исходные данные, решения и ответы, которые ждём от заказчика. «Получено» убирает строку со страницы.')}</div>
     <div class="sub"><h3>Исходные данные</h3><p class="hint">Что нужно для проектирования и в каком оно состоянии — вкладка «Исходные данные» у заказчика. «Запросить» ставит строку в «Нужно от вас»: заказчик отвечает прямо со страницы, ответ приходит сюда — его можно принять или вернуть с замечанием.</p>${list('ird', (x, i) => { const rq = irdRequest(x);
         return `<td>${pdSel(`ird.${i}.kind`, IRD_KINDS, x.kind || irdKindOf(x.title))}</td><td class="grow">${pdIn(`ird.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}</td><td>${pdIn(`ird.${i}.who`, x.who, 'placeholder="Заказчик" maxlength="60" list="ird-who"')}</td>
         <td>${pdSel(`ird.${i}.status`, IRD_STATUS, x.status)}</td><td>${pdDate(`ird.${i}.due`, x.due)}</td><td class="grow">${pdIn(`ird.${i}.note`, x.note, 'placeholder="Примечание для заказчика" maxlength="200"')}</td>
@@ -4194,6 +4206,8 @@ let cabCustomers = null; // customer accounts on the server, loaded when the «�
 let cabPw = null;        // { name, login, password } — shown once after creating or resetting
 let cabLoadErr = '';
 const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи' };
+// The customer's verdict on files sent for approval.
+const decisionChip = m => (m?.decision === 'approve' ? ' <span class="chip tone-ok">Согласовано</span>' : m?.decision === 'remarks' ? ' <span class="chip tone-warn">Есть замечания</span>' : '');
 const cabTime = ts => { const d = new Date(ts); return Number.isNaN(+d) ? '' : `${fmtDate(ts.slice(0, 10))} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 function setCab(v) {
   const unreadBefore = cab?.messages?.filter(m => !m.read).length || 0, countBefore = cab?.messages?.length || 0;
@@ -4249,7 +4263,7 @@ function renderCabinetBox() {
     ${cabCustomers ? `<div class="row-in cab-add"><input id="cab-name" placeholder="Имя: Иванов Иван, ООО «Заказчик»" maxlength="120"><input id="cab-login" placeholder="Логин: ivanov" maxlength="80"><button class="btn sm" type="button" data-act="cab-add">Открыть доступ</button></div>
       ${others.length ? `<div class="row-in cab-add"><select id="cab-other"><option value="">— уже есть в кабинете —</option>${others.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.login)})</option>`).join('')}</select><button class="btn sm" type="button" data-act="cab-link">Добавить к проекту</button></div>` : ''}` : ''}
     ${msgs.length ? `<h4>Сообщения от заказчика</h4>${msgs.map(m => { const req = m.requestId && state.draft?.requests.find(r => r.id === m.requestId);
-      return `<div class="cab-msg${m.read ? ' read' : ''}${m.kind === 'urgent' ? ' urgent' : ''}"><div><b>${esc(CAB_KINDS[m.kind] || 'Сообщение')}${m.requestTitle ? `: ${esc(m.requestTitle)}` : ''}${m.meetingTitle ? `: ${esc(m.meetingTitle)}` : ''}${m.to ? ` → ${esc(m.to)}` : ''}</b> <span class="hint">${esc(m.customerName)} · ${cabTime(m.ts)}</span></div><div class="cab-text">${esc(m.text)}</div>
+      return `<div class="cab-msg${m.read ? ' read' : ''}${m.kind === 'urgent' ? ' urgent' : ''}"><div><b>${esc(CAB_KINDS[m.kind] || 'Сообщение')}${m.requestTitle ? `: ${esc(m.requestTitle)}` : ''}${m.meetingTitle ? `: ${esc(m.meetingTitle)}` : ''}${m.to ? ` → ${esc(m.to)}` : ''}</b>${decisionChip(m)} <span class="hint">${esc(m.customerName)} · ${cabTime(m.ts)}</span></div><div class="cab-text">${esc(m.text)}</div>
         <div>${m.read ? '' : `<button class="btn ghostbtn sm" type="button" data-act="cab-read" data-id="${esc(m.id)}">Прочитано</button>`}${req && !req.done ? (req.irdId ? `<button class="btn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Принять</button><button class="btn ghostbtn sm" type="button" data-act="cab-remark" data-id="${esc(m.id)}">Вернуть с замечанием</button>` : `<button class="btn ghostbtn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Отметить запрос «получено»</button>`) : ''}</div></div>`; }).join('')}` : ''}
   </div>`;
 }
@@ -5540,6 +5554,9 @@ document.addEventListener('click', e => {
     case 'cab-pw-copy': if (cabPw) copyText(`Кабинет заказчика: ${cab.publicUrl || cab.url}\nЛогин: ${cabPw.login}\nПароль: ${cabPw.password}`).then(ok => toast(ok ? 'Скопировано — вставьте в письмо или мессенджер' : 'Не удалось скопировать', !ok)); break;
     case 'cab-read': api.cabinetRead([id]); break;
     case 'cab-got': cabMarkGot(id); break;
+    case 'req-attach': { const x = state.draft?.requests?.[Number(el.dataset.i)], pid = state.drawer?.id; if (x && pid) api.attachAdd(pid).then(r => { if (r?.ok) { x.files = [...(x.files || []), r.file]; renderCustomer(); toast('Файл приложен — сохраните проект, и заказчик увидит его в кабинете.'); } else if (r && !r.canceled) toast(r.message, true); }); break; }
+    case 'req-unattach': { const x = state.draft?.requests?.[Number(el.dataset.i)]; if (x) { x.files = (x.files || []).filter((_, k) => k !== Number(el.dataset.k)); renderCustomer(); } break; }
+    case 'att-open': { const pid = state.drawer?.id; if (pid) api.attachOpen(pid, el.dataset.fid).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть', true); }); break; }
     case 'cab-read-all': api.cabinetRead(cab.messages.filter(m => !m.read).map(m => m.id)); break;
     case 'cab-open-msg': { const m = cab.messages.find(x => x.id === id); if (m) { api.cabinetRead([id]); if (state.projects.has(m.projectId)) openProject(m.projectId, 'cust'); } break; }
     case 'open-project-cust': openProject(id, 'cust'); break;

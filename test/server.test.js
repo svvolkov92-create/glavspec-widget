@@ -168,3 +168,36 @@ test('3.7 customer page: blocks, questions to the team, meeting reschedule and c
     assert.equal((await t.web('GET', '/p/p1/meeting/none.ics')).status, 404);
   } finally { await t.stop(); }
 });
+
+test('4.0: files for approval — upload, customer downloads, «Согласовано» / remarks, delete with the project', async () => {
+  const t = await start();
+  try {
+    const withFiles = pageModel({ project: { ...project, requests: [{ id: 'r2', title: 'Согласовать планировку', due: '2026-12-07', files: [{ id: 'f1', name: 'Планировка этажа.pdf', size: 5 }] }] }, tasks, contact: { name: 'ГИП' }, today: '2026-11-05' });
+    assert.deepEqual(withFiles.project.requests[0].files, [{ id: 'f1', name: 'Планировка этажа.pdf', size: 5 }]);
+    assert.equal((await t.api('PUT', '/projects/p1', { model: withFiles })).ok, true);
+    const up = await t.api('PUT', '/projects/p1/files/f1', { name: 'Планировка этажа.pdf', type: 'application/pdf', data: Buffer.from('%PDF-').toString('base64') });
+    assert.equal(up.ok, true);
+    assert.equal((await t.api('PUT', '/projects/p1/files/..%2Fx', { name: 'x', data: 'AA==' })).status, 400, 'file ids are plain');
+    const c = await t.api('POST', '/customers', { name: 'Иван', login: 'ivan', projectIds: ['p1'] });
+    await t.web('POST', '/login', { login: 'ivan', password: c.password });
+    const page = await t.web('GET', '/p/p1');
+    assert.match(page.text, /href="\/p\/p1\/f\/f1" download>Планировка этажа\.pdf</);
+    assert.match(page.text, /name="decision" value="approve"/);
+    const file = await t.web('GET', '/p/p1/f/f1');
+    assert.equal(file.status, 200);
+    assert.equal(file.text, '%PDF-');
+    assert.match(file.headers.get('content-disposition'), /filename\*=UTF-8''%D0%9F/);
+    assert.equal((await t.web('GET', '/p/p1/f/nope')).status, 404);
+    const csrf = csrfOf(page.text);
+    const ok = await t.web('POST', '/c/answer', { csrf, project: 'p1', request: 'r2', decision: 'approve' });
+    assert.equal(ok.status, 303);
+    const inbox = await t.api('GET', '/inbox?after=0');
+    const m = inbox.messages.at(-1);
+    assert.equal(m.decision, 'approve');
+    assert.equal(m.text, 'Согласовано');
+    // Without a text remarks are refused.
+    assert.match((await t.web('POST', '/c/answer', { csrf, project: 'p1', request: 'r2', decision: 'remarks' })).location, /ok=empty/);
+    assert.equal((await t.api('DELETE', '/projects/p1')).ok, true);
+    assert.equal(fs.existsSync(path.join(t.dir, 'files', 'p1')), false, 'files go with the project');
+  } finally { await t.stop(); }
+});
