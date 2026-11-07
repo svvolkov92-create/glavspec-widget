@@ -9,6 +9,7 @@ const A = window.Access;
 
 // Tab icons: 16×16 strokes in currentColor.
 const ICON = {
+  pin: '<path d="M6 2h4l-.6 4 2.4 2.2v1.2H4.2V8.2L6.6 6z" stroke-linejoin="round"/><path d="M8 9.4V14" stroke-linecap="round"/>',
   chat: '<path d="M2 3.2h12v7.6H7.2L4.4 13.2v-2.4H2z" stroke-linejoin="round"/><path d="M4.8 6.2h6.4M4.8 8.2h4" stroke-linecap="round"/>',
   overview: '<rect x="2" y="2" width="5" height="6" rx="1"/><rect x="9" y="2" width="5" height="3.5" rx="1"/><rect x="2" y="10" width="5" height="4" rx="1"/><rect x="9" y="7.5" width="5" height="6.5" rx="1"/>',
   projects: '<path d="M1.8 4.2v8.6h12.4V5.6H7.6L6.2 3.6H2.4z" stroke-linejoin="round"/>',
@@ -1146,8 +1147,52 @@ const msgMentions = c => msgUnread(c).filter(m => (m.mentions || []).includes(st
 const lastTs = c => (c.messages || []).at(-1)?.ts || '';
 function msgTotals() {
   let n = 0, at = 0;
-  for (const c of chatsAll()) { n += msgUnread(c).length; at += msgMentions(c).length; }
+  for (const th of msgThreads()) { n += th.unread; at += th.at; }
   return { n, at };
+}
+/* Messenger threads. One list for everything that is written to the user: chats (project, personal, group),
+   card discussions and messages from customers. Key: a chat id, «t:<task id>» or «c:<project id>». */
+const MSG_SECTIONS = [['all', 'Все'], ['cust', 'От заказчиков'], ['proj', 'Проекты'], ['task', 'Задачи'], ['other', 'Прочие'], ['at', '@']];
+const taskUnreadN = t => { if (!unread(t)) return 0; const me = state.me?.id, seen = t.seen?.[me] || ''; return Math.max(1, (t.comments || []).filter(c => c.userId !== me && c.ts > seen).length); };
+const custMsgs = pid => (cab?.allowed ? cab.messages.filter(m => m.projectId === pid) : []);
+function msgThread(key) {
+  if (!key || key === 'new') return null;
+  if (key.startsWith('t:')) { const t = state.tasks.get(key.slice(2)); return t ? { key, type: 'task', t } : null; }
+  if (key.startsWith('c:')) { const pid = key.slice(2), list = custMsgs(pid); return list.length ? { key, type: 'cust', pid, list } : null; }
+  const c = chatById(key); return c ? { key, type: 'chat', c } : null;
+}
+function msgThreads() {
+  const me = state.me?.id, out = [];
+  for (const c of chatsAll()) {
+    const last = (c.messages || []).at(-1);
+    out.push({ key: c.id, sec: c.kind === 'project' ? 'proj' : 'other', title: chatTitle(c), icon: chatIcon(c), last: last?.ts || '', unread: msgUnread(c).length, at: msgMentions(c).length,
+      prev: last ? `${last.userId === me ? 'Вы' : esc(surnameOf(last.user))}: ${esc(last.text.slice(0, 80))}` : `<span class="hint">${c.kind === 'project' ? 'чат проекта · сообщений нет' : 'сообщений нет'}</span>` });
+  }
+  for (const t of state.tasks.values()) {
+    const last = (t.comments || []).at(-1);
+    if (!last) continue;
+    out.push({ key: 't:' + t.id, sec: 'task', title: `${marksText(t) || t.title || 'Карточка'} · ${projectOf(t)?.name || ''}`, icon: '<span class="mc-ic task">✎</span>', last: last.ts, unread: taskUnreadN(t), at: 0,
+      prev: `${last.userId === me ? 'Вы' : esc(surnameOf(last.user))}: ${esc(String(last.text).slice(0, 80))}` });
+  }
+  if (cab?.allowed) {
+    const byProject = new Map();
+    for (const m of cab.messages) { if (!byProject.has(m.projectId)) byProject.set(m.projectId, []); byProject.get(m.projectId).push(m); }
+    for (const [pid, list] of byProject) {
+      const last = list.reduce((a, b) => (b.ts > a.ts ? b : a));
+      const urgent = list.some(m => !m.read && m.kind === 'urgent');
+      out.push({ key: 'c:' + pid, sec: 'cust', title: state.projects.get(pid)?.name || last.projectName || 'Проект', icon: `<span class="mc-ic cust${urgent ? ' urgent' : ''}">З</span>`, last: last.ts,
+        unread: list.filter(m => !m.read).length, at: 0, urgent, prev: `${esc(last.customerName || 'Заказчик')}: ${esc(CAB_KINDS[last.kind] || '')}${last.text ? ' — ' + esc(last.text.slice(0, 60)) : ''}` });
+    }
+  }
+  return out;
+}
+// Pinned threads: per user on this computer, shown first in every section.
+const msgPins = () => new Set(loadLocal('msgPins:' + (state.me?.id || ''), []));
+function msgTogglePin(key) {
+  const pins = msgPins();
+  if (pins.has(key)) pins.delete(key); else pins.add(key);
+  saveLocal('msgPins:' + (state.me?.id || ''), [...pins]);
+  renderMsg();
 }
 const timeOf = ts => (ts.slice(0, 10) === state.today ? ts.slice(11, 16) : fmtDate(ts.slice(0, 10)).slice(0, 5));
 // Local time of an ISO stamp (messages are stored in UTC).
@@ -1160,19 +1205,24 @@ function msgText(t, c) {
     return hit ? `<b class="mention${lw === meSur || lw === 'все' ? ' me' : ''}">${all}</b>` : all; });
 }
 function msgListHtml() {
-  const all = chatsAll().sort((a, b) => lastTs(b).localeCompare(lastTs(a)) || chatTitle(a).localeCompare(chatTitle(b), 'ru'));
-  const t = msgTotals();
-  const tabs = `<div class="seg mc-tabs"><button class="btn sm${msg.filter === 'all' ? ' on' : ''}" type="button" data-act="msg-filter" data-v="all">Все${t.n ? ' · ' + t.n : ''}</button><button class="btn sm${msg.filter === 'at' ? ' on' : ''}" type="button" data-act="msg-filter" data-v="at">@ Упоминания${t.at ? ' · ' + t.at : ''}</button></div>`;
+  const all = msgThreads(), pins = msgPins();
+  const sections = MSG_SECTIONS.filter(([k]) => k !== 'cust' || all.some(t => t.sec === 'cust'));
+  if (!sections.some(([k]) => k === msg.filter)) msg.filter = 'all';
+  const count = k => (k === 'at' ? all.reduce((a, t) => a + t.at, 0) : all.filter(t => k === 'all' || t.sec === k).reduce((a, t) => a + t.unread, 0));
+  const tabs = `<div class="mc-tabs" role="tablist">${sections.map(([k, l]) => { const n = count(k); return `<button class="mc-tab${msg.filter === k ? ' on' : ''}" type="button" role="tab" aria-selected="${msg.filter === k}" data-act="msg-filter" data-v="${k}">${l}${n ? `<i>${n}</i>` : ''}</button>`; }).join('')}</div>`;
   if (msg.filter === 'at') {
     const hits = chatsAll().flatMap(c => (c.messages || []).filter(m => (m.mentions || []).includes(state.me?.id)).map(m => ({ c, m }))).sort((a, b) => b.m.ts.localeCompare(a.m.ts)).slice(0, 60);
-    return tabs + `<div class="mc-list">${hits.map(({ c, m }) => `<button class="mc-item${m.ts > (c.seen?.[state.me.id] || '') ? ' unread' : ''}" type="button" data-act="msg-chat" data-id="${esc(c.id)}">${chatIcon(c)}<span class="mc-body"><span class="mc-top"><b>${esc(chatTitle(c))}</b><span class="hint">${timeOf(localTs(m.ts))}</span></span><span class="mc-prev"><b>${esc(surnameOf(m.user))}:</b> ${msgText(m.text.slice(0, 140), c)}</span></span></button>`).join('') || '<p class="hint mc-empty">Вас пока никто не упоминал. Упоминание — «@» и фамилия в сообщении.</p>'}</div>`;
+    return tabs + `<div class="mc-list">${hits.map(({ c, m }) => `<button class="mc-item${m.ts > (c.seen?.[state.me.id] || '') ? ' unread' : ''}" type="button" data-act="msg-chat" data-id="${esc(c.id)}">${chatIcon(c)}<span class="mc-body"><span class="mc-top"><b>${esc(chatTitle(c))}</b><span class="hint">${timeOf(localTs(m.ts))}</span></span><span class="mc-prev">${esc(surnameOf(m.user))}: ${msgText(m.text.slice(0, 120), c)}</span></span></button>`).join('') || '<p class="hint mc-empty">Вас пока не упоминали.</p>'}</div>`;
   }
-  const item = c => { const u = msgUnread(c).length, at = msgMentions(c).length, last = (c.messages || []).at(-1);
-    return `<button class="mc-item${u ? ' unread' : ''}${msg.chatId === c.id ? ' sel' : ''}" type="button" data-act="msg-chat" data-id="${esc(c.id)}">${chatIcon(c)}<span class="mc-body"><span class="mc-top"><b>${esc(chatTitle(c))}</b><span class="hint">${last ? timeOf(localTs(last.ts)) : ''}</span></span>
-      <span class="mc-prev">${last ? `${last.userId === state.me?.id ? 'Вы' : esc(surnameOf(last.user))}: ${esc(last.text.slice(0, 80))}` : `<span class="hint">${c.kind === 'project' ? 'чат проекта · сообщений нет' : 'сообщений нет'}</span>`}</span></span>
-      ${at ? '<i class="mc-at">@</i>' : ''}${u ? `<i class="mc-n">${u}</i>` : ''}</button>`; };
-  const withMsg = all.filter(c => (c.messages || []).length), empty = all.filter(c => !(c.messages || []).length);
-  return tabs + `<div class="mc-list">${withMsg.map(item).join('')}${empty.length ? `<div class="mc-sep">Без сообщений</div>${empty.map(item).join('')}` : ''}${all.length ? '' : '<p class="hint mc-empty">Чатов пока нет.</p>'}</div>`;
+  const list = all.filter(t => msg.filter === 'all' || t.sec === msg.filter)
+    .sort((a, b) => (b.urgent && b.unread ? 1 : 0) - (a.urgent && a.unread ? 1 : 0) || b.last.localeCompare(a.last) || a.title.localeCompare(b.title, 'ru'));
+  const item = t => `<div class="mc-row"><button class="mc-item${t.unread ? ' unread' : ''}${msg.chatId === t.key ? ' sel' : ''}" type="button" data-act="msg-chat" data-id="${esc(t.key)}">${t.icon}<span class="mc-body"><span class="mc-top"><b>${esc(t.title)}</b><span class="hint">${t.last ? timeOf(localTs(t.last)) : ''}</span></span>
+      <span class="mc-prev">${t.prev}</span></span>${t.at ? '<i class="mc-at">@</i>' : ''}${t.unread ? `<i class="mc-n${t.urgent ? ' urgent' : ''}">${t.unread}</i>` : ''}</button>
+    <button class="mc-pin${pins.has(t.key) ? ' on' : ''}" type="button" data-act="msg-pin" data-id="${esc(t.key)}" aria-pressed="${pins.has(t.key)}" title="${pins.has(t.key) ? 'Открепить' : 'Закрепить сверху'}">${icon('pin')}</button></div>`;
+  const pinned = list.filter(t => pins.has(t.key)), rest = list.filter(t => !pins.has(t.key));
+  const withMsg = rest.filter(t => t.last), empty = rest.filter(t => !t.last);
+  const emptyText = { all: 'Сообщений пока нет.', cust: 'От заказчиков сообщений нет.', proj: 'Чатов проектов нет.', task: 'Обсуждений в карточках пока нет. Они появляются, когда в карточке пишут во вкладке «Обсуждение».', other: 'Личных и групповых чатов нет. «+ Новый чат» — создать.' }[msg.filter];
+  return tabs + `<div class="mc-list">${pinned.length ? `<div class="mc-sep">Закреплённые</div>${pinned.map(item).join('')}${withMsg.length || empty.length ? '<div class="mc-sep">Остальные</div>' : ''}` : ''}${withMsg.map(item).join('')}${empty.length ? `<div class="mc-sep">Без сообщений</div>${empty.map(item).join('')}` : ''}${list.length ? '' : `<p class="hint mc-empty">${emptyText}</p>`}</div>`;
 }
 function msgChatHtml(c) {
   const me = state.me?.id, seen = msg.mark?.id === c.id ? msg.mark.since : (c.seen?.[me] || '');
@@ -1193,10 +1243,40 @@ function msgChatHtml(c) {
       ${canEdit ? `<div class="row-in"><select id="mc-add"><option value="">— добавить участника —</option>${liveUsers().filter(u => !people.includes(u)).sort(byName).map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select><button class="btn sm" type="button" data-act="msg-add-member">Добавить</button></div>` : ''}
       ${c.kind === 'group' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-leave">Выйти из чата</button>' : ''}${c.kind === 'project' ? `<button class="btn ghostbtn sm" type="button" data-act="project-page" data-id="${esc(c.projectId)}">Открыть проект</button><span class="hint">Участники проекта меняются на его странице.</span>` : ''}</div>` : '';
   return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку чатов">←</button>' : ''}${chatIcon(c)}<span class="mc-ht"><b>${esc(chatTitle(c))}</b><span class="hint">${sub}</span></span>
-      <button class="btn ghostbtn sm" type="button" data-act="msg-info" aria-pressed="${msg.info}">Участники</button></div>${info}
+      ${msgPinBtn(c.id)}<button class="btn ghostbtn sm" type="button" data-act="msg-info" aria-pressed="${msg.info}">Участники</button></div>${info}
     <div class="mc-msgs" id="mc-msgs">${rows || `<p class="hint mc-empty">Напишите первое сообщение. «@» и фамилия — упомянуть коллегу${c.kind !== 'direct' ? ', «@все» — всех' : ''}.</p>`}</div>
     <div class="mc-compose"><div class="mc-ac" id="mc-ac" hidden></div><textarea id="msg-text" rows="2" maxlength="2000" placeholder="Сообщение… Enter — отправить, Shift+Enter — новая строка, @ — упомянуть">${esc(msg.drafts[c.id] || '')}</textarea><button class="btn primary sm" type="button" data-act="mc-send">Отправить</button></div></div>`;
 }
+// A card discussion inside the messenger: the same messages as the card's «Обсуждение».
+function msgTaskHtml(t) {
+  const me = state.me?.id, list = t.comments || [];
+  let day = '';
+  const rows = list.map(c => {
+    const lt = localTs(c.ts), d = lt.slice(0, 10), sep = d !== day ? `<div class="mc-day">${d === state.today ? 'Сегодня' : fmtDate(d)}</div>` : '';
+    day = d;
+    const out = c.userId === me, editing = out && msg.edit?.mid === c.id;
+    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${c.kind === 'submit' ? ' submit' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(c.user || '—')}</b> <span class="hint">${lt.slice(11, 16)}${c.editedAt ? ' · изменено' : ''}</span>${c.kind === 'submit' ? ' <span class="chip tone-review">сдал на проверку</span>' : ''}${out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
+      ? `<div class="msg-edit"><textarea id="mc-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(msg.edit.text)}</textarea><div class="row-in"><button class="btn primary sm" type="button" data-act="mc-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="mc-edit-cancel">Отмена</button></div></div>`
+      : `<div class="chat-text">${esc(c.text)}</div>`}${thankBtn(t, c)}</div>`;
+  }).join('');
+  return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку">←</button>' : ''}<span class="mc-ic task">✎</span><span class="mc-ht"><b>${esc(marksText(t) || t.title || 'Карточка')}</b><span class="hint">обсуждение карточки · ${esc(projectOf(t)?.name || '')}</span></span>
+      ${msgPinBtn('t:' + t.id)}<button class="btn ghostbtn sm" type="button" data-act="open-task" data-id="${esc(t.id)}">Открыть карточку</button></div>
+    <div class="mc-msgs" id="mc-msgs">${rows || '<p class="hint mc-empty">Сообщений нет.</p>'}</div>
+    <div class="mc-compose"><textarea id="msg-text" rows="2" maxlength="2000" placeholder="Сообщение в обсуждение карточки… Enter — отправить, Shift+Enter — новая строка">${esc(msg.drafts['t:' + t.id] || '')}</textarea><button class="btn primary sm" type="button" data-act="mc-send">Отправить</button></div></div>`;
+}
+// Messages from a project's customer (cabinet): read here, answered by the actions in the project.
+function msgCustHtml(pid, list) {
+  const sorted = [...list].sort((a, b) => a.ts.localeCompare(b.ts));
+  const rows = sorted.map(m => `<div class="chat-msg in cust${m.kind === 'urgent' ? ' urgent' : ''}${m.read ? '' : ' fresh'}"><div class="chat-meta"><b>${esc(m.customerName || 'Заказчик')}</b> <span class="hint">${fmtDate(localTs(m.ts).slice(0, 10))} ${localTs(m.ts).slice(11, 16)}</span>
+      <span class="chip ${m.kind === 'urgent' ? 'tone-bad' : 'tone-idle'}">${esc(CAB_KINDS[m.kind] || 'Сообщение')}</span></div>
+    ${m.requestTitle || m.meetingTitle || m.to ? `<div class="hint">${esc(m.requestTitle || m.meetingTitle || '')}${m.to ? ` → ${esc(m.to)}` : ''}</div>` : ''}<div class="chat-text">${esc(m.text || '')}</div></div>`).join('');
+  const name = state.projects.get(pid)?.name || sorted.at(-1)?.projectName || 'Проект';
+  return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку">←</button>' : ''}<span class="mc-ic cust">З</span><span class="mc-ht"><b>${esc(name)}</b><span class="hint">от заказчика · через кабинет</span></span>
+      ${msgPinBtn('c:' + pid)}${state.projects.has(pid) ? `<button class="btn ghostbtn sm" type="button" data-act="msg-cust-project" data-id="${esc(pid)}" title="Открыть проект: принять исходные данные, ответить, перенести встречу">В проект</button>` : ''}</div>
+    <div class="mc-msgs" id="mc-msgs">${rows}</div>
+    <p class="hint mc-note">Заказчик пишет из кабинета, ответ ему — действиями в проекте: принять исходные данные, перенести встречу, перезвонить.</p></div>`;
+}
+const msgPinBtn = key => { const on = msgPins().has(key); return `<button class="btn ghostbtn sm mc-pinbtn${on ? ' on' : ''}" type="button" data-act="msg-pin" data-id="${esc(key)}" aria-pressed="${on}" title="${on ? 'Открепить' : 'Закрепить сверху списка'}">${icon('pin')}</button>`; };
 function msgNewHtml() {
   const others = liveUsers().filter(u => u.id !== state.me?.id).sort(byName);
   return `<div class="mc-chat mc-new"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back">←</button>' : ''}<span class="mc-ht"><b>Новый чат</b><span class="hint">личный — с одним человеком, группа — без привязки к проекту</span></span></div>
@@ -1213,13 +1293,13 @@ function renderMsg() {
   const focus = document.activeElement?.id === 'msg-text', caret = focus ? document.activeElement.selectionStart : 0;
   const editFocus = document.activeElement?.id === 'mc-edit';
   if (msg.edit && document.getElementById('mc-edit')) msg.edit.text = document.getElementById('mc-edit').value; // keep the edit through a re-render
-  const t = msgTotals(), c = msg.chatId && msg.chatId !== 'new' ? chatById(msg.chatId) : null;
-  if (msg.chatId && msg.chatId !== 'new' && !c) msg.chatId = '';
+  const t = msgTotals(), th = msgThread(msg.chatId), c = th?.type === 'chat' ? th.c : null;
+  if (msg.chatId && msg.chatId !== 'new' && !th) msg.chatId = '';
   const pill = `<button class="msg-fab${t.n ? ' has' : ''}" type="button" data-act="msg-open" title="Сообщения: чаты проектов, личные и групповые">${icon('chat')}<span>Сообщения</span>${t.n ? `<i class="mc-n">${t.n}</i>` : ''}${t.at ? `<i class="mc-at" title="Вас упомянули">@${t.at}</i>` : ''}</button>`;
   if (msg.mode === 'pill') { root.innerHTML = pill; return; }
   const head = `<div class="mp-head"><b>Сообщения</b><span class="spacer"></span><button class="btn sm" type="button" data-act="msg-new">+ Новый чат</button>
     <button class="btn ghostbtn sm" type="button" data-act="msg-size" title="${msg.mode === 'full' ? 'Свернуть в боковую панель' : 'Открыть окно со всеми чатами'}">${msg.mode === 'full' ? '⇲' : '⤢'}</button><button class="btn ghostbtn sm" type="button" data-act="msg-close" aria-label="Свернуть">✕</button></div>`;
-  const right = msg.chatId === 'new' ? msgNewHtml() : c ? msgChatHtml(c) : '<div class="mc-chat"><p class="hint mc-empty">Выберите чат слева или создайте новый.</p></div>';
+  const right = msg.chatId === 'new' ? msgNewHtml() : c ? msgChatHtml(c) : th?.type === 'task' ? msgTaskHtml(th.t) : th?.type === 'cust' ? msgCustHtml(th.pid, th.list) : '<div class="mc-chat"><p class="hint mc-empty">Выберите разговор слева или создайте новый чат.</p></div>';
   const body = msg.mode === 'full' ? `<div class="mp-full"><div class="mp-left">${msgListHtml()}</div><div class="mp-right">${right}</div></div>` : (msg.chatId ? right : msgListHtml());
   root.innerHTML = `${msg.mode === 'full' ? '<div class="mp-back" data-act="msg-close"></div>' : ''}<section class="msg-panel ${msg.mode}" role="dialog" aria-label="Сообщения">${head}${body}</section>`;
   const box = document.getElementById('mc-msgs');
@@ -1227,6 +1307,8 @@ function renderMsg() {
   if (focus) { const ta = document.getElementById('msg-text'); if (ta) { ta.focus(); try { ta.setSelectionRange(caret, caret); } catch { /* fine */ } } }
   if (editFocus) { const ta = document.getElementById('mc-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
   if (c) msgSeenLater(c);
+  if (th?.type === 'task' && unread(th.t)) api.taskSeen(th.t.id);
+  if (th?.type === 'cust') { const ids = th.list.filter(m => !m.read).map(m => m.id); if (ids.length) api.cabinetRead?.(ids); }
 }
 function msgSeenLater(c) {
   if (msg.mark?.id !== c.id) msg.mark = { id: c.id, since: c.seen?.[state.me?.id] || '' };
@@ -1241,6 +1323,7 @@ function msgOpen(chatId = msg.chatId) {
   setTimeout(() => document.getElementById('msg-text')?.focus(), 30);
 }
 async function msgSend() {
+  if (msg.chatId.startsWith('t:')) return msgTaskSend();
   const c = chatById(msg.chatId), ta = document.getElementById('msg-text');
   if (!c || !ta) return;
   const text = ta.value.trim();
@@ -1255,20 +1338,34 @@ async function msgSend() {
   }
   await refresh();
 }
+async function msgTaskSend() {
+  const key = msg.chatId, id = key.slice(2), ta = document.getElementById('msg-text');
+  if (!ta) return;
+  const text = ta.value.trim();
+  if (!text) return ta.focus();
+  msg.drafts[key] = ''; ta.value = '';
+  const r = await api.addComment(id, text);
+  if (!r?.ok) {
+    if (!msg.drafts[key]) { msg.drafts[key] = text; const cur = document.getElementById('msg-text'); if (cur && !cur.value) cur.value = text; }
+    return toast(r?.message || 'Не отправлено', true);
+  }
+  await refresh();
+}
+const threadMessages = () => { const th = msgThread(msg.chatId); return th?.type === 'chat' ? th.c.messages || [] : th?.type === 'task' ? th.t.comments || [] : []; };
 // Editing one's own message: inline, Enter saves, Esc cancels; mentions are re-read from the new text.
 function mcEditStart(mid) {
-  const c = chatById(msg.chatId), m = (c?.messages || []).find(x => x.id === mid);
+  const m = threadMessages().find(x => x.id === mid);
   if (!m || m.userId !== state.me?.id) return;
   msg.edit = { mid, text: m.text };
   renderMsg();
   const ta = document.getElementById('mc-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
 }
 async function mcEditSave() {
-  const c = chatById(msg.chatId), ta = document.getElementById('mc-edit');
-  if (!c || !msg.edit || !ta) return;
+  const th = msgThread(msg.chatId), ta = document.getElementById('mc-edit');
+  if (!th || !msg.edit || !ta) return;
   const text = ta.value.trim();
   if (!text) return toast('Сообщение не может быть пустым.', true);
-  const r = await api.chatEdit(c.id, msg.edit.mid, text);
+  const r = th.type === 'task' ? await api.editComment(th.t.id, msg.edit.mid, text) : await api.chatEdit(th.c.id, msg.edit.mid, text);
   if (!r?.ok) return toast(r?.message || 'Не удалось сохранить.', true);
   msg.edit = null;
   await refresh();
@@ -5439,6 +5536,8 @@ document.addEventListener('click', e => {
     case 'msg-chat': msgOpen(id); break;
     case 'msg-back': msg.chatId = ''; renderMsg(); break;
     case 'msg-filter': msg.filter = el.dataset.v; renderMsg(); break;
+    case 'msg-pin': msgTogglePin(id); break;
+    case 'msg-cust-project': msg.mode = 'pill'; renderMsg(); openProject(id, 'cust'); break;
     case 'mc-send': msgSend(); break;
     case 'mc-edit': mcEditStart(id); break;
     case 'mc-edit-save': mcEditSave(); break;
