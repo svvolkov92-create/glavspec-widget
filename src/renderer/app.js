@@ -2675,7 +2675,7 @@ function renderNow() {
   renderMsg(); msgNotify();
   if (active === 'f-q') { const el = $('#f-q'); el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* not a text input any more */ } }
   if (state.tab === 'gantt') drawGanttLinks();
-  if (state.drawer?.kind === 'task' && state.drawer.id) { renderPayments(); renderPlanPreview(); renderTalk(); }
+  if (state.drawer?.kind === 'task' && state.drawer.id) { renderPayments(); renderPlanPreview(); renderTalk(); if (state.drawer.tab === 'log') loadTaskLog(state.drawer.id); }
 }
 
 /* ---------- drawer shell ---------- */
@@ -3269,7 +3269,7 @@ function taskMainPanel(t, isNew) {
         <div class="ready-in"><input type="range" id="t-ready-r" min="${L.READY_MIN}" max="${L.READY_MAX}" step="5" value="${L.readinessManual(t.status) ? L.readiness(t) : L.READY_MIN}" data-transient aria-label="Готовность, ползунок">
           <input id="t-ready" name="readiness" type="number" min="${L.READY_MIN}" max="${L.READY_MAX}" step="1" value="${L.readinessManual(t.status) ? L.readiness(t) : ''}"></div>
         <span class="hint" id="ready-hint"></span></div>
-      <div class="f"><label for="t-budget">Бюджет, ₽</label><input id="t-budget" name="budget" inputmode="decimal" value="${t.budget ? esc(String(t.budget).replace('.', ',')) : ''}" placeholder="150 000"></div>
+      ${canMoney() ? `<div class="f"><label for="t-budget">Бюджет, ₽</label><input id="t-budget" name="budget" inputmode="decimal" value="${t.budget ? esc(String(t.budget).replace('.', ',')) : ''}" placeholder="150 000"></div>` : ''}
       <details class="f wide more"${t.title || t.note || t.folder ? ' open' : ''}><summary>Дополнительно: уточнение, папка раздела, примечание</summary><div class="fgrid">
         <div class="f wide"><label for="t-title">Уточнение</label><input id="t-title" name="title" value="${esc(t.title || '')}" placeholder="Корпус 2, стадия Р" maxlength="120"></div>
         <div class="f wide"><label for="t-folder">Папка раздела</label>
@@ -3573,7 +3573,7 @@ function openTask(id, preset = {}, tab = 'main') {
   const navAt = id ? (state.navIds || []).indexOf(id) : -1;
   const navHtml = navAt >= 0 && state.navIds.length > 1 ? `<span class="d-nav"><button class="icon" type="button" data-act="task-step" data-dir="-1"${navAt ? '' : ' disabled'} title="Предыдущая карточка списка (Alt+↑)">‹</button><span class="hint num">${navAt + 1}/${state.navIds.length}</span><button class="icon" type="button" data-act="task-step" data-dir="1"${navAt < state.navIds.length - 1 ? '' : ' disabled'} title="Следующая карточка (Alt+↓)">›</button></span>` : '';
   state.draft = { milestones: clone(t.milestones || []), plan: clone(t.plan || []), dependsOn: [...L.depsOf(t)], revisions: clone(t.revisions || []) };
-  const tabsDef = [['main', 'Основное'], ['time', 'Сроки и проверка'], ...(canMoney() ? [['money', 'Оплата и документы']] : []), ...(isNew ? [] : [['talk', 'Обсуждение']])];
+  const tabsDef = [['main', 'Основное'], ['time', 'Сроки и проверка'], ...(canMoney() ? [['money', 'Оплата и документы']] : []), ...(isNew ? [] : [['talk', 'Обсуждение'], ['log', 'Журнал']])];
   const sh = isNew ? null : L.shiftsOf(t);
   const badge = k => {
     if (isNew) return '';
@@ -3592,7 +3592,8 @@ function openTask(id, preset = {}, tab = 'main') {
       <div class="dpanel" data-panel="time" ${tab === 'time' ? '' : 'hidden'}>${taskTimePanel(t, isNew)}</div>
       ${canMoney() ? `<div class="dpanel" data-panel="money" ${tab === 'money' ? '' : 'hidden'}>${taskMoneyPanel(t, isNew)}</div>` : ''}
       ${isNew ? '' : `<div class="dpanel" data-panel="talk" data-transient ${tab === 'talk' ? '' : 'hidden'}><div id="talk-box"></div>
-        <details class="msg-details"${tab === 'msg' ? ' open' : ''}><summary>Написать подрядчику — готовые тексты для почты и мессенджеров</summary><div id="msg-box"></div></details></div>`}
+        <details class="msg-details"${tab === 'msg' ? ' open' : ''}><summary>Написать подрядчику — готовые тексты для почты и мессенджеров</summary><div id="msg-box"></div></details></div>
+      <div class="dpanel" data-panel="log" data-transient ${tab === 'log' ? '' : 'hidden'}><div id="tlog-box"><div class="hint">Загружаем…</div></div></div>`}
       <div class="err" id="form-err" hidden></div>`,
     footer: `<button class="btn primary" type="submit">${isNew ? 'Добавить' : 'Сохранить'}</button>
       <button class="btn" data-act="discard" type="button">Отмена</button>
@@ -3629,6 +3630,25 @@ function setDrawerTab(k) {
   if (state.drawer.kind === 'project') $('#dform')?.classList.toggle('full', k === 'comp');
   $$('.dtab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.id === k)));
   $$('.dpanel').forEach(p => { p.hidden = p.dataset.panel !== k; });
+  if (k === 'log' && state.drawer.kind === 'task') loadTaskLog(state.drawer.id);
+}
+
+// «Журнал» of one card: its entries from the action journal (who changed what and when), newest first.
+// The journal is already filtered for the user (money hidden from those without access).
+async function loadTaskLog(id) {
+  let list = [];
+  try { list = (await api.getJournal('')).filter(e => e.col === 'tasks' && e.id === id); } catch { /* shown as empty */ }
+  const box = $('#tlog-box');
+  if (!box || state.drawer?.id !== id) return;
+  const when = ts => { const d = new Date(ts); return d.toLocaleString('ru-RU', { day: 'numeric', month: 'short', ...(d.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }), hour: '2-digit', minute: '2-digit' }); };
+  box.innerHTML = list.length ? `<div class="tlog">${list.map(e => `<div class="jr-item">
+      <span class="num hint jr-time tlog-time">${when(e.ts)}</span>
+      <div class="jr-main">
+        <div class="jr-line"><span class="chip tone-${e.kind === 'trash' || e.kind === 'delete' ? 'bad' : e.kind === 'create' ? 'ok' : e.undo ? 'warn' : 'idle'}">${esc(e.undo ? 'отмена' : KIND_LABEL[e.kind] || e.kind)}</span>
+          ${e.action ? `<span>${esc(e.action)}</span>` : ''}${e.user ? `<span class="hint jr-user">· ${esc(e.user)}</span>` : ''}</div>
+        ${(e.changes || []).length ? `<ul class="jr-ch">${e.changes.map(c => `<li><span class="hint">${esc(c.label)}:</span> ${c.from !== undefined ? `${esc(c.from)} → ` : ''}<b>${esc(c.to ?? '')}</b></li>`).join('')}</ul>` : ''}
+      </div></div>`).join('')}</div>`
+    : '<div class="hint">По этой карточке изменений в журнале пока нет. В журнал попадают правки карточки: сроки, статусы, исполнители, поля, оплаты.</div>';
 }
 
 // Readiness field: editable (1…90) only while the card is in work or paused and only by the chief/GIP.
