@@ -95,9 +95,10 @@
     if (!view.projects.some(x => x.id === projectId)) return { ok: false, message: 'Выберите проект.' };
     const p = store.data.projects[projectId];
     const format = opts.format === 'pdf' ? 'pdf' : 'html', stamp = L.todayStr();
-    const target = await saveAs({ title: 'Сохранить страницу для заказчика', name: `Статус проекта — ${safeName(p.name)} ${stamp}.${format}`, ext: format,
+    // Where PDF is made by the browser's print dialog (Tauri), that dialog asks where to save it.
+    const target = format === 'pdf' && io.pdfViaBrowser ? null : await saveAs({ title: 'Сохранить страницу для заказчика', name: `Статус проекта — ${safeName(p.name)} ${stamp}.${format}`, ext: format,
       filter: format === 'pdf' ? { name: 'PDF', extensions: ['pdf'] } : { name: 'Веб-страница', extensions: ['html'] } });
-    if (!target) return { ok: false, canceled: true };
+    if (!target && !(format === 'pdf' && io.pdfViaBrowser)) return { ok: false, canceled: true };
     const montserrat = opts.font === 'montserrat';
     const text = bytes => (typeof bytes === 'string' ? bytes : Buffer.from(bytes).toString('utf8'));
     const html = R.customerHtml({
@@ -109,7 +110,7 @@
     try {
       if (format === 'html') { await io.writeFile(target, html); return saved(target); }
       const r = await io.pdf(html, target);
-      if (r?.viaBrowser) return { ok: true, viaBrowser: true, name: io.basename(target) };
+      if (r?.viaBrowser) return { ok: true, viaBrowser: true };
       return saved(target);
     } catch (e) { return writeError(e, 'страницу'); }
   }

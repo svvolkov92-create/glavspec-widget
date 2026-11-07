@@ -4342,6 +4342,7 @@ async function customerPage(format) {
     const res = await api.customerPage(id, { format, font: brandFont });
     if (res.canceled) return;
     if (!res.ok) return toast(res.message, true);
+    if (res.viaBrowser) return toast('Страница открылась в браузере — в окне печати выберите «Сохранить как PDF».');
     toast(`Сохранено: ${res.name}`, false, { label: 'Открыть', run: api.openLastReport });
   } catch (e) { toast('Не удалось сохранить страницу: ' + (e?.message || e), true); }
 }
