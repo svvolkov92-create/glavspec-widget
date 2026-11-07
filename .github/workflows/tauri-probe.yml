@@ -3,7 +3,7 @@ name: Tauri probe
 on:
   push:
     branches: [tauri-probe]
-    paths: ['src-tauri/**', 'src/renderer/**', '.github/workflows/tauri-probe.yml']
+    paths: ['src-tauri/**', 'src/renderer/**', 'src/core/**', '.github/workflows/tauri-probe.yml']
   workflow_dispatch:
 
 jobs:
@@ -22,6 +22,9 @@ jobs:
           workspaces: src-tauri
       - name: Prepare the interface (unchanged src/renderer + Tauri bridge)
         run: node src-tauri/ui/prepare-ui.js
+      - name: Rust tests (files layer, on Windows)
+        working-directory: src-tauri
+        run: cargo test
       - name: Build
         run: npx --yes @tauri-apps/cli@2 build
       - name: Sizes

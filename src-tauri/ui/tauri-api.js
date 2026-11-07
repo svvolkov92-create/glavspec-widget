@@ -1,37 +1,23 @@
 'use strict';
-// Probe bridge: gives the unchanged interface the same `window.api` the Electron preload gives,
-// on top of Tauri. Data is read-only here — every change is refused with a clear message.
+// Bridge: gives the unchanged interface the same `window.api` the Electron preload gives, on top of Tauri.
+// Data and settings go through the shared core (tauri-core.js → src/core/handlers.js → Rust files).
+// What is not moved yet (stage 3: chats, ИРД, reports, import, backups, cabinet) answers with a clear message.
 (function () {
   const T = window.__TAURI__;
-  const invoke = T.core.invoke;
   const win = T.window.getCurrentWindow();
   const LogicalSize = (T.dpi && T.dpi.LogicalSize) || T.window.LogicalSize;
-  const READ_ONLY = 'Проба Tauri: только просмотр — изменения не сохраняются.';
-  const refused = async () => ({ ok: false, message: READ_ONLY });
-  const COLLECTIONS = ['projects', 'contractors', 'tasks', 'users', 'chats'];
+  const LATER = 'В пробе Tauri этого пока нет — будет на следующем этапе переноса.';
+  const later = async () => ({ ok: false, message: LATER });
 
-  let loading = null;
-  const load = () => (loading ||= invoke('probe_load'));
-
-  // Same shape as Store.snapshot() + userView() in src/main.js.
-  function userView(data, settings) {
-    const snap = {};
-    for (const col of COLLECTIONS) snap[col] = Object.entries(data[col] || {}).map(([id, doc]) => ({ ...doc, id }));
-    const users = snap.users.filter(u => !u.deletedAt);
-    const me = users.find(u => u.id === settings.userId) || users.find(u => u.role === 'gip') || users[0] || null;
-    return { ...window.Access.viewFor(me, snap), me };
-  }
-
-  // Window settings changed in this session. Not written to settings.json (read-only probe), but kept
-  // in sessionStorage so they survive the page reload after a user switch.
-  const SESSION_KEY = 'glavspec.probe';
-  const local = (() => { try { return JSON.parse(sessionStorage.getItem(SESSION_KEY)) || {}; } catch { return {}; } })();
-  const remember = patch => { Object.assign(local, patch); try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(local)); } catch { /* optional */ } };
+  const dataListeners = [];
+  const emitData = () => { if (!ctx) return; const view = ctx.core.userView(); for (const cb of dataListeners) cb(view); };
+  let ctx = null, starting = null;
+  const ready = () => (starting ||= window.TauriCore.init({ onChanged: emitData }).then(c => { ctx = c; return c; }));
 
   // Same mapping as themeSource() in src/main.js: «Графит» is dark, «Тандем» is light.
   const schemeOf = t => (t === 'graphite' ? 'dark' : t === 'tandem' ? 'light' : t === 'light' || t === 'dark' ? t : 'system');
-  // Electron switches prefers-color-scheme for the page (nativeTheme.themeSource); the probe switches the
-  // stylesheet's dark rules itself, so a light theme stays light on a dark Windows and the other way round.
+  // Electron switches prefers-color-scheme for the page (nativeTheme.themeSource); here the stylesheet's
+  // dark rules are switched directly, so a light theme stays light on a dark Windows and the other way round.
   let darkRules = null;
   function applyScheme(theme) {
     const scheme = schemeOf(theme);
@@ -53,9 +39,12 @@
     catch { document.documentElement.style.zoom = String(z); zoomByWebview = false; } // older Tauri: CSS zoom
   }
   const applyLevel = level => win.setAlwaysOnTop(level === 'top').catch(e => console.error('always on top:', e));
+  // As in src/main.js: before 1.6 there was only «always on top» on/off; «on the desktop» is not in Tauri yet.
+  const levelOf = s => (s.get('windowLevel') === 'top' || s.get('windowLevel') === 'normal' ? s.get('windowLevel') : s.get('alwaysOnTop') === false ? 'normal' : 'top');
 
   // Click-through. Electron forwards mouse moves to an ignoring window, so the page sees the cursor over its
-  // «unlock» handle; Tauri does not, so the probe watches the cursor itself and lets the mouse in over the handle.
+  // «unlock» handle; Tauri does not, so the bridge watches the cursor itself and lets the mouse in over the handle.
+  // Deliberately not saved: the app must never start un-clickable.
   const ghost = { on: false, timer: null, passing: null };
   async function ghostTick() {
     if (!ghost.on) return;
@@ -64,7 +53,7 @@
     let over = false;
     if (r && r.width) {
       const [cur, pos, scale] = await Promise.all([T.window.cursorPosition(), win.outerPosition(), win.scaleFactor()]);
-      const k = scale * (zoomByWebview ? (local.zoom ?? 1) : 1), pad = 6 * scale;
+      const k = scale * (zoomByWebview && ctx ? clampZoom(ctx.settings.get('zoom')) : 1), pad = 6 * scale;
       const x = (cur.x - pos.x) / k, y = (cur.y - pos.y) / k;
       over = x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
     }
@@ -81,20 +70,21 @@
 
   const winListeners = [];
   async function windowState() {
-    const { settings: s } = await load();
-    const level = local.level || (s.windowLevel === 'top' || (!s.windowLevel && s.alwaysOnTop !== false) ? 'top' : 'normal');
+    const { settings: s } = await ready();
+    const level = levelOf(s);
     return {
       alwaysOnTop: level === 'top', level, desktopSupported: false,
-      theme: local.theme || s.theme || 'system', zoom: clampZoom(local.zoom ?? s.zoom ?? 1), compact: false,
-      maximized: await win.isMaximized(), opacity: local.opacity ?? s.opacity ?? 0.82, // translucency is CSS over a transparent window
+      theme: s.get('theme') || 'system', zoom: clampZoom(s.get('zoom')), compact: false,
+      maximized: await win.isMaximized(), opacity: s.get('opacity') ?? 0.82, // translucency is CSS over a transparent window
       clickThrough: ghost.on, autostart: false, hotkey: 'Ctrl+Alt+G',
     };
   }
   const pushState = async () => { const st = await windowState(); for (const cb of winListeners) cb(st); };
   win.onResized(() => { pushState(); });
-  // Start with the saved look: theme, zoom and level from settings.json (or from this session).
-  let started = null;
-  const start = () => (started ||= windowState().then(st => { applyScheme(st.theme); applyZoom(st.zoom); applyLevel(st.level); }));
+  // Start with the saved look: theme, zoom and level.
+  let looked = null;
+  const startLook = () => (looked ||= windowState().then(st => { applyScheme(st.theme); applyZoom(st.zoom); applyLevel(st.level); }));
+  const setting = async patch => { (await ready()).settings.set(patch); pushState(); };
 
   // The interface marks its title bar with -webkit-app-region: drag; Tauri needs an explicit call.
   document.addEventListener('mousedown', e => {
@@ -104,45 +94,35 @@
     win.startDragging();
   });
 
-  const dataListeners = [];
-  async function currentView() {
-    const { data, settings } = await load();
-    return userView(data, { ...settings, userId: local.userId || settings.userId });
-  }
+  // A change is answered once the file is written: if saving failed, the window gets the error instead of «ok».
+  const saved = async result => { const f = await ctx.flush(); return f.ok ? result : f; };
 
   const known = {
-    getData: async () => {
-      const { found, dir } = await load();
-      const warning = found ? `${READ_ONLY} Данные: ${dir}` : `Проба Tauri: в ${dir} нет data.json — откройте сначала Electron-версию.`;
-      return { data: await currentView(), warning };
-    },
+    getData: async () => { const c = await ready(); return { data: c.core.userView(), warning: c.warning }; },
     onData: cb => { dataListeners.push(cb); return () => dataListeners.splice(dataListeners.indexOf(cb), 1); },
-    // Trying the roles out is a view change, not a data change: allowed in the probe, kept for this session only.
-    switchUser: async id => {
-      const { data } = await load();
-      const u = (data.users || {})[id];
-      if (!u || u.deletedAt) return { ok: false, message: 'Пользователь не найден.' };
-      remember({ userId: id });
-      const view = await currentView();
-      for (const cb of dataListeners) cb(view);
-      return { ok: true };
-    },
+    write: async (ops, meta) => { const c = await ready(); return saved(c.core.write(ops, meta)); },
+    switchUser: async id => { const c = await ready(); return c.core.switchUser(id); },
+    taskSeen: async id => { const c = await ready(); return saved(c.core.taskSeen(id)); },
+    addComment: async (id, text) => { const c = await ready(); return saved(c.core.taskComment(id, text)); },
+    thankComment: async (id, commentId) => { const c = await ready(); return saved(c.core.taskThank(id, commentId)); },
+    clearDemo: async () => { const c = await ready(); return saved(c.core.demoClear()); },
+    getJournal: async since => { const c = await ready(); return c.core.journalGet({ since }); },
     reloadWindow: async () => { location.reload(); return { ok: true }; },
-    getWindowState: async () => { await start(); return windowState(); },
+
+    getWindowState: async () => { await startLook(); return windowState(); },
     onWindowState: cb => { winListeners.push(cb); return () => winListeners.splice(winListeners.indexOf(cb), 1); },
     minimize: () => win.minimize(),
     setMaximized: async on => { (on ? await win.maximize() : await win.unmaximize()); pushState(); },
-    hide: () => win.minimize(), // no tray in the probe: hiding would leave no way back
+    hide: () => win.minimize(), // no tray yet: hiding would leave no way back
     setSize: (w, h) => win.setSize(new LogicalSize(w, h)),
-    setTheme: theme => { remember({ theme }); applyScheme(theme); pushState(); },
-    setOpacity: v => { remember({ opacity: Number(v) }); pushState(); },
-    setZoom: z => { const zoom = clampZoom(z); remember({ zoom }); applyZoom(zoom); pushState(); },
-    setLevel: level => { if (level !== 'top' && level !== 'normal') return; remember({ level }); applyLevel(level); pushState(); },
+    setTheme: theme => { applyScheme(theme); setting({ theme }); },
+    setOpacity: v => { const n = Number(v); if (Number.isFinite(n)) setting({ opacity: Math.min(1, Math.max(0.25, n)) }); },
+    setZoom: z => { const zoom = clampZoom(z); applyZoom(zoom); setting({ zoom }); },
+    setLevel: level => { if (level !== 'top' && level !== 'normal') return; applyLevel(level); setting({ windowLevel: level }); },
     setAlwaysOnTop: on => known.setLevel(on ? 'top' : 'normal'),
     setClickThrough: on => setGhost(on),
     hoverUnlock: () => {}, setCompact: () => {},
     fbList: async () => [],
-    getJournal: async () => [],
     autoBackupGet: async () => ({ dir: '' }),
     cabinetGet: async () => null,
   };
@@ -151,7 +131,7 @@
     get(target, name) {
       if (name in target) return target[name];
       if (typeof name === 'string' && /^on[A-Z]/.test(name)) return () => () => {};
-      return refused;
+      return later;
     },
   });
 })();

@@ -1,47 +1,63 @@
-// Tauri probe of «Пульт главспеца»: the unchanged Electron interface, read-only data.
-// Reads the same files the Electron version keeps in %APPDATA%\GlavspecWidget and never writes them.
+// «Пульт главспеца» on Tauri (probe, stage 2): the unchanged interface, the shared JavaScript rules (src/core)
+// and this Rust core for the files. The probe works on its own copy of the data: %APPDATA%\GlavspecWidget-tauri.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde_json::{json, Value};
-use std::{fs, io::ErrorKind, path::PathBuf};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-fn data_dir() -> Result<PathBuf, String> {
-    std::env::var_os("APPDATA")
-        .or_else(|| std::env::var_os("XDG_CONFIG_HOME"))
-        .map(|base| PathBuf::from(base).join("GlavspecWidget"))
-        .ok_or_else(|| "Не найдена папка APPDATA.".to_string())
-}
+mod files;
+use files::Files;
+use tauri::State;
 
-fn read_json(path: &PathBuf) -> Result<Option<Value>, String> {
-    match fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str(&text)
-            .map(Some)
-            .map_err(|e| format!("{}: файл повреждён ({e})", path.display())),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(format!("{}: {e}", path.display())),
-    }
+type Res<T> = Result<T, String>;
+
+#[tauri::command]
+fn store_load(files: State<Files>) -> Res<Value> {
+    let mut r = files.load()?;
+    r["dir"] = json!(files.dir.to_string_lossy());
+    r["copiedFrom"] = json!(files.copied_from.as_ref().map(|p| p.to_string_lossy().into_owned()));
+    Ok(r)
 }
 
 #[tauri::command]
-fn probe_load() -> Result<Value, String> {
-    let dir = data_dir()?;
-    let data = read_json(&dir.join("data.json"))?;
-    let settings = read_json(&dir.join("settings.json"))?.unwrap_or_else(|| json!({}));
-    Ok(json!({
-        "dir": dir.to_string_lossy(),
-        "found": data.is_some(),
-        "data": data.unwrap_or_else(|| json!({})),
-        "settings": settings,
-    }))
+fn store_save(files: State<Files>, data: Value, day: String) -> Res<()> {
+    files.save(&data, &day)
+}
+
+#[tauri::command]
+fn settings_load(files: State<Files>) -> Value {
+    files.settings_load()
+}
+
+#[tauri::command]
+fn settings_save(files: State<Files>, values: Value) -> Res<()> {
+    files.settings_save(&values)
+}
+
+#[tauri::command]
+fn journal_append(files: State<Files>, lines: Vec<Value>) -> Res<()> {
+    files.journal_append(&lines)
+}
+
+#[tauri::command]
+fn journal_read(files: State<Files>, since: String, limit: Option<usize>) -> Vec<Value> {
+    files.journal_read(&since, limit.unwrap_or(3000))
 }
 
 fn main() {
     // Ctrl+Alt+G toggles click-through, as in the Electron version: the way back when the window ignores the mouse.
     let hotkey = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyG);
     let to_register = hotkey.clone();
+    let files = match Files::open() {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Папка данных недоступна: {e}");
+            std::process::exit(1);
+        }
+    };
     tauri::Builder::default()
+        .manage(files)
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
@@ -60,7 +76,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![probe_load])
+        .invoke_handler(tauri::generate_handler![store_load, store_save, settings_load, settings_save, journal_append, journal_read])
         .run(tauri::generate_context!())
         .expect("Пульт (проба Tauri) не запустился");
 }
