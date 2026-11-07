@@ -4,6 +4,7 @@
 // The window, the tray, notifications: Tauri window API + Rust commands (src-tauri/src/system.rs).
 // Anything not provided here answers with a clear message.
 (function () {
+  if (window.TauriWindows.isSatellite) return; // a separate window: its window.api comes from tauri-windows.js
   const T = window.__TAURI__;
   const win = T.window.getCurrentWindow();
   const LogicalSize = (T.dpi && T.dpi.LogicalSize) || T.window.LogicalSize;
@@ -21,36 +22,17 @@
   const later = async () => ({ ok: false, message: LATER });
 
   const dataListeners = [];
-  const emitData = () => { if (!ctx) return; const view = ctx.core.userView(); for (const cb of dataListeners) cb(view); trayLater(); };
+  const emitData = () => { if (!ctx) return; const view = ctx.core.userView(); for (const cb of dataListeners) cb(view); windows?.data(view); trayLater(); };
   let ctx = null, starting = null;
   const cabListeners = [];
-  const emitCabinet = () => { if (!ctx) return; const v = ctx.cabinet.view(); for (const cb of cabListeners) cb(v); };
+  const emitCabinet = () => { if (!ctx) return; const v = ctx.cabinet.view(); for (const cb of cabListeners) cb(v); windows?.cabinet(v); };
+  let windows = null; // separate windows (tauri-windows.js), set up at the end
   const ready = () => (starting ||= window.TauriCore.init({ onChanged: emitData, cabinetChanged: emitCabinet }).then(c => { ctx = c; return c; }));
 
-  // Same mapping as themeSource() in src/main.js: «Графит» is dark, «Тандем» is light.
-  const schemeOf = t => (t === 'graphite' ? 'dark' : t === 'tandem' ? 'light' : t === 'light' || t === 'dark' ? t : 'system');
-  // Electron switches prefers-color-scheme for the page (nativeTheme.themeSource); here the stylesheet's
-  // dark rules are switched directly, so a light theme stays light on a dark Windows and the other way round.
-  let darkRules = null;
-  function applyScheme(theme) {
-    const scheme = schemeOf(theme);
-    if (!darkRules) {
-      darkRules = [];
-      for (const sheet of document.styleSheets) {
-        let rules; try { rules = sheet.cssRules; } catch { continue; }
-        for (const r of rules) if (r.media && /prefers-color-scheme:\s*dark/.test(r.media.mediaText)) darkRules.push([r, r.media.mediaText]);
-      }
-    }
-    for (const [r, original] of darkRules) r.media.mediaText = scheme === 'dark' ? 'all' : scheme === 'light' ? 'not all' : original;
-    win.setTheme?.(scheme === 'system' ? null : scheme).catch(() => {}); // scrollbars and system parts of the window
-  }
+  const { applyScheme } = window.TauriWindows.look;
   let zoomByWebview = false; // true: Webview.setZoom; false: CSS zoom (getBoundingClientRect already scaled)
   const clampZoom = z => Math.round(Math.min(1.5, Math.max(0.8, Number(z) || 1)) * 100) / 100;
-  async function applyZoom(z) {
-    const wv = T.webview?.getCurrentWebview?.();
-    try { if (!wv?.setZoom) throw new Error('no webview zoom'); await wv.setZoom(z); document.documentElement.style.zoom = ''; zoomByWebview = true; }
-    catch { document.documentElement.style.zoom = String(z); zoomByWebview = false; } // older Tauri: CSS zoom
-  }
+  const applyZoom = async z => { zoomByWebview = await window.TauriWindows.look.applyZoom(z); };
   // «On the desktop»: under all other windows (Rust: SetWindowPos HWND_BOTTOM) and no taskbar button —
   // reached via the tray icon, as in the Electron version.
   const toBottom = () => invoke('window_to_bottom').catch(() => {});
@@ -147,7 +129,7 @@
       clickThrough: ghost.on, autostart: sys.autostart, hotkey: 'Ctrl+Alt+G',
     };
   }
-  const pushState = async () => { const st = await windowState(); for (const cb of winListeners) cb(st); trayLater(); };
+  const pushState = async () => { const st = await windowState(); for (const cb of winListeners) cb(st); windows?.state(st); trayLater(); };
   win.onResized(() => { pushState(); rememberBounds(); });
   // Start: the saved look (theme, zoom), size and place, level — then the window is shown (it starts hidden).
   let looked = null;
@@ -241,14 +223,6 @@
   }
   const setting = async patch => { (await ready()).settings.set(patch); pushState(); };
 
-  // The interface marks its title bar with -webkit-app-region: drag; Tauri needs an explicit call.
-  document.addEventListener('mousedown', e => {
-    if (e.button !== 0 || e.detail > 1) return;
-    if (!e.target.closest('.bar, .drag')) return;
-    if (e.target.closest('button, input, select, textarea, label, a, .menu, .tabs, .unlock, .adds, .user-wrap, .grip')) return;
-    win.startDragging();
-  });
-
   // A change is answered once the file is written: if saving failed, the window gets the error instead of «ok».
   const saved = async result => { const f = await ctx.flush(); return f.ok ? result : f; };
 
@@ -324,6 +298,10 @@
     hoverUnlock: () => {},
     fbList: async () => [],
   };
+  // Separate windows for a project or a chat: opened from here, every call of theirs is answered here.
+  windows = window.TauriWindows.host({ known, focus: async () => { await win.unminimize().catch(() => {}); await win.show(); await win.setFocus().catch(() => {}); } });
+  known.windowOpen = windows.windowOpen;
+  known.onWindowMain = windows.onWindowMain;
 
   window.api = new Proxy(known, {
     get(target, name) {

@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
 const fs = require('fs'), path = require('path'), http = require('http');
 const root = path.resolve('build/tauri-ui');
 const srv = http.createServer((q, res) => { const u = decodeURIComponent(q.url.split('?')[0]); const f = path.join(root, u === '/' ? 'index.html' : u);
-  fs.readFile(f, (e, d) => { if (e) { res.writeHead(404); return res.end(); } res.writeHead(200, { 'content-type': f.endsWith('.css') ? 'text/css' : f.endsWith('.js') ? 'text/javascript' : f.endsWith('.html') ? 'text/html; charset=utf-8' : 'application/octet-stream' }); res.end(d); }); }).listen(8766);
+  fs.readFile(f, (e, d) => { if (e) { res.writeHead(404); return res.end(); } res.writeHead(200, { 'content-type': f.endsWith('.css') ? 'text/css' : f.endsWith('.js') ? 'text/javascript' : f.endsWith('.html') ? 'text/html; charset=utf-8' : f.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream' }); res.end(d); }); }).listen(8766);
 const disk = { data: null, settings: { fullBounds: { x: 200, y: 100, width: 1200, height: 800 } }, journal: [], version: 0, seen: 0, saves: 0 };
 const sysCalls = [];
 const fsMem = {}; // path → Buffer (stand-in for the disk behind the Rust file commands)
@@ -18,6 +18,13 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   const b = await chromium.launch();
   const ctx = await b.newContext({ viewport: { width: 1400, height: 900 } });
+  // Tauri events between windows: every page of the context gets every event; window opening is queued for the test.
+  const opened = [], closed = [];
+  await ctx.exposeBinding('__bus', (_s, name, payload) => {
+    if (name === '__open') { opened.push(payload); return; }
+    if (name === '__close') { closed.push(payload); return; }
+    for (const pg of ctx.pages()) pg.evaluate(([n, x]) => window.__emit?.(n, x), [name, payload]).catch(() => {});
+  });
   await ctx.exposeBinding('__rust', async (_s, cmd, args) => {
     switch (cmd) {
       case 'store_load': disk.seen = disk.version; return { data: disk.data, warning: null, dir: 'C:\\\\AppData\\\\GlavspecWidget-tauri', copiedFrom: null };
@@ -63,8 +70,10 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await ctx.addInitScript(() => {
     // A stand-in window that remembers its place and what was asked of it.
     const w = window.__win = { x: 0, y: 0, width: 1320, height: 860, visible: false, top: null, skip: null, min: null, calls: [] };
+    const sp = new URLSearchParams(location.search).get('w');
+    const label = sp ? 'sat-' + sp.replace(/[^a-z0-9]/gi, '') : 'main';
     const listeners = {};
-    const win = { isMaximized: async () => false, isMinimized: async () => false, isVisible: async () => w.visible, onResized: () => {}, onMoved: () => {}, onFocusChanged: () => {},
+    const win = { label, close: async () => { w.calls.push('close'); window.__bus('__close', label); }, setFocus: async () => { w.calls.push('focus'); }, unminimize: async () => {}, isMaximized: async () => false, isMinimized: async () => false, isVisible: async () => w.visible, onResized: () => {}, onMoved: () => {}, onFocusChanged: () => {},
       minimize: async () => {}, maximize: async () => {}, unmaximize: async () => {}, startDragging: async () => {},
       setSize: async s => { w.width = s.width; w.height = s.height; }, setPosition: async p => { w.x = p.x; w.y = p.y; }, setMinSize: async s => { w.min = s; },
       outerPosition: async () => ({ x: w.x, y: w.y }), outerSize: async () => ({ width: w.width, height: w.height }), scaleFactor: async () => 1,
@@ -73,7 +82,10 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     function Size(width, height) { this.width = width; this.height = height; }
     function Pos(x, y) { this.x = x; this.y = y; }
     window.__emit = (name, payload) => (listeners[name] || []).forEach(f => f({ payload }));
-    window.__TAURI__ = { core: { invoke: (c, a) => window.__rust(c, a || {}) }, event: { listen: async (n, f) => { (listeners[n] ||= []).push(f); } },
+    function WebviewWindow(lbl, opts) { window.__bus('__open', { label: lbl, opts }); this.once = (ev, f) => { if (ev === 'tauri://created') setTimeout(() => f({}), 10); }; }
+    WebviewWindow.getByLabel = async () => null;
+    window.__TAURI__ = { core: { invoke: (c, a) => window.__rust(c, a || {}) }, event: { listen: async (n, f) => { (listeners[n] ||= []).push(f); }, emit: async (n, x) => window.__bus(n, x) },
+      webviewWindow: { WebviewWindow },
       dpi: { LogicalSize: Size, LogicalPosition: Pos },
       window: { getCurrentWindow: () => win, availableMonitors: async () => [{ position: { x: 0, y: 0 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 }], cursorPosition: async () => ({ x: 0, y: 0 }) },
       webview: { getCurrentWebview: () => ({ setZoom: async () => {} }) } };
@@ -218,6 +230,71 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     check('cabinet state kept in cabinet.json', Object.keys(fsMem).some(k => k.endsWith('\\cabinet.json')));
   }
 
+  // Separate windows (4.0): bookmarks for open projects, a project and a chat in their own windows.
+  {
+    const pids = Object.keys(disk.data.projects).filter(id => !disk.data.projects[id].deletedAt);
+    await js(() => window.api.switchUser('u-gip')); await wait(300);
+    for (const id of pids.slice(0, 2)) { await js(i => { const b = document.createElement('button'); b.dataset.act = 'project-page'; b.dataset.id = i; document.body.append(b); b.click(); b.remove(); }, id); await wait(150); }
+    const tabs = await js(() => [...document.querySelectorAll('.doc-tabs .dtab[data-doc]')].map(t => t.dataset.docId));
+    check('bookmarks: opened projects stay as tabs', tabs.length === 2 && tabs[0] === pids[0] && tabs[1] === pids[1], JSON.stringify(tabs));
+    await p.click(`.dtab[data-doc-id="${pids[0]}"] .dt-open`); await wait(150);
+    check('bookmarks: a tab switches the project', await js(() => window.AppBridge.state.openProjectId) === pids[0] && await js(() => !!document.querySelector('.dtab.on[data-doc-id] .dt-open')));
+    await p.click(`.dtab[data-doc-id="${pids[1]}"] [data-act="dtab-close"]`); await wait(150);
+    check('bookmarks: × closes a tab', (await js(() => document.querySelectorAll('.doc-tabs .dtab[data-doc]').length)) === 1);
+    await p.click('.pt-top [data-act="win-detach"]'); await wait(300);
+    const o = opened.at(-1);
+    check('⧉ opens the project in its own window', o && /^sat-project-/.test(o.label) && o.opts.url === `index.html?w=${encodeURIComponent('project:' + pids[0])}` && o.opts.transparent && o.opts.decorations === false && o.opts.dragDropEnabled === false, JSON.stringify(o));
+    check('…and it leaves the main window', await js(() => window.AppBridge.state.openProjectId) === null && (await js(() => document.querySelectorAll('.doc-tabs .dtab[data-doc]').length)) === 0);
+    // The separate window: same interface over the main window's data.
+    const sp = await ctx.newPage();
+    const serr = []; sp.on('pageerror', e => serr.push(e.message)); sp.on('console', m => { if (m.type() === 'error') serr.push(m.text()); });
+    await sp.goto('http://127.0.0.1:8766/' + o.opts.url); await wait(1200);
+    const sjs = (f, a) => sp.evaluate(f, a);
+    const pname = disk.data.projects[pids[0]].name;
+    check('project window shows only its project', await sjs(() => document.body.classList.contains('solo-project')) && (await sjs(() => document.querySelector('.pt-top h2')?.textContent)) === pname
+      && await sjs(() => getComputedStyle(document.getElementById('nav')).display === 'none') && !(await sjs(() => document.querySelector('.msg-fab'))), (await sjs(() => document.querySelector('#app')?.innerText.slice(0, 60))).replace(/\s+/g, ' '));
+    check('project window: title, «в главное окно», no ⧉', (await sjs(() => document.getElementById('app-title').textContent)) === pname && await sjs(() => !!document.querySelector('[data-act="win-dock"]') && !document.querySelector('[data-act="win-detach"]')));
+    const t1 = Object.keys(disk.data.tasks).find(id => disk.data.tasks[id].projectId === pids[0] && !disk.data.tasks[id].deletedAt);
+    const before = disk.saves;
+    const sw = await sjs(id => window.api.write([{ type: 'update', col: 'tasks', id, data: { readiness: 42 } }], { action: 'Готовность' }), t1);
+    await wait(400);
+    check('a change in the project window is saved by the main one', sw.ok && disk.data.tasks[t1].readiness === 42 && disk.saves > before, JSON.stringify(sw));
+    check('…and both windows show it', await js(id => window.AppBridge.state.tasks.get(id)?.readiness, t1) === 42 && await sjs(id => window.AppBridge.state.tasks.get(id)?.readiness, t1) === 42);
+    await js(id => window.api.write([{ type: 'update', col: 'tasks', id, data: { readiness: 43 } }], {}), t1); await wait(400);
+    check('a change in the main window reaches the project window', await sjs(id => window.AppBridge.state.tasks.get(id)?.readiness, t1) === 43);
+    await js(() => window.api.setTheme('graphite')); await wait(400);
+    check('theme follows into the separate window', (await sjs(() => document.documentElement.dataset.theme)) === 'graphite');
+    await js(() => window.api.setTheme('tandem')); await wait(300);
+    const deny = await sjs(() => window.api.windowOpen);
+    check('a separate window does not open others', deny === undefined);
+    await sp.click('[data-act="win-dock"]'); await wait(400);
+    check('«в главное окно»: the window closes', closed.length === 1);
+    check('…as a tab, shown', await js(() => window.AppBridge.state.openProjectId) === pids[0] && (await js(() => document.querySelectorAll('.doc-tabs .dtab[data-doc]').length)) === 1);
+    check('no errors in the project window', serr.length === 0, serr.join(' | '));
+    await sp.screenshot({ path: require('os').tmpdir() + '/tauri-ui-project-window.png' }).catch(() => {});
+    await sp.close();
+    // A chat in its own window.
+    const chatId = Object.keys(disk.data.chats).find(id => { const c = disk.data.chats[id]; return c.kind === 'project' ? pids.includes(c.projectId) && !disk.data.projects[c.projectId].archived : (c.members || []).includes('u-gip'); });
+    const cp = await ctx.newPage();
+    const cerr = []; cp.on('pageerror', e => cerr.push(e.message)); cp.on('console', m => { if (m.type() === 'error') cerr.push(m.text()); });
+    await cp.goto('http://127.0.0.1:8766/index.html?w=' + encodeURIComponent('chat:' + chatId)); await wait(1200);
+    const cjs = (f, a) => cp.evaluate(f, a);
+    check('chat window shows only its chat', await cjs(() => !!document.querySelector('.msg-panel.solo #msg-text') && !document.querySelector('.mp-head') && getComputedStyle(document.querySelector('.body')).visibility === 'hidden'));
+    await cp.fill('#msg-text', 'Из отдельного окна'); await cp.click('[data-act="mc-send"]'); await wait(500);
+    check('message sent from the chat window', disk.data.chats[chatId].messages.at(-1)?.text === 'Из отдельного окна' && (await cjs(() => document.getElementById('msg-text').value)) === '');
+    check('…shown in the main window', await js(id => window.AppBridge.state.chats.get(id)?.messages.at(-1)?.text, chatId) === 'Из отдельного окна');
+    const n = opened.length;
+    check('no errors in the chat window', cerr.length === 0, cerr.join(' | '));
+    await cp.setViewportSize({ width: 480, height: 680 }); await wait(200);
+    await cp.screenshot({ path: require('os').tmpdir() + '/tauri-ui-chat-window.png' });
+    await cp.close();
+    // From the messenger: ⧉ in a chat's head.
+    await js(id => { const b = document.createElement('button'); b.dataset.act = 'msg-open'; document.body.append(b); b.click(); b.remove(); }, chatId); await wait(200);
+    await js(id => { const b = document.createElement('button'); b.dataset.act = 'msg-chat'; b.dataset.id = id; document.body.append(b); b.click(); b.remove(); }, chatId); await wait(200);
+    await p.click('.mc-head [data-act="win-detach"]'); await wait(300);
+    check('⧉ in a chat opens it in its own window', opened.length === n + 1 && opened.at(-1).opts.url.includes(encodeURIComponent('chat:' + chatId)) && /^sat-chat-/.test(opened.at(-1).label), JSON.stringify(opened.at(-1)));
+    await js(() => { const b = document.createElement('button'); b.dataset.act = 'msg-close'; document.body.append(b); b.click(); b.remove(); }); await wait(300);
+  }
   // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
   const w0 = await js(() => window.__win);
   check('window shown at its saved place', w0.visible && w0.calls.includes('show') && w0.x === 200 && w0.width === 1200, JSON.stringify(w0));

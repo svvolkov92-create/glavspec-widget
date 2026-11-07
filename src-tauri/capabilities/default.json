@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: own title bar, size and place, levels, theme, zoom, click-through, tray.",
+  "description": "Main window and separate project/chat windows: own title bar, size and place, levels, theme, zoom, click-through, tray.",
   "windows": [
-    "main"
+    "main",
+    "sat-*"
   ],
   "permissions": [
     "core:default",
@@ -26,6 +27,9 @@
     "core:window:allow-show",
     "core:window:allow-set-focus",
     "core:window:allow-unminimize",
-    "core:window:allow-set-skip-taskbar"
+    "core:window:allow-set-skip-taskbar",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-close",
+    "core:window:allow-set-title"
   ]
 }

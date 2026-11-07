@@ -98,11 +98,14 @@ fn main() {
             });
             Ok(())
         })
-        // The close button and Alt+F4 hide the window to the tray; quitting is in the tray menu.
+        // The close button and Alt+F4 hide the main window to the tray; quitting is in the tray menu.
+        // Separate windows (a project, a chat) simply close.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

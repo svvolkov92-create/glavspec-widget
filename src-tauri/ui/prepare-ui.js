@@ -11,6 +11,7 @@ const to = path.join(root, 'build', 'tauri-ui');
 
 fs.rmSync(to, { recursive: true, force: true });
 fs.cpSync(from, to, { recursive: true });
+fs.copyFileSync(path.join(__dirname, 'tauri-windows.js'), path.join(to, 'tauri-windows.js'));
 fs.copyFileSync(path.join(__dirname, 'tauri-api.js'), path.join(to, 'tauri-api.js'));
 fs.copyFileSync(path.join(__dirname, 'tauri-core.js'), path.join(to, 'tauri-core.js'));
 // The shared rules of the Electron main process (src/core), loaded after logic.js / access.js / composition.js.
@@ -109,7 +110,7 @@ let html = fs.readFileSync(file, 'utf8');
 const firstScript = html.indexOf('<script src=');
 const csp = /(<meta http-equiv="Content-Security-Policy" content=")([^"]*)(")/;
 if (firstScript < 0 || !csp.test(html)) throw new Error('index.html changed: no <script src=…> or CSP meta to patch');
-html = html.slice(0, firstScript) + '<script src="tauri-api.js"></script>\n' + html.slice(firstScript);
+html = html.slice(0, firstScript) + '<script src="tauri-windows.js"></script>\n<script src="tauri-api.js"></script>\n' + html.slice(firstScript);
 const appScript = html.indexOf('<script src="app.js">');
 if (appScript < 0) throw new Error('index.html changed: no <script src="app.js">');
 html = html.slice(0, appScript) + CORE.map(f => `<script src="core/${f}"></script>\n`).join('')
