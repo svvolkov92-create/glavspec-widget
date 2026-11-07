@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('api', {
   exportComposition: (projectId, format, opts) => ipcRenderer.invoke('report:composition', projectId, format, opts),
   docDefaults: () => ipcRenderer.invoke('report:doc-defaults'),
   openTemplates: () => ipcRenderer.invoke('report:open-templates'),
+  attachAdd: projectId => ipcRenderer.invoke('attach:add', projectId),
+  attachOpen: (projectId, fileId) => ipcRenderer.invoke('attach:open', projectId, fileId),
 
   cabinetGet: () => ipcRenderer.invoke('cabinet:get'),
   onCabinet: cb => subscribe('cabinet:changed', cb),

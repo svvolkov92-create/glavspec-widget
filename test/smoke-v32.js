@@ -141,6 +141,47 @@ app.on('browser-window-created', (_e, win) => {
         check('read all clears the panel', !(await js(`!!document.querySelector('.cab-inbox')`)));
       });
 
+      await step('4.0: a file for approval goes to the customer and the verdict comes back', async () => {
+        const pdf = path.join(outDir, 'Планировка.pdf');
+        fs.writeFileSync(pdf, '%PDF-1.4 test');
+        electron.dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [pdf] });
+        await js(`document.querySelector('[data-act="tab"][data-id="projects"]').click()`); await wait(300);
+        await js(`document.querySelector('[data-act="project-back"]')?.click()`); await wait(150);
+        await js(`document.querySelector('[data-act="project-page"][data-id="demo-p1"]').click()`); await wait(400);
+        await js(`document.querySelector('[data-act="ask-customer"][data-id="demo-p1"]').click()`); await wait(300);
+        await setVal('#aq-title', 'Согласовать планировку 1 этажа');
+        await js(`document.querySelector('.modal input[name="aq-kind"][value="decision"]').click()`);
+        await js(`document.querySelector('.modal [data-m="attach"]').click()`); await wait(400);
+        check('file listed in the request dialog', /Планировка\.pdf/.test(await text('#aq-files')));
+        await js(`document.querySelector('.modal form, form.modal').requestSubmit()`); await wait(1500);
+        const req = data().projects['demo-p1'].requests.find(r => /планировку/.test(r.title));
+        check('request saved with the file', req && req.files?.length === 1 && req.files[0].name === 'Планировка.pdf', JSON.stringify(req));
+        const fid = req.files[0].id;
+        check('a copy kept in the data folder', fs.existsSync(path.join(dataDir, 'attachments', 'demo-p1', fid)));
+        await js(`window.api.cabinetSync()`); await wait(1500);
+        check('file uploaded to the cabinet', fs.existsSync(path.join(srvDir, 'files', 'demo-p1', fid)));
+        let cookie = '';
+        const web = async (method, p, form) => {
+          const r = await fetch(base + p, { method, redirect: 'manual', headers: { ...(cookie ? { Cookie: cookie } : {}), ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) }, body: form ? new URLSearchParams(form).toString() : undefined });
+          const sc = r.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
+          return { status: r.status, text: await r.text() };
+        };
+        await web('POST', '/login', { login: 'ivanov', password });
+        const page = await web('GET', '/p/demo-p1');
+        check('customer sees the file and «Согласовано»', page.text.includes(`/p/demo-p1/f/${fid}`) && /value="approve"/.test(page.text));
+        const dl = await web('GET', `/p/demo-p1/f/${fid}`);
+        check('customer downloads it', dl.status === 200 && dl.text === '%PDF-1.4 test');
+        const csrf = page.text.match(/name="csrf" value="([^"]+)"/)[1];
+        await web('POST', '/c/answer', { csrf, project: 'demo-p1', request: req.id, decision: 'approve' });
+        await js(`window.api.cabinetSync()`); await wait(1500);
+        await js(`document.querySelector('[data-act="msg-open"]').click()`); await wait(300);
+        await js(`document.querySelector('.mc-tab[data-v="cust"]')?.click()`); await wait(200);
+        await js(`document.querySelector('[data-act="msg-chat"][data-id="c:demo-p1"]')?.click()`); await wait(400);
+        check('«Согласовано» in the app', /Согласовано/.test(await text('#mc-msgs')));
+        await shot('32-05-approved');
+        await js(`document.querySelector('[data-act="msg-close"]').click()`); await wait(300);
+      });
+
       await step('specialist sees nothing of the cabinet', async () => {
         const spec = Object.entries(data().users).find(([, u]) => u.role === 'specialist');
         if (!spec) return check('specialist present in demo', false);

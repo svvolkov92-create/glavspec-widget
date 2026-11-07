@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 // Shared code: in the repository it lives in ../src, in the server package in ./lib.
 const LIB = fs.existsSync(path.join(__dirname, 'lib')) ? path.join(__dirname, 'lib') : path.join(__dirname, '..', 'src');
 const { renderPage, meetingIcs } = require(path.join(LIB, 'report', 'customer.js'));
@@ -188,9 +188,38 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
     if (!Array.isArray(m.sections) || m.sections.length > 600) return 'Разделы проекта повреждены.';
     return null;
   }
+  // Files attached to requests: <data>/files/<project>/<file id>, the names in data.files[project][file id].
+  const FILE_MAX = 30 * 1024 * 1024;
+  const safeId = v => /^[A-Za-z0-9_-]{1,64}$/.test(String(v)) ? String(v) : null;
+  const filesDir = pid => path.join(cfg.dataDir, 'files', pid);
+  function dropProjectFiles(pid) {
+    try { fs.rmSync(filesDir(pid), { recursive: true, force: true }); } catch { /* nothing to drop */ }
+    if (D().files) delete D().files[pid];
+  }
   async function team(req, res, url) {
     if (!teamAuth(req)) return json(res, 401, { ok: false, message: 'Неверный ключ команды.' });
     const parts = url.pathname.split('/').filter(Boolean).slice(2); // after /api/team
+    if (parts[0] === 'projects' && parts[2] === 'files' && parts[3]) {
+      const pid = safeId(decodeURIComponent(parts[1])), fid = safeId(decodeURIComponent(parts[3]));
+      if (!pid || !fid) return json(res, 400, { ok: false, message: 'Неверный файл.' });
+      const meta = ((D().files ||= {})[pid] ||= {});
+      if (req.method === 'PUT') {
+        const b = JSON.parse((await readBody(req, Math.ceil(FILE_MAX * 1.4) + 4096)) || '{}');
+        const bytes = Buffer.from(String(b.data || ''), 'base64');
+        if (!bytes.length || bytes.length > FILE_MAX) return json(res, 400, { ok: false, message: 'Файл пустой или больше 30 МБ.' });
+        fs.mkdirSync(filesDir(pid), { recursive: true });
+        fs.writeFileSync(path.join(filesDir(pid), fid), bytes);
+        meta[fid] = { name: str(b.name, 200) || 'файл', type: str(b.type, 100) || 'application/octet-stream', size: bytes.length, at: new Date().toISOString() };
+        store.save();
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === 'DELETE') {
+        try { fs.unlinkSync(path.join(filesDir(pid), fid)); } catch { /* already gone */ }
+        delete meta[fid];
+        store.save();
+        return json(res, 200, { ok: true });
+      }
+    }
     const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? JSON.parse((await readBody(req, 2_000_000)) || '{}') : null;
     if (parts[0] === 'ping') return json(res, 200, { ok: true, version: VERSION, projects: Object.keys(D().projects).length, customers: Object.keys(D().customers).length });
     if (parts[0] === 'projects' && parts[1]) {
@@ -202,7 +231,7 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
         store.save();
         return json(res, 200, { ok: true });
       }
-      if (req.method === 'DELETE') { delete D().projects[id]; store.save(); return json(res, 200, { ok: true }); }
+      if (req.method === 'DELETE') { delete D().projects[id]; dropProjectFiles(safeId(id) || '_'); store.save(); return json(res, 200, { ok: true }); }
     }
     if (parts[0] === 'customers') {
       const id = parts[1] && decodeURIComponent(parts[1]);
@@ -289,9 +318,12 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
         const back = (flash, hash = '') => redirect(res, `/p/${encodeURIComponent(pid)}?ok=${flash}${hash}`);
         if (p === '/c/answer') {
           const r = (m.project.requests || []).find(x => x.id === f.request);
-          if (!r || !text) return back('empty');
-          addMessage(s, pid, 'answer', text, r);
-          ((D().sent[s.customerId] ||= {})[pid] ||= {})[r.id] = text.slice(0, 200);
+          // Files sent for approval: «Согласовано» needs no text, remarks do.
+          const decision = r?.files?.length && ['approve', 'remarks'].includes(f.decision) ? f.decision : '';
+          const said = decision === 'approve' ? (text || 'Согласовано') : text;
+          if (!r || !said) return back('empty');
+          addMessage(s, pid, 'answer', said, r, decision ? { decision } : {});
+          ((D().sent[s.customerId] ||= {})[pid] ||= {})[r.id] = (decision === 'remarks' ? 'Есть замечания: ' : '') + said.slice(0, 200);
           store.save();
           return back('answer', '#q');
         }
@@ -319,6 +351,18 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
         return send(res, 200, shell(cfg.title, `<div class="top"><b>${esc(s.customer.name)}</b><form method="post" action="/logout"><input type="hidden" name="csrf" value="${esc(s.csrf)}"><button type="submit">Выйти</button></form></div>
           ${list.length ? list.map(x => `<a class="pr" href="/p/${encodeURIComponent(x.project.id)}"><b>${esc(x.project.name)}</b><span class="mu">${esc(x.project.code ? 'Шифр ' + x.project.code + ' · ' : '')}обновлено ${esc(String(x.publishedAt || '').split('-').reverse().join('.'))}</span></a>`).join('')
             : '<div class="card"><p>Проекты ещё не открыты для вас. Главный инженер проекта откроет доступ.</p></div>'}`));
+      }
+      // A file attached to a request of a project this customer sees.
+      const fm = p.match(/^\/p\/([^/]+)\/f\/([^/]+)$/);
+      if (fm) {
+        const pid = safeId(decodeURIComponent(fm[1])), fid = safeId(decodeURIComponent(fm[2]));
+        const m = pid && D().projects[pid];
+        const listed = m && (s.customer.projectIds || []).includes(pid) && (m.project.requests || []).some(r => (r.files || []).some(x => x.id === fid));
+        const meta = listed && D().files?.[pid]?.[fid];
+        const file = meta && path.join(filesDir(pid), fid);
+        if (!file || !fs.existsSync(file)) return send(res, 404, 'Файл не найден — возможно, ГИП ещё не отправил его.', 'text/plain; charset=utf-8');
+        const ascii = meta.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+        return send(res, 200, fs.readFileSync(file), meta.type, { 'Content-Disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.name)}`, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
       }
       const ics = p.match(/^\/p\/([^/]+)\/meeting\/([^/]+)\.ics$/);
       if (ics) {
