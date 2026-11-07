@@ -3,3 +3,6 @@ dist/
 *.log
 /out/
 /test-out/
+build/
+src-tauri/target/
+src-tauri/gen/

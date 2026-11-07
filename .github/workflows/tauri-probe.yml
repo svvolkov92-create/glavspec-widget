@@ -1,0 +1,47 @@
+name: Tauri probe
+
+on:
+  push:
+    branches: [tauri-probe]
+    paths: ['src-tauri/**', 'src/renderer/**', '.github/workflows/tauri-probe.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build the Tauri probe for Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Prepare the interface (unchanged src/renderer + Tauri bridge)
+        run: node src-tauri/ui/prepare-ui.js
+      - name: Build
+        run: npx --yes @tauri-apps/cli@2 build
+      - name: Sizes
+        shell: pwsh
+        run: |
+          $exe = Get-Item src-tauri/target/release/pult-glavspeca.exe
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          $lines = @(
+            "## Размеры пробы Tauri",
+            "| Файл | МБ |", "|---|---|",
+            ("| Программа (pult-glavspeca.exe) | {0:N1} |" -f ($exe.Length / 1MB)),
+            ("| Установщик ({0}) | {1:N1} |" -f $setup.Name, ($setup.Length / 1MB))
+          )
+          $lines | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          $lines | Write-Output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PultGlavspeca-tauri-probe-setup
+          path: src-tauri/target/release/bundle/nsis/*.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PultGlavspeca-tauri-probe-portable
+          path: src-tauri/target/release/pult-glavspeca.exe

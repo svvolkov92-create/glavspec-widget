@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PultGlavspeca",
+  "version": "3.99.0",
+  "identifier": "ru.tandem.glavspeca.probe",
+  "build": {
+    "frontendDist": "../build/tauri-ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Пульт главспеца — проба Tauri",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 720,
+        "minHeight": 480,
+        "decorations": false,
+        "transparent": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Russian"]
+      }
+    }
+  }
+}

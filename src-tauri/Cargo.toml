@@ -1,0 +1,20 @@
+[package]
+name = "pult-glavspeca"
+version = "3.99.0"
+description = "Пульт главспеца — проба Tauri (только просмотр)"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde_json = "1"
+
+# Small binary: the point of the probe is to measure size.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
