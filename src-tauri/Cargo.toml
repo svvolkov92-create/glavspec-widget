@@ -1,7 +1,7 @@
 [package]
 name = "pult-glavspeca"
-version = "3.99.5"
-description = "Пульт главспеца на Tauri — проба, этап 3"
+version = "4.0.0"
+description = "Пульт главспеца 4.0 (Tauri)"
 edition = "2021"
 
 [build-dependencies]

@@ -24,7 +24,6 @@ struct Stamp {
 
 pub struct Files {
     pub dir: PathBuf,
-    pub copied_from: Option<PathBuf>,
     stamp: Mutex<Option<Stamp>>,
 }
 
@@ -83,28 +82,16 @@ fn now_ms() -> u128 {
 }
 
 impl Files {
-    // The probe keeps its own copy of the data (GlavspecWidget-tauri), taken from the Electron version's
-    // folder on first start, so trying it out never touches the working data.
+    // 4.0 works in the same folder as 3.x (Electron): %APPDATA%\GlavspecWidget — data, settings, journal,
+    // backups, attachments and the built-in cabinet server's data stay where they were.
     pub fn open() -> Result<Files, String> {
         let base = std::env::var_os("APPDATA")
             .or_else(|| std::env::var_os("XDG_CONFIG_HOME"))
             .map(PathBuf::from)
             .ok_or_else(|| "Не найдена папка APPDATA.".to_string())?;
-        let dir = base.join("GlavspecWidget-tauri");
-        let source = base.join("GlavspecWidget");
-        let mut copied_from = None;
-        if !dir.join("data.json").exists() && source.join("data.json").exists() {
-            fs::create_dir_all(&dir).map_err(|e| err(&dir, e))?;
-            for name in ["data.json", "settings.json", "journal.jsonl"] {
-                let from = source.join(name);
-                if from.exists() {
-                    fs::copy(&from, dir.join(name)).map_err(|e| err(&from, e))?;
-                }
-            }
-            copied_from = Some(source);
-        }
+        let dir = base.join("GlavspecWidget");
         fs::create_dir_all(dir.join("backups")).map_err(|e| err(&dir, e))?;
-        Ok(Files { dir, copied_from, stamp: Mutex::new(None) })
+        Ok(Files { dir, stamp: Mutex::new(None) })
     }
 
     fn data_file(&self) -> PathBuf {
@@ -238,7 +225,7 @@ mod tests {
     fn temp_files() -> Files {
         let dir = std::env::temp_dir().join(format!("glavspec-files-{}-{:?}", now_ms(), thread::current().id()));
         fs::create_dir_all(dir.join("backups")).unwrap();
-        Files { dir, copied_from: None, stamp: Mutex::new(None) }
+        Files { dir, stamp: Mutex::new(None) }
     }
 
     #[test]

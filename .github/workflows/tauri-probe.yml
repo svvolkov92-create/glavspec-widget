@@ -1,14 +1,14 @@
-name: Tauri probe
+name: Pult 4.0 (Tauri)
 
 on:
   push:
     branches: [tauri-probe]
-    paths: ['src-tauri/**', 'src/renderer/**', 'src/core/**', '.github/workflows/tauri-probe.yml']
+    paths: ['src-tauri/**', 'src/renderer/**', 'src/core/**', 'src/report/**', 'src/cabinet.js', 'server/**', 'README-win.txt', '.github/workflows/tauri-probe.yml']
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build the Tauri probe for Windows
+    name: Build Pult 4.0 for Windows
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -33,18 +33,24 @@ jobs:
           $exe = Get-Item src-tauri/target/release/pult-glavspeca.exe
           $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
           $lines = @(
-            "## Размеры пробы Tauri",
+            "## Пульт 4.0 — размеры",
             "| Файл | МБ |", "|---|---|",
             ("| Программа (pult-glavspeca.exe) | {0:N1} |" -f ($exe.Length / 1MB)),
             ("| Установщик ({0}) | {1:N1} |" -f $setup.Name, ($setup.Length / 1MB))
           )
           $lines | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
           $lines | Write-Output
+      - name: Installer with the readme
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item src-tauri/target/release/bundle/nsis/*.exe release/
+          (Get-Content -Raw -Encoding utf8 README-win.txt) -replace "`r?`n", "`r`n" | Set-Content -NoNewline -Encoding utf8 "release/ПРОЧТИ.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: PultGlavspeca-tauri-probe-setup
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          name: PultGlavspeca-4.0-setup
+          path: release/*
       - uses: actions/upload-artifact@v4
         with:
-          name: PultGlavspeca-tauri-probe-portable
+          name: PultGlavspeca-4.0-portable
           path: src-tauri/target/release/pult-glavspeca.exe

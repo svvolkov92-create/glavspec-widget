@@ -1,5 +1,5 @@
-// «Пульт главспеца» on Tauri (probe, stage 2): the unchanged interface, the shared JavaScript rules (src/core)
-// and this Rust core for the files. The probe works on its own copy of the data: %APPDATA%\GlavspecWidget-tauri.
+// «Пульт главспеца» 4.0 on Tauri: the unchanged interface, the shared JavaScript rules (src/core) and this Rust
+// core for the files, the tray and the system. The data folder is the one of 3.x: %APPDATA%\GlavspecWidget.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde_json::{json, Value};
@@ -19,7 +19,6 @@ type Res<T> = Result<T, String>;
 fn store_load(files: State<Files>) -> Res<Value> {
     let mut r = files.load()?;
     r["dir"] = json!(files.dir.to_string_lossy());
-    r["copiedFrom"] = json!(files.copied_from.as_ref().map(|p| p.to_string_lossy().into_owned()));
     Ok(r)
 }
 
@@ -118,7 +117,7 @@ fn main() {
             cabinet::cabinet_local_start, cabinet::cabinet_local_stop, cabinet::cabinet_local_running
         ])
         .build(tauri::generate_context!())
-        .expect("Пульт (проба Tauri) не запустился")
+        .expect("Пульт главспеца не запустился")
         // The built-in cabinet server is a child process: it stops with the app.
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {

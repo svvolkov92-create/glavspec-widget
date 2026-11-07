@@ -27,7 +27,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   });
   await ctx.exposeBinding('__rust', async (_s, cmd, args) => {
     switch (cmd) {
-      case 'store_load': disk.seen = disk.version; return { data: disk.data, warning: null, dir: 'C:\\\\AppData\\\\GlavspecWidget-tauri', copiedFrom: null };
+      case 'store_load': disk.seen = disk.version; return { data: disk.data, warning: null, dir: 'C:\\\\AppData\\\\GlavspecWidget' };
       case 'store_save': if (disk.seen !== disk.version) throw 'conflict'; disk.data = JSON.parse(JSON.stringify(args.data)); disk.version++; disk.seen = disk.version; disk.saves++; return null;
       case 'settings_load': return disk.settings;
       case 'settings_save': disk.settings = JSON.parse(JSON.stringify(args.values)); return null;
@@ -41,7 +41,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       case 'window_to_bottom': sysCalls.push('bottom'); return true;
       case 'open_data_folder': sysCalls.push('folder'); return null;
       case 'app_quit': sysCalls.push('quit'); return null;
-      case 'known_dirs': return { documents: 'C:\\Users\\gip\\Documents', userData: 'C:\\Users\\gip\\AppData\\Roaming\\GlavspecWidget-tauri' };
+      case 'known_dirs': return { documents: 'C:\\Users\\gip\\Documents', userData: 'C:\\Users\\gip\\AppData\\Roaming\\GlavspecWidget' };
       case 'dialog_save': case 'dialog_open': dialogs.push({ cmd, ...args }); return nextPath;
       case 'dialog_confirm': dialogs.push({ cmd, ...args }); return confirmAnswer;
       case 'fs_write': fsMem[args.path] = args.text != null ? Buffer.from(args.text, 'utf8') : Buffer.from(args.base64, 'base64'); return null;
@@ -154,7 +154,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const pr = disk.data.projects[pid];
   check('ИРД request saved (request + ИРД row)', (pr.requests || []).some(r => /ТУ на водоснабжение/.test(r.title)) && (pr.ird || []).some(r => /ТУ на водоснабжение/.test(r.title)), JSON.stringify({ req: pr.requests, ird: pr.ird }).slice(0, 300));
   const r5 = await js(() => window.api.fbExport());
-  check('not moved yet → clear message', !r5.ok && /следующем этапе/.test(r5.message));
+  check('not moved yet → clear message', !r5.ok && /версии 4.0 этого нет/.test(r5.message));
   // Files through the shared module (src/core/files.js) and the report code of the Electron version.
   {
   const docs = 'C:\\Users\\gip\\Documents';
@@ -317,6 +317,11 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('hide → hidden (back via the tray)', (await js(() => window.__win.visible)) === false);
   await js(() => window.__emit('tray:action', 'quit')); await wait(100);
   check('tray: quit', sysCalls.includes('quit'));
+  // A key saved by 3.x (Electron encryption) cannot be read: the cabinet settings ask for it again.
+  disk.settings = { ...disk.settings, cabinetUrl: 'http://192.168.1.10:8080', cabinetKey: 'enc:djEwAAAA', cabinetLocal: false };
+  await p.reload(); await wait(1200);
+  const kl = await js(() => window.api.cabinetGet());
+  check('3.x cabinet key: asked again, address kept', kl.keyLost === true && kl.hasKey === false && kl.url === 'http://192.168.1.10:8080', JSON.stringify(kl).slice(0, 200));
   await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-check.png' });
   check('no page errors', errs.length === 0, errs.join(' | '));
   console.log(log.join('\n')); process.exitCode = log.some(l => l.startsWith('FAIL')) ? 1 : 0;

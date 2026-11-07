@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PultGlavspeca",
-  "version": "3.99.5",
-  "identifier": "ru.tandem.glavspeca.probe",
+  "version": "4.0.0",
+  "identifier": "ru.tandem.glavspeca",
   "build": {
     "frontendDist": "../build/tauri-ui"
   },
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Пульт главспеца — проба Tauri",
+        "title": "Пульт главспеца",
         "width": 1320,
         "height": 860,
         "minWidth": 280,

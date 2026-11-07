@@ -96,7 +96,7 @@
     const dirs = await invoke('known_dirs');
     const files = window.createFiles({
       store, journal, settings, A: window.Access, L, Composition: window.Composition, StoreError: SC.StoreError, Buffer: window.Buffer,
-      io: tauriIo(dirs), appVersion: 'Tauri', R: reportCode(),
+      io: tauriIo(dirs), appVersion: '4.0.0', R: reportCode(),
       currentUser: () => core.currentUser(), userView: () => core.userView(), changed: () => onChanged(),
     });
     const cabinetRules = await cabinetOf({ store, settings, files, core, dirs, onCabinet: () => onCabinet?.() });
@@ -105,10 +105,7 @@
     try { core.purgeTrash(); } catch (e) { console.error('Не удалось очистить корзину:', e); }
     await flush();
 
-    const copied = loaded.copiedFrom
-      ? `Проба Tauri работает на своей копии данных (${loaded.dir}), взятой из обычного Пульта. Обычный Пульт она не меняет.`
-      : '';
-    return { core, chats, files, cabinet: cabinetRules, store, settings, flush, warning: store.warning || copied || null };
+    return { core, chats, files, cabinet: cabinetRules, store, settings, flush, warning: store.warning || null };
   }
 
   // The customer cabinet: the client of the Electron version (src/cabinet.js) and the shared rules
@@ -119,9 +116,11 @@
     const stateFile = dirs.userData + '\\cabinet.json';
     let saved = null;
     try { if (await invoke('fs_exists', { path: stateFile })) saved = JSON.parse(window.Buffer.from(await invoke('fs_read', { path: stateFile }), 'base64').toString('utf8')); } catch { /* start over */ }
-    // The team key: 'dpapi:' — encrypted for this Windows user; an Electron key ('enc:') cannot be read here.
+    // The team key: 'dpapi:' — encrypted for this Windows user. A key saved by 3.x ('enc:', Electron's own
+    // encryption) cannot be read here: the cabinet settings ask for it again (view().keyLost).
     let key = '';
     const stored = settings.get('cabinetKey') || '';
+    const keyLost = stored.startsWith('enc:');
     if (stored.startsWith('dpapi:')) { try { key = await invoke('secret_unprotect', { data: stored.slice(6) }); } catch { key = ''; } }
     else if (stored.startsWith('plain:')) key = stored.slice(6);
     const keyStore = {
@@ -155,8 +154,14 @@
       notify: text => invoke('notify', { body: text }).catch(() => {}), openExternal: url => invoke('open_url', { url }).catch(e => console.error(e)),
       changed: () => onCabinet(),
     });
-    // The built-in server comes back with the app when it was on (as in Electron).
-    if (settings.get('cabinetLocal')) local.start().then(() => onCabinet()).catch(e => console.error('Кабинет на этом компьютере:', e));
+    const view = rules.view;
+    rules.view = () => { const v = view(); return v.allowed && keyLost && !key ? { ...v, keyLost: true } : v; };
+    // The built-in server comes back with the app when it was on (as in Electron), with its own team key —
+    // also the way back for a key saved by 3.x.
+    if (settings.get('cabinetLocal')) {
+      local.start().then(async r => { if (r.teamKey && r.teamKey !== key) await keyStore.set(r.teamKey); onCabinet(); })
+        .catch(e => console.error('Кабинет на этом компьютере:', e));
+    }
     return rules;
   }
 

@@ -18,7 +18,7 @@
   const THEMES = { system: 'Как в Windows', light: 'Светлая', dark: 'Тёмная', graphite: 'Графит', tandem: 'Тандем' };
   const ZOOMS = [0.8, 0.9, 1, 1.1, 1.25, 1.5];
   const sys = { desktop: false, autostart: false }; // asked from Rust once at start
-  const LATER = 'В пробе Tauri этого пока нет — будет на следующем этапе переноса.';
+  const LATER = 'В версии 4.0 этого нет.';
   const later = async () => ({ ok: false, message: LATER });
 
   const dataListeners = [];
@@ -302,6 +302,10 @@
   windows = window.TauriWindows.host({ known, focus: async () => { await win.unminimize().catch(() => {}); await win.show(); await win.setFocus().catch(() => {}); } });
   known.windowOpen = windows.windowOpen;
   known.onWindowMain = windows.onWindowMain;
+
+  // The developer notes mode (feedback-ui.js) is not in 4.0: no button for it.
+  const hideFb = () => document.getElementById('btn-fb')?.setAttribute('hidden', '');
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideFb); else hideFb();
 
   window.api = new Proxy(known, {
     get(target, name) {
