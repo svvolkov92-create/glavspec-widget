@@ -153,6 +153,25 @@
     return { ok: true };
   }
 
+  // Only the author edits their message; the text stays visible to the same people, marked «изменено».
+  function taskCommentEdit(id, commentId, text) {
+    const me = currentUser(), t = typeof id === 'string' ? store.data.tasks[id] : null;
+    if (!me || !t || !A.canSeeTask(me, t, store.snapshot().users)) return { ok: false, message: 'Карточка не найдена.' };
+    const body = typeof text === 'string' ? text.trim().slice(0, 2000) : '';
+    if (!body) return { ok: false, message: 'Сообщение не может быть пустым.' };
+    const comments = (t.comments || []).map(c => ({ ...c }));
+    const c = comments.find(x => x.id === commentId);
+    if (!c) return { ok: false, message: 'Сообщение не найдено — возможно, его уже удалили.' };
+    if (c.userId !== me.id) return { ok: false, message: 'Исправить можно только своё сообщение.' };
+    if (c.text === body) return { ok: true };
+    const was = c.text;
+    Object.assign(c, { text: body, editedAt: new Date().toISOString() });
+    store.apply({ type: 'update', col: 'tasks', id, data: { comments } });
+    journal.append([{ col: 'tasks', id, kind: 'update', title: L.sectionsOf(t).join(', '), changes: [{ f: 'comment', label: 'Комментарий исправлен', from: was.slice(0, 200), to: body.slice(0, 200) }] }], { action: 'Комментарий исправлен', user: me.name });
+    changed();
+    return { ok: true };
+  }
+
   function taskThank(id, commentId) {
     const me = currentUser(), t = typeof id === 'string' ? store.data.tasks[id] : null;
     if (!me || !t || !A.canSeeTask(me, t, store.snapshot().users)) return { ok: false, message: 'Карточка не найдена.' };
@@ -201,5 +220,5 @@
       .filter(e => !e.changes || e.changes.length || e.kind !== 'update');
   }
 
-  return { currentUser, userView, migrateUsers, purgeTrash, switchUser, write, taskSeen, taskComment, taskThank, demoClear, journalGet };
+  return { currentUser, userView, migrateUsers, purgeTrash, switchUser, write, taskSeen, taskComment, taskCommentEdit, taskThank, demoClear, journalGet };
 });

@@ -1182,7 +1182,10 @@ function msgChatHtml(c) {
     const lt = localTs(m.ts), d = lt.slice(0, 10), sep = d !== day ? `<div class="mc-day">${d === state.today ? 'Сегодня' : fmtDate(d)}</div>` : '';
     day = d;
     const out = m.userId === me, tome = (m.mentions || []).includes(me), fresh = !out && m.ts > seen;
-    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${tome ? ' tome' : ''}${fresh ? ' fresh' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(m.user)}</b> <span class="hint">${lt.slice(11, 16)}</span>${tome ? ' <span class="chip tone-work">вас упомянули</span>' : ''}</div><div class="chat-text">${msgText(m.text, c)}</div></div>`;
+    const editing = out && msg.edit?.mid === m.id;
+    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${tome ? ' tome' : ''}${fresh ? ' fresh' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(m.user)}</b> <span class="hint">${lt.slice(11, 16)}${m.editedAt ? ' · изменено' : ''}</span>${tome ? ' <span class="chip tone-work">вас упомянули</span>' : ''}${out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(m.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
+      ? `<div class="msg-edit"><textarea id="mc-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(msg.edit.text)}</textarea><div class="row-in"><button class="btn primary sm" type="button" data-act="mc-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="mc-edit-cancel">Отмена</button></div></div>`
+      : `<div class="chat-text">${msgText(m.text, c)}</div>`}</div>`;
   }).join('');
   const sub = c.kind === 'project' ? `чат проекта · ${people.length} ${plural(people.length, 'участник', 'участника', 'участников')}` : c.kind === 'direct' ? 'личный чат' : `группа · ${people.length} ${plural(people.length, 'участник', 'участника', 'участников')}`;
   const canEdit = c.kind === 'group' && (c.createdBy === me || A.isGip(state.me));
@@ -1208,6 +1211,8 @@ function renderMsg() {
   if (!root) { root = document.createElement('div'); root.id = 'msg-root'; document.body.append(root); }
   if (!state.loaded || !state.me || state.win.compact) { root.innerHTML = ''; return; }
   const focus = document.activeElement?.id === 'msg-text', caret = focus ? document.activeElement.selectionStart : 0;
+  const editFocus = document.activeElement?.id === 'mc-edit';
+  if (msg.edit && document.getElementById('mc-edit')) msg.edit.text = document.getElementById('mc-edit').value; // keep the edit through a re-render
   const t = msgTotals(), c = msg.chatId && msg.chatId !== 'new' ? chatById(msg.chatId) : null;
   if (msg.chatId && msg.chatId !== 'new' && !c) msg.chatId = '';
   const pill = `<button class="msg-fab${t.n ? ' has' : ''}" type="button" data-act="msg-open" title="Сообщения: чаты проектов, личные и групповые">${icon('chat')}<span>Сообщения</span>${t.n ? `<i class="mc-n">${t.n}</i>` : ''}${t.at ? `<i class="mc-at" title="Вас упомянули">@${t.at}</i>` : ''}</button>`;
@@ -1220,6 +1225,7 @@ function renderMsg() {
   const box = document.getElementById('mc-msgs');
   if (box) box.scrollTop = box.scrollHeight;
   if (focus) { const ta = document.getElementById('msg-text'); if (ta) { ta.focus(); try { ta.setSelectionRange(caret, caret); } catch { /* fine */ } } }
+  if (editFocus) { const ta = document.getElementById('mc-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
   if (c) msgSeenLater(c);
 }
 function msgSeenLater(c) {
@@ -1230,7 +1236,7 @@ function msgSeenLater(c) {
 }
 function msgOpen(chatId = msg.chatId) {
   if (msg.mode === 'pill') msg.mode = 'side';
-  msg.chatId = chatId; msg.info = false; msg.mark = null;
+  msg.chatId = chatId; msg.info = false; msg.mark = null; msg.edit = null;
   renderMsg();
   setTimeout(() => document.getElementById('msg-text')?.focus(), 30);
 }
@@ -1239,12 +1245,35 @@ async function msgSend() {
   if (!c || !ta) return;
   const text = ta.value.trim();
   if (!text) return ta.focus();
-  const r = await api.chatSend(c.id, text, c.kind === 'project' ? c.projectId : undefined);
-  if (!r?.ok) return toast(r?.message || 'Не отправлено', true);
+  // Emptied before sending: the panel re-renders from the draft while the message is saved.
   msg.drafts[c.id] = '';
   ta.value = '';
+  const r = await api.chatSend(c.id, text, c.kind === 'project' ? c.projectId : undefined);
+  if (!r?.ok) {
+    if (!msg.drafts[c.id]) { msg.drafts[c.id] = text; const cur = document.getElementById('msg-text'); if (cur && !cur.value) cur.value = text; }
+    return toast(r?.message || 'Не отправлено', true);
+  }
   await refresh();
 }
+// Editing one's own message: inline, Enter saves, Esc cancels; mentions are re-read from the new text.
+function mcEditStart(mid) {
+  const c = chatById(msg.chatId), m = (c?.messages || []).find(x => x.id === mid);
+  if (!m || m.userId !== state.me?.id) return;
+  msg.edit = { mid, text: m.text };
+  renderMsg();
+  const ta = document.getElementById('mc-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+async function mcEditSave() {
+  const c = chatById(msg.chatId), ta = document.getElementById('mc-edit');
+  if (!c || !msg.edit || !ta) return;
+  const text = ta.value.trim();
+  if (!text) return toast('Сообщение не может быть пустым.', true);
+  const r = await api.chatEdit(c.id, msg.edit.mid, text);
+  if (!r?.ok) return toast(r?.message || 'Не удалось сохранить.', true);
+  msg.edit = null;
+  await refresh();
+}
+function mcEditCancel() { msg.edit = null; renderMsg(); }
 // «@» autocomplete: the chat's people by surname; Enter/Tab or a click inserts «@Фамилия ».
 function msgAutocomplete(ta) {
   const box = document.getElementById('mc-ac'), c = chatById(msg.chatId);
@@ -3182,15 +3211,21 @@ function renderTalk() {
   const box = $('#talk-box'), t = state.tasks.get(state.drawer?.id);
   if (!box || !t) return;
   const draft = $('#talk-text')?.value || '', typing = document.activeElement?.id === 'talk-text';
+  if (talkEdit && $('#talk-edit')) talkEdit.text = $('#talk-edit').value; // keep the edit through a re-render
+  if (talkEdit && !(t.comments || []).some(c => c.id === talkEdit.cid)) talkEdit = null;
+  const editingNow = document.activeElement?.id === 'talk-edit';
   const list = t.comments || [];
   const when = ts => new Date(ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   box.innerHTML = `<div class="talk">${list.length ? list.map(c => `<div class="msg-item${c.userId === state.me?.id ? ' mine' : ''}${c.kind === 'submit' ? ' submit' : ''}">
-      <div class="msg-h"><b>${esc(c.user || '—')}</b>${c.kind === 'submit' ? '<span class="chip tone-review">сдал на проверку</span>' : ''}<span class="hint">${when(c.ts)}</span></div>
-      <div class="msg-t">${esc(c.text)}</div>${thankBtn(t, c)}</div>`).join('') : '<div class="hint">Обсуждения пока нет. Здесь видят друг друга ответственные по карточке и их руководители.</div>'}</div>
+      <div class="msg-h"><b>${esc(c.user || '—')}</b>${c.kind === 'submit' ? '<span class="chip tone-review">сдал на проверку</span>' : ''}<span class="hint">${when(c.ts)}${c.editedAt ? ' · изменено' : ''}</span>${c.userId === state.me?.id && talkEdit?.cid !== c.id ? `<button class="edit-msg" type="button" data-act="talk-edit" data-cid="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>
+      ${talkEdit?.cid === c.id ? `<div class="msg-edit"><textarea id="talk-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(talkEdit.text)}</textarea>
+        <div class="row-in"><button class="btn primary sm" type="button" data-act="talk-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="talk-edit-cancel">Отмена</button><span class="hint">Ctrl+Enter — сохранить, Esc — отмена</span></div></div>`
+        : `<div class="msg-t">${esc(c.text)}</div>`}${thankBtn(t, c)}</div>`).join('') : '<div class="hint">Обсуждения пока нет. Здесь видят друг друга ответственные по карточке и их руководители.</div>'}</div>
     <div class="talk-new"><textarea id="talk-text" rows="2" maxlength="2000" placeholder="Написать… (Ctrl+Enter — отправить)">${esc(draft)}</textarea>
       <button class="btn primary" type="button" data-act="talk-send">Отправить</button></div>`;
   const tl = box.querySelector('.talk'); tl.scrollTop = tl.scrollHeight;
   if (typing) { const ta = $('#talk-text'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  if (editingNow) { const ta = $('#talk-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
 }
 // «Спасибо» under a colleague's message: one per person; the author sees the count and it adds up on their card.
 function thankBtn(t, c) {
@@ -3207,15 +3242,39 @@ async function thank(taskId, cid) {
   renderTalk();
   if (res.on) toast('Спасибо отправлено');
 }
+// The field is emptied before sending: the card re-renders while the message is saved, and it must not
+// come back with the old text. On failure the text is put back.
 async function sendComment() {
   const el = $('#talk-text'), id = state.drawer?.id;
   if (!el || !id || !el.value.trim()) return;
-  const res = await api.addComment(id, el.value);
-  if (!res?.ok) return toast(res?.message || 'Не удалось отправить.', true);
+  const text = el.value;
   el.value = '';
+  const res = await api.addComment(id, text);
+  if (!res?.ok) { const cur = $('#talk-text'); if (cur && !cur.value) cur.value = text; return toast(res?.message || 'Не удалось отправить.', true); }
   await refresh();
   renderTalk();
 }
+// Editing one's own message in a card discussion: inline, Ctrl+Enter saves, Esc cancels.
+let talkEdit = null; // { cid, text }
+function talkEditStart(cid) {
+  const c = (state.tasks.get(state.drawer?.id)?.comments || []).find(x => x.id === cid);
+  if (!c || c.userId !== state.me?.id) return;
+  talkEdit = { cid, text: c.text };
+  renderTalk();
+  const ta = $('#talk-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+async function talkEditSave() {
+  const ta = $('#talk-edit'), id = state.drawer?.id;
+  if (!talkEdit || !ta || !id) return;
+  const text = ta.value.trim();
+  if (!text) return toast('Сообщение не может быть пустым.', true);
+  const res = await api.editComment(id, talkEdit.cid, text);
+  if (!res?.ok) return toast(res?.message || 'Не удалось сохранить.', true);
+  talkEdit = null;
+  await refresh();
+  renderTalk();
+}
+function talkEditCancel() { talkEdit = null; renderTalk(); }
 
 // Status changes are actions (buttons in the card header, the status cell, the kanban), not a free list.
 const QUICK = {
@@ -5327,6 +5386,9 @@ document.addEventListener('click', e => {
     case 'new-user': setCreateMenu(false); openUser(null, el.dataset.role, el.dataset.chief); break;
     case 'team-toggle': toggleTeamNode(id); break;
     case 'talk-send': sendComment(); break;
+    case 'talk-edit': talkEditStart(el.dataset.cid); break;
+    case 'talk-edit-save': talkEditSave(); break;
+    case 'talk-edit-cancel': talkEditCancel(); break;
     case 'weekly': setFileMenu(false); openWeekly(); break;
     case 'usage': setFileMenu(false); openUsage(); break;
     case 'help': setFileMenu(false); openHelp(); break;
@@ -5378,6 +5440,9 @@ document.addEventListener('click', e => {
     case 'msg-back': msg.chatId = ''; renderMsg(); break;
     case 'msg-filter': msg.filter = el.dataset.v; renderMsg(); break;
     case 'mc-send': msgSend(); break;
+    case 'mc-edit': mcEditStart(id); break;
+    case 'mc-edit-save': mcEditSave(); break;
+    case 'mc-edit-cancel': mcEditCancel(); break;
     case 'msg-info': msg.info = !msg.info; renderMsg(); break;
     case 'msg-project': msgOpen(projectChatId(id)); break;
     case 'msg-new': msg.chatId = 'new'; msg.newKind = 'direct'; if (msg.mode === 'pill') msg.mode = 'side'; renderMsg(); break;
@@ -5512,6 +5577,14 @@ document.addEventListener('keydown', e => {
 }, true);
 
 document.addEventListener('keydown', e => {
+  if (e.target.id === 'talk-edit') {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); talkEditCancel(); return; }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); talkEditSave(); return; }
+  }
+  if (e.target.id === 'mc-edit') {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); mcEditCancel(); return; }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); mcEditSave(); return; }
+  }
   if (e.key === 'Escape' && !$('#view-menu').hidden) { setViewMenu(false); $('#btn-view').focus(); return; }
   if (e.key === 'Escape' && !$('#user-menu').hidden) { setUserMenu(false); $('#btn-user').focus(); return; }
   if (e.key === 'Escape' && !$('#file-menu').hidden) { setFileMenu(false); $('#btn-file').focus(); return; }

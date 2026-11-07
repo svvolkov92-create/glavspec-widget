@@ -1444,3 +1444,10 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .aq-kinds input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text, var(--accent)); font-weight: 600 }
 .aq-kinds input:focus-visible + span { outline: 2px solid var(--accent) }
 :root[data-theme="tandem"] .aq-kinds span { border-radius: 0 }
+
+/* Editing one's own message (card discussion and messenger) */
+.edit-msg { appearance: none; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0 4px; border-radius: 4px; margin-left: auto; opacity: .55 }
+.edit-msg:hover, .edit-msg:focus-visible { opacity: 1; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent) }
+.msg-edit { display: grid; gap: 6px; margin-top: 2px }
+.msg-edit textarea { width: 100%; resize: vertical; min-height: 52px }
+.msg-edit .row-in { display: flex; gap: 6px; align-items: center; flex-wrap: wrap }

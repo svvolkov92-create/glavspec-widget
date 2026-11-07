@@ -1,5 +1,6 @@
 'use strict';
-// 3.9: no budget field in the card for those without money access; «Журнал» tab of a card.
+// 3.9: no budget field in the card for those without money access; «Журнал» tab of a card;
+// the message field empties after sending; one's own messages can be corrected (card discussion and messenger).
 const electron = require('electron');
 const { app } = electron;
 const fs = require('node:fs');
@@ -58,6 +59,49 @@ app.on('browser-window-created', (_e, win) => {
         const t = await text('#tlog-box');
         check('«Журнал» shows the card entries', /Примечание/.test(t) && /ГИП/.test(t) && /создано/.test(t), t.slice(0, 200));
         await shot('39-01-card-journal');
+      });
+
+      await step('card discussion: empty after send, edit own', async () => {
+        await openTask('demo-t3');
+        await click('.dtab[data-id="talk"]'); await wait(200);
+        await setVal('#talk-text', 'Првоерка опечатки');
+        await click('[data-act="talk-send"]'); await wait(700);
+        check('field empty after sending', (await js(`document.querySelector('#talk-text').value`)) === '');
+        const c = data().tasks['demo-t3'].comments.at(-1);
+        check('message saved', c.text === 'Првоерка опечатки');
+        await click(`[data-act="talk-edit"][data-cid="${c.id}"]`); await wait(200);
+        check('edit field with the old text', (await js(`document.querySelector('#talk-edit')?.value`)) === 'Првоерка опечатки');
+        check('only own messages have ✎', (await js(`document.querySelectorAll('[data-act="talk-edit"]').length`)) === (await js(`[...window.AppBridge.state.tasks.get('demo-t3').comments].filter(x => x.userId === window.AppBridge.state.me.id).length`)) - 1);
+        await setVal('#talk-edit', 'Проверка опечатки');
+        await js(`document.querySelector('#talk-edit').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))`); await wait(700);
+        const c2 = data().tasks['demo-t3'].comments.at(-1);
+        check('corrected and marked', c2.text === 'Проверка опечатки' && !!c2.editedAt && /изменено/.test(await text('#talk-box')) && !(await js(`!!document.querySelector('#talk-edit')`)), JSON.stringify(c2));
+        await click(`[data-act="talk-edit"][data-cid="${c.id}"]`); await wait(150);
+        await js(`document.querySelector('#talk-edit').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`); await wait(200);
+        check('Esc cancels the edit, card stays open', !(await js(`!!document.querySelector('#talk-edit')`)) && (await js(`!!document.querySelector('#dform')`)));
+        const other = await js(`window.api.editComment('demo-t3', 'cm1', 'чужое')`);
+        check('someone else\'s message cannot be changed', !other.ok, JSON.stringify(other));
+        await click('.dtab[data-id="log"]'); await wait(600);
+        check('correction in the card journal', /Комментарий исправлен/.test(await text('#tlog-box')));
+        await shot('39-02-talk-edit');
+        await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(200);
+      });
+
+      await step('messenger: empty after send, edit own', async () => {
+        await click('[data-act="msg-open"]'); await wait(300);
+        const chatId = await js(`document.querySelector('[data-act="msg-chat"]')?.dataset.id`);
+        await click(`[data-act="msg-chat"][data-id="${chatId}"]`); await wait(300);
+        await setVal('#msg-text', 'Привет @все, првоерка');
+        await js(`document.querySelector('#msg-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`); await wait(800);
+        check('field empty after sending', (await js(`document.querySelector('#msg-text').value`)) === '');
+        const m = data().chats[chatId].messages.at(-1);
+        check('message saved', m.text === 'Привет @все, првоерка');
+        await click(`[data-act="mc-edit"][data-id="${m.id}"]`); await wait(200);
+        await setVal('#mc-edit', 'Привет, проверка');
+        await js(`document.querySelector('#mc-edit').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`); await wait(800);
+        const m2 = data().chats[chatId].messages.at(-1);
+        check('corrected, mentions re-read', m2.text === 'Привет, проверка' && !!m2.editedAt && m2.mentions.length === 0 && /изменено/.test(await text('#mc-msgs')), JSON.stringify(m2));
+        await shot('39-03-chat-edit');
       });
     } catch (e) { log.push('[smoke error] ' + (e.stack || e)); }
     fs.writeFileSync(path.join(outDir, 'log.txt'), log.join('\n'));
