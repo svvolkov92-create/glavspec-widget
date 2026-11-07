@@ -575,6 +575,7 @@ function registerIpc() {
   ipcMain.handle('task:seen', (_e, id) => core.taskSeen(id));
   // Card discussion: anyone who sees the card may write; its people and their chiefs get a «new» mark.
   ipcMain.handle('task:comment', (_e, id, text) => core.taskComment(id, text));
+  ipcMain.handle('task:comment-edit', (_e, id, commentId, text) => core.taskCommentEdit(id, commentId, text));
   // Messenger (3.8): project chats (GIP and participants), personal chats and group chats without a project.
   // Written only here; the renderer cannot write the chats collection directly.
   ipcMain.handle('chat:send', (_e, chatId, text, projectId) => {
@@ -592,6 +593,22 @@ function registerIpc() {
     store.apply({ type: 'set', col: 'chats', id: chatId, data: { ...chat, messages, seen: { ...(chat.seen || {}), [me.id]: now }, lastTs: now } });
     sendData();
     return { ok: true, mentions: msg.mentions.length };
+  });
+  // Only the author edits their message; mentions are read again from the new text.
+  ipcMain.handle('chat:edit', (_e, chatId, msgId, text) => {
+    const me = currentUser(), chat = typeof chatId === 'string' ? store.data.chats[chatId] : null;
+    const body = typeof text === 'string' ? text.trim().slice(0, 2000) : '';
+    if (!me || !chat || !A.canSeeChat(me, chat, store.snapshot().projects)) return { ok: false, message: 'Этот чат вам недоступен.' };
+    if (!body) return { ok: false, message: 'Сообщение не может быть пустым.' };
+    const messages = (chat.messages || []).map(m => ({ ...m }));
+    const m = messages.find(x => x.id === msgId);
+    if (!m) return { ok: false, message: 'Сообщение не найдено.' };
+    if (m.userId !== me.id) return { ok: false, message: 'Исправить можно только своё сообщение.' };
+    if (m.text === body) return { ok: true };
+    Object.assign(m, { text: body, editedAt: new Date().toISOString(), mentions: mentionsIn(body, chatMembers(chat)).filter(id => id !== me.id) });
+    store.apply({ type: 'update', col: 'chats', id: chatId, data: { messages } });
+    sendData();
+    return { ok: true };
   });
   ipcMain.handle('chat:seen', (_e, chatId) => {
     const me = currentUser(), chat = store.data.chats[chatId];
