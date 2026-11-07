@@ -389,7 +389,8 @@ app.on('browser-window-created', (_e, win) => {
         await shot('16-view-menu');
         await click('[data-act="settings"]'); await wait(200);
         check('settings window', await js(`!!document.querySelector('.settings-modal .set-sec')`));
-        check('desktop mode disabled outside Windows', await js(`document.querySelector('input[name="vm-level"][value="desktop"]').disabled`));
+        // On Windows the mode is there (PowerShell helper); elsewhere it is switched off.
+        check('desktop mode only on Windows', (await js(`document.querySelector('input[name="vm-level"][value="desktop"]').disabled`)) === (process.platform !== 'win32'));
         await shot('16b-settings');
         await click('[data-act="set-theme"][data-v="dark"]'); await wait(500);
         check('dark theme applied', await js(`matchMedia('(prefers-color-scheme: dark)').matches`));
