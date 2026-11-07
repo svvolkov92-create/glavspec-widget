@@ -151,15 +151,22 @@ function readCsv(buf) {
   return [{ name: 'CSV', rows }];
 }
 
-function readTable(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
+// The file's contents by its name (.xlsx / .csv); shared with the Tauri version, which reads the bytes itself.
+function readTableBytes(name, buf) {
+  const ext = path.extname(name).toLowerCase();
   if (ext === '.xls') throw new ImportError('Старый формат .xls не поддерживается. Откройте файл в Excel и сохраните как «Книга Excel (.xlsx)» или CSV.');
-  const stat = fs.statSync(filePath);
-  if (stat.size > MAX_FILE) throw new ImportError('Файл слишком большой (больше 30 МБ).');
-  const buf = fs.readFileSync(filePath);
+  if (buf.length > MAX_FILE) throw new ImportError('Файл слишком большой (больше 30 МБ).');
   if (ext === '.csv' || ext === '.txt') return readCsv(buf);
   if (ext === '.xlsx' || ext === '.xlsm') return readXlsx(buf);
   throw new ImportError('Поддерживаются файлы .xlsx и .csv.');
 }
 
-module.exports = { readTable, readXlsx, readCsv, ImportError };
+function readTable(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.xls') throw new ImportError('Старый формат .xls не поддерживается. Откройте файл в Excel и сохраните как «Книга Excel (.xlsx)» или CSV.');
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_FILE) throw new ImportError('Файл слишком большой (больше 30 МБ).');
+  return readTableBytes(filePath, fs.readFileSync(filePath));
+}
+
+module.exports = { readTable, readTableBytes, readXlsx, readCsv, ImportError };
