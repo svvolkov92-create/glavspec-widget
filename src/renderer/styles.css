@@ -1134,13 +1134,12 @@ details.more[open] { padding-bottom: 10px }
   --ok: #1E7A45; --ok-soft: #E3F2E8; --warn: #A34700; --warn-soft: #FFF0E3; --bad: #B3261E; --bad-soft: #FCE8E6;
   --review: #2457A6; --review-soft: #E4ECF8; --idle: #4B5361; --idle-soft: #EDF0F4; color-scheme: light;
 }
-:root[data-theme="tandem"] .shell { background: #F2F4F7 }
 :root[data-theme="tandem"] .brand-logo { display: inline-block }
 :root[data-theme="tandem"] #app-title { font-weight: 600; color: var(--muted); font-size: 12.5px }
 /* 3.7: «Тандем» — not only colours: the controls of the customer page (square corners, 600 weight, orange solid
    primary, soft-orange «burn», segments and tabs with an orange line, square chips, round orange counters). */
 :root[data-theme="tandem"] { --accent-text: #B04E0D; --accent-line: #F6D6C1 }
-:root[data-theme="tandem"] .btn { border-radius: 0; font-weight: 600; font-size: 13px; min-height: 34px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: var(--surface); text-shadow: none }
+:root[data-theme="tandem"] .btn { border-radius: 0; font-weight: 600; font-size: 13px; min-height: 34px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent); text-shadow: none }
 :root[data-theme="tandem"] .btn:hover { border-color: var(--accent) }
 :root[data-theme="tandem"] .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff }
 :root[data-theme="tandem"] .btn.primary:hover { background: #E45E14; border-color: #E45E14 }
@@ -1150,7 +1149,7 @@ details.more[open] { padding-bottom: 10px }
 :root[data-theme="tandem"] .btn.danger { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)) }
 :root[data-theme="tandem"] .btn.on, :root[data-theme="tandem"] .office-panel .btn.on, :root[data-theme="tandem"] .stage-bar .btn.on, :root[data-theme="tandem"] .g-mode .btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); box-shadow: inset 0 -2px 0 var(--accent) }
 :root[data-theme="tandem"] .btn.burn, :root[data-theme="tandem"] #btn-create.primary { }
-:root[data-theme="tandem"] .seg { display: inline-flex; gap: 0 !important; border: 1px solid var(--line); background: var(--surface) }
+:root[data-theme="tandem"] .seg { display: inline-flex; gap: 0 !important; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent) }
 :root[data-theme="tandem"] .seg > .btn { border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); min-height: 32px }
 :root[data-theme="tandem"] .seg > .btn:last-child { border-right: 0 }
 :root[data-theme="tandem"] .seg > .btn.on, :root[data-theme="tandem"] .seg > .btn.primary { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 -2px 0 var(--accent) }

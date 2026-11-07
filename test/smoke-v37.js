@@ -91,6 +91,8 @@ app.on('browser-window-created', (_e, win) => {
       await step('«Тандем» theme controls', async () => {
         await js(`window.api.setTheme('tandem')`); await wait(500);
         check('theme on', (await js(`document.documentElement.dataset.theme`)) === 'tandem');
+        const glass = await js(`getComputedStyle(document.querySelector('#shell')).backgroundColor + '|' + getComputedStyle(document.querySelector('.btn:not(.primary):not(.ghostbtn)')).backgroundColor`);
+        check('«Тандем» keeps the window translucent', /^(rgba|color)\(.*0\.8\d*\)\|/.test(glass) && !/^rgb\(/.test(glass.split('|')[1]), glass);
         const st = await js(`(() => { const b = document.querySelector('#btn-create'); const c = getComputedStyle(b); return c.borderRadius + '|' + c.fontWeight + '|' + c.backgroundColor; })()`);
         check('square orange primary button, weight 600', /^0px\|600\|rgb\(242, 106, 31\)/.test(st), st);
         await click('[data-act="tab"][data-id="tasks"]'); await wait(300);
