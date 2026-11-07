@@ -20,6 +20,8 @@ const ICON = {
   kanban: '<rect x="1.8" y="2" width="3.6" height="11.5" rx=".9"/><rect x="6.2" y="2" width="3.6" height="7.5" rx=".9"/><rect x="10.6" y="2" width="3.6" height="9.5" rx=".9"/>',
   tasks: '<path d="M6 4h8M6 8h8M6 12h8" stroke-linecap="round"/><path d="M2 4h1.4M2 8h1.4M2 12h1.4" stroke-width="1.8" stroke-linecap="round"/>',
   office: '<path d="M2 14V6.5L8 2l6 4.5V14z" stroke-linejoin="round"/><path d="M6 14v-3.5h4V14M5 7.5h1.5M9.5 7.5H11" stroke-linecap="round"/>',
+  detach: '<rect x="1.8" y="4.8" width="9.4" height="9.4" rx="1.2"/><path d="M8.5 2h5.5v5.5M14 2L7.5 8.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  dock: '<rect x="1.8" y="1.8" width="12.4" height="12.4" rx="1.4"/><path d="M11 5L6 10M6 6v4h4" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 // Direction icons (filled, own colours): электрика — молния, слаботочка — чип, водоснабжение — кран с каплей,
 // водоотведение — капли, отопление и вентиляция — ветерок.
@@ -237,7 +239,7 @@ function setData(snap) {
   state.chats = new Map((snap.chats || []).map(c => [c.id, c]));
   const first = !state.loaded;
   state.loaded = true;
-  if (prevMe !== state.me?.id) { mentionSeenTs = null; msg.chatId = ''; }
+  if (prevMe !== state.me?.id) { mentionSeenTs = null; msg.chatId = SOLO?.kind === 'chat' ? SOLO.id : ''; } // a chat window stays on its chat
   const d = state.drawer;
   if (d?.id && ['task', 'project', 'contractor'].includes(d.kind)) {
     const map = { task: state.tasks, project: state.projects, contractor: state.contractors }[d.kind];
@@ -1043,11 +1045,107 @@ function assignsOf(t) {
 }
 
 function openProjectPage(id) {
+  if (SOLO) { if (id !== SOLO.id) api.windowMain?.({ kind: 'project', id }); return; } // other projects open in the main window
+  docTabAdd(id);
   state.openProjectId = id;
   if (state.tab !== 'projects') state.tab = 'projects';
   render();
   const app = $('#app'); if (app) app.scrollTop = 0;
 }
+/* ---------- bookmarks and separate windows (4.0) ---------- */
+// A separate window shows one project or one chat: «?w=project:<id>» / «?w=chat:<key>». It runs this same
+// interface over the main window's data (the bridge forwards every call there) and shows only that page.
+const SOLO = (() => {
+  try {
+    const v = new URLSearchParams(location.search).get('w') || '', i = v.indexOf(':');
+    return i > 0 && ['project', 'chat'].includes(v.slice(0, i)) && v.length > i + 1 ? { kind: v.slice(0, i), id: v.slice(i + 1) } : null;
+  } catch { return null; }
+})();
+// Only where the app can open windows (the Tauri version); the Electron preload has no windowOpen.
+const canDetach = () => !SOLO && typeof api.windowOpen === 'function';
+// Projects opened in the main window stay as tabs above the page, like in a browser: × closes, the middle mouse
+// button too, dragging a tab out of the window (or ⧉) moves the project into its own window.
+const DOC_TABS_MAX = 12;
+let docTabs = (v => (Array.isArray(v) ? v.filter(x => typeof x === 'string').slice(-DOC_TABS_MAX) : []))(loadLocal('docTabs', []));
+const saveDocTabs = () => saveLocal('docTabs', docTabs);
+function docTabAdd(id) {
+  if (docTabs.includes(id)) return;
+  docTabs.push(id);
+  if (docTabs.length > DOC_TABS_MAX) docTabs = docTabs.filter(x => x === state.openProjectId || x === id).concat(docTabs.filter(x => x !== state.openProjectId && x !== id).slice(-(DOC_TABS_MAX - 2)));
+  saveDocTabs();
+}
+function docTabClose(id) {
+  const i = docTabs.indexOf(id);
+  if (i < 0) return;
+  docTabs.splice(i, 1);
+  saveDocTabs();
+  if (state.openProjectId === id) state.openProjectId = docTabs[Math.min(i, docTabs.length - 1)] || null;
+  render();
+}
+function docTabsHtml() {
+  if (SOLO) return '';
+  const tabs = docTabs.map(id => state.projects.get(id)).filter(p => p && !p.deletedAt);
+  if (!tabs.length) return '';
+  const dt = canDetach();
+  return `<div class="doc-tabs" role="tablist" aria-label="Открытые проекты"><button class="dtab home${state.openProjectId ? '' : ' on'}" type="button" role="tab" aria-selected="${!state.openProjectId}" data-act="project-back">${icon('projects')}<span>Все проекты</span></button>${tabs.map(p => {
+    const on = state.openProjectId === p.id;
+    return `<div class="dtab${on ? ' on' : ''}" role="tab" aria-selected="${on}" draggable="true" data-doc="project" data-doc-id="${esc(p.id)}" title="${esc(p.name)}${dt ? ' — перетащите за пределы окна, чтобы открыть отдельно' : ''}"><button class="dt-open" type="button" data-act="project-page" data-id="${esc(p.id)}">${p.code ? `<span class="mono">${esc(p.code)}</span>` : ''}<span class="dt-name">${esc(p.name)}</span></button>${dt ? `<button class="dt-btn" type="button" data-act="win-detach" data-kind="project" data-id="${esc(p.id)}" title="Открыть в отдельном окне" aria-label="Открыть в отдельном окне">${icon('detach')}</button>` : ''}<button class="dt-btn" type="button" data-act="dtab-close" data-id="${esc(p.id)}" title="Закрыть вкладку (средняя кнопка мыши)" aria-label="Закрыть вкладку">×</button></div>`;
+  }).join('')}</div>`;
+}
+const threadTitle = key => msgThreads().find(t => t.key === key)?.title || 'Чат';
+// Moves a project or a chat into its own window; `at` — the screen point where a dragged tab was dropped.
+async function detachDoc(kind, id, at) {
+  if (!canDetach() || !id) return;
+  const title = kind === 'project' ? (state.projects.get(id)?.name || 'Проект') : threadTitle(id);
+  const r = await api.windowOpen({ kind, id, title, ...(at && Number.isFinite(at.x) ? { x: at.x, y: at.y } : {}) });
+  if (!r?.ok) return toast(r?.message || 'Не удалось открыть отдельное окно.', true);
+  if (kind === 'project') {
+    const i = docTabs.indexOf(id);
+    if (i >= 0) { docTabs.splice(i, 1); saveDocTabs(); }
+    if (state.openProjectId === id) state.openProjectId = null;
+    render();
+  } else if (msg.chatId === id) { msg.chatId = ''; renderMsg(); }
+}
+// Buttons in a page head: «в отдельное окно» here, «в главное окно» inside a separate window.
+const winBtn = (kind, id) => (SOLO ? `<button class="btn ghostbtn sm" type="button" data-act="win-dock" title="Закрыть это окно и открыть здесь же в главном">${icon('dock')} В главное окно</button>`
+  : canDetach() ? `<button class="btn ghostbtn sm" type="button" data-act="win-detach" data-kind="${kind}" data-id="${esc(id)}" title="Открыть в отдельном окне — удобно держать рядом несколько проектов и чатов">${icon('detach')}</button>` : '');
+// Dragging: a project tab onto another one changes the order; a tab or a chat dropped outside the window opens
+// it in its own window.
+let docDrag = null;
+document.addEventListener('dragstart', e => {
+  const el = e.target.closest?.('[data-doc]');
+  if (!el) return;
+  docDrag = { kind: el.dataset.doc, id: el.dataset.docId };
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', el.title || el.textContent.trim());
+});
+document.addEventListener('dragover', e => {
+  if (docDrag?.kind !== 'project') return;
+  const t = e.target.closest?.('.dtab[data-doc]');
+  if (t && t.dataset.docId !== docDrag.id) e.preventDefault();
+});
+document.addEventListener('drop', e => {
+  const d = docDrag, t = e.target.closest?.('.dtab[data-doc]');
+  if (d?.kind !== 'project' || !t || t.dataset.docId === d.id) return;
+  e.preventDefault();
+  docTabs = docTabs.filter(x => x !== d.id);
+  docTabs.splice(docTabs.indexOf(t.dataset.docId), 0, d.id);
+  saveDocTabs();
+  render();
+});
+document.addEventListener('dragend', e => {
+  const d = docDrag;
+  docDrag = null;
+  if (!d) return;
+  const outside = e.clientX < 0 || e.clientY < 0 || e.clientX > window.innerWidth || e.clientY > window.innerHeight;
+  if (outside && e.dataTransfer?.dropEffect === 'none') detachDoc(d.kind, d.id, { x: e.screenX, y: e.screenY });
+});
+document.addEventListener('auxclick', e => {
+  const t = e.button === 1 && e.target.closest?.('.dtab[data-doc]');
+  if (!t) return;
+  e.preventDefault();
+  docTabClose(t.dataset.docId);
+});
 /* ---------- assigning people by drag and drop (3.6) ---------- */
 // People of the project (participants the current user may assign, plus contractors) on the left; sections of the
 // composition on the right, grouped like the project page. Drop a person on a section — or on a group heading to
@@ -1257,7 +1355,8 @@ function msgListHtml() {
   }
   const list = all.filter(t => msg.filter === 'all' || t.sec === msg.filter)
     .sort((a, b) => (b.urgent && b.unread ? 1 : 0) - (a.urgent && a.unread ? 1 : 0) || b.last.localeCompare(a.last) || a.title.localeCompare(b.title, 'ru'));
-  const item = t => `<div class="mc-row"><button class="mc-item${t.unread ? ' unread' : ''}${msg.chatId === t.key ? ' sel' : ''}" type="button" data-act="msg-chat" data-id="${esc(t.key)}">${t.icon}<span class="mc-body"><span class="mc-top"><b>${esc(t.title)}</b><span class="hint">${t.last ? timeOf(localTs(t.last)) : ''}</span></span>
+  const drag = canDetach() ? ' draggable="true" data-doc="chat"' : '';
+  const item = t => `<div class="mc-row"><button class="mc-item${t.unread ? ' unread' : ''}${msg.chatId === t.key ? ' sel' : ''}" type="button" data-act="msg-chat" data-id="${esc(t.key)}"${drag}${drag ? ` data-doc-id="${esc(t.key)}" title="${esc(t.title)} — перетащите за пределы окна, чтобы открыть отдельно"` : ''}>${t.icon}<span class="mc-body"><span class="mc-top"><b>${esc(t.title)}</b><span class="hint">${t.last ? timeOf(localTs(t.last)) : ''}</span></span>
       <span class="mc-prev">${t.prev}</span></span>${t.at ? '<i class="mc-at">@</i>' : ''}${t.unread ? `<i class="mc-n${t.urgent ? ' urgent' : ''}">${t.unread}</i>` : ''}</button>
     <button class="mc-pin${pins.has(t.key) ? ' on' : ''}" type="button" data-act="msg-pin" data-id="${esc(t.key)}" aria-pressed="${pins.has(t.key)}" title="${pins.has(t.key) ? 'Открепить' : 'Закрепить сверху'}">${icon('pin')}</button></div>`;
   const pinned = list.filter(t => pins.has(t.key)), rest = list.filter(t => !pins.has(t.key));
@@ -1284,7 +1383,7 @@ function msgChatHtml(c) {
       ${canEdit ? `<div class="row-in"><select id="mc-add"><option value="">— добавить участника —</option>${liveUsers().filter(u => !people.includes(u)).sort(byName).map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select><button class="btn sm" type="button" data-act="msg-add-member">Добавить</button></div>` : ''}
       ${c.kind === 'group' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-leave">Выйти из чата</button>' : ''}${c.kind === 'project' ? `<button class="btn ghostbtn sm" type="button" data-act="project-page" data-id="${esc(c.projectId)}">Открыть проект</button><span class="hint">Участники проекта меняются на его странице.</span>` : ''}</div>` : '';
   return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку чатов">←</button>' : ''}${chatIcon(c)}<span class="mc-ht"><b>${esc(chatTitle(c))}</b><span class="hint">${sub}</span></span>
-      ${msgPinBtn(c.id)}<button class="btn ghostbtn sm" type="button" data-act="msg-info" aria-pressed="${msg.info}">Участники</button></div>${info}
+      ${msgPinBtn(c.id)}${winBtn('chat', c.id)}<button class="btn ghostbtn sm" type="button" data-act="msg-info" aria-pressed="${msg.info}">Участники</button></div>${info}
     <div class="mc-msgs" id="mc-msgs">${rows || `<p class="hint mc-empty">Напишите первое сообщение. «@» и фамилия — упомянуть коллегу${c.kind !== 'direct' ? ', «@все» — всех' : ''}.</p>`}</div>
     <div class="mc-compose"><div class="mc-ac" id="mc-ac" hidden></div><textarea id="msg-text" rows="2" maxlength="2000" placeholder="Сообщение… Enter — отправить, Shift+Enter — новая строка, @ — упомянуть">${esc(msg.drafts[c.id] || '')}</textarea><button class="btn primary sm" type="button" data-act="mc-send">Отправить</button></div></div>`;
 }
@@ -1301,7 +1400,7 @@ function msgTaskHtml(t) {
       : `<div class="chat-text">${esc(c.text)}</div>`}${thankBtn(t, c)}</div>`;
   }).join('');
   return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку">←</button>' : ''}<span class="mc-ic task">✎</span><span class="mc-ht"><b>${esc(marksText(t) || t.title || 'Карточка')}</b><span class="hint">обсуждение карточки · ${esc(projectOf(t)?.name || '')}</span></span>
-      ${msgPinBtn('t:' + t.id)}<button class="btn ghostbtn sm" type="button" data-act="open-task" data-id="${esc(t.id)}">Открыть карточку</button></div>
+      ${msgPinBtn('t:' + t.id)}${winBtn('chat', 't:' + t.id)}<button class="btn ghostbtn sm" type="button" data-act="open-task" data-id="${esc(t.id)}">Открыть карточку</button></div>
     <div class="mc-msgs" id="mc-msgs">${rows || '<p class="hint mc-empty">Сообщений нет.</p>'}</div>
     <div class="mc-compose"><textarea id="msg-text" rows="2" maxlength="2000" placeholder="Сообщение в обсуждение карточки… Enter — отправить, Shift+Enter — новая строка">${esc(msg.drafts['t:' + t.id] || '')}</textarea><button class="btn primary sm" type="button" data-act="mc-send">Отправить</button></div></div>`;
 }
@@ -1313,7 +1412,7 @@ function msgCustHtml(pid, list) {
     ${m.requestTitle || m.meetingTitle || m.to ? `<div class="hint">${esc(m.requestTitle || m.meetingTitle || '')}${m.to ? ` → ${esc(m.to)}` : ''}</div>` : ''}<div class="chat-text">${esc(m.text || '')}</div></div>`).join('');
   const name = state.projects.get(pid)?.name || sorted.at(-1)?.projectName || 'Проект';
   return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку">←</button>' : ''}<span class="mc-ic cust">З</span><span class="mc-ht"><b>${esc(name)}</b><span class="hint">от заказчика · через кабинет</span></span>
-      ${msgPinBtn('c:' + pid)}${state.projects.has(pid) ? `<button class="btn ghostbtn sm" type="button" data-act="msg-cust-project" data-id="${esc(pid)}" title="Открыть проект: принять исходные данные, ответить, перенести встречу">В проект</button>` : ''}</div>
+      ${msgPinBtn('c:' + pid)}${winBtn('chat', 'c:' + pid)}${state.projects.has(pid) ? `<button class="btn ghostbtn sm" type="button" data-act="msg-cust-project" data-id="${esc(pid)}" title="Открыть проект: принять исходные данные, ответить, перенести встречу">В проект</button>` : ''}</div>
     <div class="mc-msgs" id="mc-msgs">${rows}</div>
     <p class="hint mc-note">Заказчик пишет из кабинета, ответ ему — действиями в проекте: принять исходные данные, перенести встречу, перезвонить.</p></div>`;
 }
@@ -1330,20 +1429,22 @@ function msgNewHtml() {
 function renderMsg() {
   let root = document.getElementById('msg-root');
   if (!root) { root = document.createElement('div'); root.id = 'msg-root'; document.body.append(root); }
-  if (!state.loaded || !state.me || state.win.compact) { root.innerHTML = ''; return; }
+  if (!state.loaded || !state.me || state.win.compact || SOLO?.kind === 'project') { root.innerHTML = ''; return; }
   const focus = document.activeElement?.id === 'msg-text', caret = focus ? document.activeElement.selectionStart : 0;
   const editFocus = document.activeElement?.id === 'mc-edit';
   if (msg.edit && document.getElementById('mc-edit')) msg.edit.text = document.getElementById('mc-edit').value; // keep the edit through a re-render
   const t = msgTotals(), th = msgThread(msg.chatId), c = th?.type === 'chat' ? th.c : null;
-  if (msg.chatId && msg.chatId !== 'new' && !th) msg.chatId = '';
+  if (msg.chatId && msg.chatId !== 'new' && !th && msg.mode !== 'solo') msg.chatId = ''; // a chat window keeps waiting for its chat
   const pill = `<button class="msg-fab${t.n ? ' has' : ''}" type="button" data-act="msg-open" title="Сообщения: чаты проектов, личные и групповые">${icon('chat')}<span>Сообщения</span>${t.n ? `<i class="mc-n">${t.n}</i>` : ''}${t.at ? `<i class="mc-at" title="Вас упомянули">@${t.at}</i>` : ''}</button>`;
   if (msg.mode === 'pill') { root.innerHTML = pill; return; }
   const head = `<div class="mp-head"><b>Сообщения</b><span class="spacer"></span><button class="btn sm" type="button" data-act="msg-new">+ Новый чат</button>
     <button class="btn ghostbtn sm" type="button" data-act="msg-size" title="${msg.mode === 'full' ? 'Свернуть в боковую панель' : 'Открыть окно со всеми чатами'}">${msg.mode === 'full' ? '⇲' : '⤢'}</button><button class="btn ghostbtn sm" type="button" data-act="msg-close" aria-label="Свернуть">✕</button></div>`;
-  const right = msg.chatId === 'new' ? msgNewHtml() : c ? msgChatHtml(c) : th?.type === 'task' ? msgTaskHtml(th.t) : th?.type === 'cust' ? msgCustHtml(th.pid, th.list) : '<div class="mc-chat"><p class="hint mc-empty">Выберите разговор слева или создайте новый чат.</p></div>';
+  const right = msg.chatId === 'new' ? msgNewHtml() : c ? msgChatHtml(c) : th?.type === 'task' ? msgTaskHtml(th.t) : th?.type === 'cust' ? msgCustHtml(th.pid, th.list) : msg.mode === 'solo' ? '<div class="mc-chat"><p class="hint mc-empty">Разговор недоступен: его удалили или вы больше в нём не участвуете. Это окно можно закрыть.</p></div>' : '<div class="mc-chat"><p class="hint mc-empty">Выберите разговор слева или создайте новый чат.</p></div>';
   const body = msg.mode === 'full' ? `<div class="mp-full"><div class="mp-left">${msgListHtml()}</div><div class="mp-right">${right}</div></div>` : (msg.chatId ? right : msgListHtml());
   const enter = msg.enter ? ' enter' : ''; msg.enter = false; // slide in only when the panel opens, not on every refresh
-  root.innerHTML = `${msg.mode === 'full' ? `<div class="mp-back${enter}" data-act="msg-close"></div>` : ''}<section class="msg-panel ${msg.mode}${enter}" role="dialog" aria-label="Сообщения">${head}${body}</section>`;
+  if (msg.mode === 'solo') document.documentElement.style.setProperty('--bar-h', `${document.getElementById('bar')?.offsetHeight || 48}px`);
+  if (msg.mode === 'solo') root.innerHTML = `<section class="msg-panel solo" aria-label="${esc(threadTitle(msg.chatId))}">${right}</section>`;
+  else root.innerHTML = `${msg.mode === 'full' ? `<div class="mp-back${enter}" data-act="msg-close"></div>` : ''}<section class="msg-panel ${msg.mode}${enter}" role="dialog" aria-label="Сообщения">${head}${body}</section>`;
   const box = document.getElementById('mc-msgs');
   if (box) box.scrollTop = box.scrollHeight;
   if (focus) { const ta = document.getElementById('msg-text'); if (ta) { ta.focus(); try { ta.setSelectionRange(caret, caret); } catch { /* fine */ } } }
@@ -1359,6 +1460,7 @@ function msgSeenLater(c) {
   msgSeenLater.t = setTimeout(() => { if (msg.chatId === c.id && msg.mode !== 'pill') api.chatSeen(c.id); }, 900);
 }
 function msgOpen(chatId = msg.chatId) {
+  if (SOLO && !(SOLO.kind === 'chat' && chatId === SOLO.id)) { if (chatId && chatId !== 'new') api.windowMain?.({ kind: 'chat', id: chatId }); return; }
   if (msg.mode === 'pill') { msg.mode = 'side'; msg.enter = true; }
   msg.chatId = chatId; msg.info = false; msg.mark = null; msg.edit = null;
   renderMsg();
@@ -1415,7 +1517,7 @@ async function mcEditSave() {
 function mcEditCancel() { msg.edit = null; renderMsg(); }
 // Closing slides the panel out to the right (when animations are on).
 function msgClose() {
-  if (msg.mode === 'pill') return;
+  if (msg.mode === 'pill' || msg.mode === 'solo') return; // a chat window closes with its own ✕
   leaveAnimated(document.querySelector('#msg-root .mp-back'), document.querySelector('#msg-root .msg-panel'));
   msg.mode = 'pill';
   renderMsg();
@@ -1564,9 +1666,9 @@ function viewProjectPage(p) {
     ${canEdit ? `<div class="row-in pt-add"><select id="pt-member"><option value="">— добавить участника —</option>${addable.map(u => `<option value="${esc(u.id)}">${esc(u.name)} · ${esc(roleOf(u))}</option>`).join('')}</select><button class="btn sm" type="button" data-act="member-add">Добавить</button>
       ${inTasks.length ? `<span class="hint">Работают в задачах, но не в участниках: ${inTasks.map(id => esc(state.users.get(id).name)).join(', ')}</span><button class="btn ghostbtn sm" type="button" data-act="member-add-tasks">Добавить их</button>` : ''}</div>` : ''}</section>`;
 
-  const head = `<div class="pt-top"><button class="btn ghostbtn sm" type="button" data-act="project-back">← Все проекты</button>
+  const head = `<div class="pt-top">${SOLO ? '' : '<button class="btn ghostbtn sm" type="button" data-act="project-back">← Все проекты</button>'}
     <h2>${esc(p.name)}</h2>${p.archived ? '<span class="chip tone-idle">в архиве</span>' : projectStageChip(p)}${code ? `<span class="pcode mono">${esc(code)}</span>` : ''}${p.client ? `<span class="meta">${esc(p.client)}</span>` : ''}
-    <span class="spacer"></span>
+    <span class="spacer"></span>${winBtn('project', p.id)}
     ${p.folder ? `<button class="btn ghostbtn sm" data-act="open-folder" data-id="${esc(p.id)}" type="button" title="${esc(p.folder)}">Папка проекта</button>` : ''}
     <button class="btn ghostbtn sm" type="button" data-act="techcard" title="Этапы, волны, задания смежникам">Техкарта</button>
     ${canEdit ? `<button class="btn sm" type="button" data-act="project-timeline" data-id="${esc(p.id)}">Сроки</button><button class="btn sm" type="button" data-act="assign-board" data-id="${esc(p.id)}">Назначить исполнителей</button><button class="btn sm" type="button" data-act="ask-customer" data-id="${esc(p.id)}" title="ТУ, письма, согласования, решения — заказчик увидит в «Нужно от вас»">Запросить у заказчика</button>${A.canChat(state.me, p) ? (() => { const c = chatById(projectChatId(p.id)), n = c ? msgUnread(c).length : 0; return `<button class="btn sm" type="button" data-act="msg-project" data-id="${esc(p.id)}">Чат проекта${n ? ` <span class="cnt bad">${n}</span>` : ''}</button>`; })() : ''}<button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="comp">Состав проекта</button><button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="cust">Для заказчика</button><button class="btn sm" type="button" data-act="open-project" data-id="${esc(p.id)}">Изменить</button>` : ''}</div>`;
@@ -1579,7 +1681,8 @@ function viewProjects() {
   if (isEmpty()) return emptyState();
   if (state.openProjectId) {
     const op = state.projects.get(state.openProjectId);
-    if (op && !op.deletedAt) return viewProjectPage(op);
+    if (op && !op.deletedAt) return docTabsHtml() + viewProjectPage(op);
+    if (SOLO) return '<section class="empty"><h2>Проект недоступен</h2><p class="hint">Его удалили или у вас больше нет к нему доступа. Это окно можно закрыть.</p></section>';
     state.openProjectId = null;
   }
   const projects = liveProjects(), archived = archivedProjects();
@@ -1593,7 +1696,7 @@ function viewProjects() {
   const shownProjects = stage ? projects.filter(p => (p.status || '') === (stage === '-' ? '' : stage)) : projects;
   const live = shownProjects.length ? shownProjects.map(p => projectPanel(p, all)).join('')
     : `<section class="empty"><h2>Активных проектов нет</h2><p class="hint">Заведите проект, затем добавьте в него карточки работ.</p><div class="acts"><button class="btn primary" data-act="new-project" type="button">Добавить проект</button></div></section>`;
-  return (projects.length && projects.some(p => p.status) ? `<div class="proj-top">${stageBar}</div>` : '') + live
+  return docTabsHtml() + (projects.length && projects.some(p => p.status) ? `<div class="proj-top">${stageBar}</div>` : '') + live
     + (orphans.length ? `<section class="panel"><div class="panel-h"><h3>Без проекта</h3></div>${taskTable(orphans, { showProject: false })}</section>` : '')
     + archToggle
     + (state.showArchive ? archived.map(p => projectPanel(p, all)).join('') : '');
@@ -2841,7 +2944,7 @@ function renderNow() {
   state.today = todayStr();
   $('#att-wrap').innerHTML = counters();
   const overdueCount = state.loaded ? attention().overdue.length : 0;
-  const title = A.titleFor(state.me);
+  const title = !SOLO ? A.titleFor(state.me) : SOLO.kind === 'project' ? (state.projects.get(SOLO.id)?.name || 'Проект') : threadTitle(SOLO.id);
   $('#app-title').textContent = title;
   document.title = title;
   $('#user-name').textContent = state.me ? `${state.me.name}${A.directionLabels(state.me).length ? ' · ' + A.directionLabels(state.me).join(', ') : ''}` : '—';
@@ -5652,6 +5755,9 @@ document.addEventListener('click', e => {
     case 'new-task': setCreateMenu(false); openTask(null, { projectId: el.dataset.project }); break;
     case 'open-project': openProject(id); break;
     case 'project-page': openProjectPage(id); break;
+    case 'dtab-close': docTabClose(id); break;
+    case 'win-detach': detachDoc(el.dataset.kind, id); break;
+    case 'win-dock': api.windowDock?.(SOLO); break;
     case 'project-back': state.openProjectId = null; render(); break;
     case 'open-project-tab': openProject(id, el.dataset.tab); break;
     case 'msg-open': msgOpen(); break;
@@ -5956,6 +6062,16 @@ applyDense();
 applyAnim();
 state.kanban.lanes = loadLocal('kbLanes', '') || '';
 $('#app').addEventListener('scroll', rememberScroll, { passive: true });
+if (SOLO) {
+  document.body.classList.add('solo', 'solo-' + SOLO.kind);
+  if (SOLO.kind === 'project') { state.tab = 'projects'; state.openProjectId = SOLO.id; }
+  else { msg.mode = 'solo'; msg.chatId = SOLO.id; }
+}
+// A separate window hands a project or a chat back (or asks to open another one here).
+api.onWindowMain?.(spec => {
+  if (spec?.kind === 'project' && state.projects.has(spec.id)) { if (state.tab !== 'projects') { state.tab = 'projects'; saveLocal('tab', 'projects'); } openProjectPage(spec.id); }
+  else if (spec?.kind === 'chat' && spec.id) { if (msg.mode === 'pill') { msg.mode = 'full'; msg.enter = true; } msgOpen(spec.id); }
+});
 api.onData(setData);
 api.onCabinet?.(setCab);
 api.onWindowState(applyWinState);
