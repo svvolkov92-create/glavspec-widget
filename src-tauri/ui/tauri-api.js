@@ -105,6 +105,7 @@
     taskSeen: async id => { const c = await ready(); return saved(c.core.taskSeen(id)); },
     addComment: async (id, text) => { const c = await ready(); return saved(c.core.taskComment(id, text)); },
     thankComment: async (id, commentId) => { const c = await ready(); return saved(c.core.taskThank(id, commentId)); },
+    editComment: async (id, commentId, text) => { const c = await ready(); return saved(c.core.taskCommentEdit(id, commentId, text)); },
     clearDemo: async () => { const c = await ready(); return saved(c.core.demoClear()); },
     getJournal: async since => { const c = await ready(); return c.core.journalGet({ since }); },
     reloadWindow: async () => { location.reload(); return { ok: true }; },
