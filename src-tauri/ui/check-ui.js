@@ -7,6 +7,8 @@ const srv = http.createServer((q, res) => { const u = decodeURIComponent(q.url.s
   fs.readFile(f, (e, d) => { if (e) { res.writeHead(404); return res.end(); } res.writeHead(200, { 'content-type': f.endsWith('.css') ? 'text/css' : f.endsWith('.js') ? 'text/javascript' : f.endsWith('.html') ? 'text/html; charset=utf-8' : 'application/octet-stream' }); res.end(d); }); }).listen(8766);
 const disk = { data: null, settings: { fullBounds: { x: 200, y: 100, width: 1200, height: 800 } }, journal: [], version: 0, seen: 0, saves: 0 };
 const sysCalls = [];
+const fsMem = {}; // path → Buffer (stand-in for the disk behind the Rust file commands)
+const dialogs = []; let nextPath = null, confirmAnswer = true;
 const log = []; const check = (n, ok, x = '') => log.push(`${ok ? 'OK  ' : 'FAIL'} ${n}${x ? ' — ' + x : ''}`);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
@@ -28,6 +30,18 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       case 'window_to_bottom': sysCalls.push('bottom'); return true;
       case 'open_data_folder': sysCalls.push('folder'); return null;
       case 'app_quit': sysCalls.push('quit'); return null;
+      case 'known_dirs': return { documents: 'C:\\Users\\gip\\Documents', userData: 'C:\\Users\\gip\\AppData\\Roaming\\GlavspecWidget-tauri' };
+      case 'dialog_save': case 'dialog_open': dialogs.push({ cmd, ...args }); return nextPath;
+      case 'dialog_confirm': dialogs.push({ cmd, ...args }); return confirmAnswer;
+      case 'fs_write': fsMem[args.path] = args.text != null ? Buffer.from(args.text, 'utf8') : Buffer.from(args.base64, 'base64'); return null;
+      case 'fs_read': if (!fsMem[args.path]) throw 'нет файла ' + args.path; return fsMem[args.path].toString('base64');
+      case 'fs_exists': return !!fsMem[args.path] || Object.keys(fsMem).some(k => k.startsWith(args.path + '\\'));
+      case 'fs_mkdir': return null;
+      case 'fs_list': return Object.keys(fsMem).filter(k => k.startsWith(args.path + '\\')).map(k => k.slice(args.path.length + 1));
+      case 'fs_remove': delete fsMem[args.path]; return null;
+      case 'open_path': sysCalls.push('open:' + args.path); return '';
+      case 'open_url': sysCalls.push('url:' + args.url); return null;
+      case 'print_html': sysCalls.push('print'); fsMem.__printed = Buffer.from(args.html); return null;
       default: throw 'unknown command ' + cmd;
     }
   });
@@ -112,8 +126,54 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const pid = await js(() => [...window.AppBridge.state.projects.keys()][0]);
   const pr = disk.data.projects[pid];
   check('ИРД request saved (request + ИРД row)', (pr.requests || []).some(r => /ТУ на водоснабжение/.test(r.title)) && (pr.ird || []).some(r => /ТУ на водоснабжение/.test(r.title)), JSON.stringify({ req: pr.requests, ird: pr.ird }).slice(0, 300));
-  const r5 = await js(() => window.api.exportReport('xlsx', 'all'));
+  const r5 = await js(() => window.api.cabinetSync());
   check('not moved yet → clear message', !r5.ok && /следующем этапе/.test(r5.message));
+  // Files through the shared module (src/core/files.js) and the report code of the Electron version.
+  {
+  const docs = 'C:\\Users\\gip\\Documents';
+  nextPath = docs + '\\Отчёт.xlsx';
+  const rx = await js(() => window.api.exportReport('xlsx', { type: 'all' }));
+  const x = fsMem[nextPath];
+  check('report: Excel written (a real .xlsx)', rx.ok && x && x[0] === 0x50 && x[1] === 0x4b && x.length > 3000 && dialogs.at(-1).filters[0].extensions[0] === 'xlsx', JSON.stringify(rx));
+  const { readXlsx } = require(require('path').resolve('src/import/read.js'));
+  const sheets = readXlsx(x);
+  check('report: Excel readable, cards inside', sheets.some(sh => sh.rows.length > 5), sheets.map(sh => sh.name + ':' + sh.rows.length).join());
+  nextPath = docs + '\\Отчёт';
+  const rd = await js(() => window.api.exportReport('docx', { type: 'all' }));
+  check('report: Word written, extension added', rd.ok && fsMem[docs + '\\Отчёт.docx']?.[0] === 0x50, JSON.stringify(rd));
+  await js(() => window.api.openLastReport()); await wait(100);
+  check('«Открыть» opens the saved file', sysCalls.includes('open:' + docs + '\\Отчёт.docx'));
+  const cpid = await js(() => [...window.AppBridge.state.projects.keys()][0]);
+  nextPath = docs + '\\Статус.html';
+  const rc = await js(id => window.api.customerPage(id, { format: 'html' }), cpid);
+  const page = fsMem[nextPath]?.toString('utf8') || '';
+  check('customer page: HTML with logo and font inside', rc.ok && /<svg/.test(page) && /@font-face/.test(page) && page.length > 50000, JSON.stringify(rc) + ' ' + page.length);
+  const n0 = dialogs.length;
+  const rp = await js(id => window.api.customerPage(id, { format: 'pdf' }), cpid);
+  check('customer page: PDF → the browser print dialog, no save dialog', rp.ok && rp.viaBrowser && sysCalls.includes('print') && dialogs.length === n0, JSON.stringify(rp));
+  nextPath = docs + '\\копия.json';
+  const rb = await js(() => window.api.backupSave());
+  const backup = JSON.parse(fsMem[nextPath].toString('utf8'));
+  check('backup saved', rb.ok && backup.format === 'glavspec-backup' && Object.keys(backup.data.tasks).length > 5);
+  const before = Object.keys(disk.data.tasks).length;
+  await js(() => window.api.write([{ type: 'set', col: 'tasks', id: 'tmp-x', data: { projectId: [...window.AppBridge.state.projects.keys()][0], sections: ['ЭОМ'], title: 'после копии' } }], {})); await wait(300);
+  const rr = await js(() => window.api.backupRestore()); await wait(400);
+  check('restore: asks, keeps the current data, replaces, saves', rr.ok && dialogs.some(d => d.cmd === 'dialog_confirm' && /Заменить текущие данные/.test(d.message)) && !disk.data.tasks['tmp-x'] && Object.keys(disk.data.tasks).length === before
+    && Object.keys(fsMem).some(k => /before-restore-/.test(k)), JSON.stringify(rr));
+  check('restore shown in the window', !(await js(() => window.AppBridge.state.tasks.has('tmp-x'))));
+  fsMem[docs + '\\Таблица.csv'] = Buffer.from('\ufeffОбъект;Разделы;Подрядчик\r\nЖК «Восток»;ЭОМ;ООО Свет\r\n', 'utf8');
+  nextPath = docs + '\\Таблица.csv';
+  const ri = await js(() => window.api.importPick());
+  check('import: table read', ri.ok && ri.sheets[0].rows[1][0] === 'ЖК «Восток»', JSON.stringify(ri).slice(0, 200));
+  nextPath = 'D:\\Копии';
+  fsMem['D:\\Копии\\.keep'] = Buffer.from('');
+  const ra = await js(() => window.api.autoBackupSet(false));
+  check('automatic copy: folder chosen, first copy written', ra.ok && Object.keys(fsMem).some(k => /^D:\\Копии\\Пульт главспеца — автокопия \d{4}-\d\d-\d\d\.json$/.test(k)) && disk.settings.autoBackupDir === 'D:\\Копии', JSON.stringify(ra));
+  nextPath = null;
+  const rn = await js(() => window.api.exportReport('xlsx', { type: 'all' }));
+  check('cancel in the dialog → nothing written', rn.canceled === true);
+  }
+
   // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
   const w0 = await js(() => window.__win);
   check('window shown at its saved place', w0.visible && w0.calls.includes('show') && w0.x === 200 && w0.width === 1200, JSON.stringify(w0));

@@ -92,6 +92,6 @@ const appScript = html.indexOf('<script src="app.js">');
 if (appScript < 0) throw new Error('index.html changed: no <script src="app.js">');
 html = html.slice(0, appScript) + CORE.map(f => `<script src="core/${f}"></script>\n`).join('')
   + '<script src="buffer.js"></script>\n<script src="pako.min.js"></script>\n<script src="node-modules.js"></script>\n<script src="tauri-core.js"></script>\n' + html.slice(appScript);
-html = html.replace(csp, (_m, a, c, b) => `${a}${c}; connect-src ipc: http://ipc.localhost${b}`);
+html = html.replace(csp, (_m, a, c, b) => `${a}${c}; connect-src 'self' ipc: http://ipc.localhost${b}`);
 fs.writeFileSync(file, html);
 console.log('Interface prepared in', path.relative(root, to));

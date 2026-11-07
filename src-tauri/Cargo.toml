@@ -1,6 +1,6 @@
 [package]
 name = "pult-glavspeca"
-version = "3.99.2"
+version = "3.99.3"
 description = "Пульт главспеца на Tauri — проба, этап 3"
 edition = "2021"
 

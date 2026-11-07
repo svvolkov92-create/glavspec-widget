@@ -133,6 +133,7 @@
       openPath: path => invoke('open_path', { path }),
       openExternal: url => invoke('open_url', { url }),
       // No print engine of our own: the page opens in the browser with its print dialog («Сохранить как PDF»).
+      pdfViaBrowser: true,
       pdf: async html => { await invoke('print_html', { html }); return { ok: true, viaBrowser: true }; },
       asset: async rel => { const r = await fetch(rel); if (!r.ok) throw new Error('нет файла ' + rel); return B.from(await r.arrayBuffer()); },
       dirs: () => dirs,
