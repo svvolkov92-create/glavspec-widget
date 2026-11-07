@@ -4,6 +4,8 @@
 
 use serde_json::{json, Value};
 use std::{fs, io::ErrorKind, path::PathBuf};
+use tauri::{Emitter, Manager};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 fn data_dir() -> Result<PathBuf, String> {
     std::env::var_os("APPDATA")
@@ -36,7 +38,28 @@ fn probe_load() -> Result<Value, String> {
 }
 
 fn main() {
+    // Ctrl+Alt+G toggles click-through, as in the Electron version: the way back when the window ignores the mouse.
+    let hotkey = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyG);
+    let to_register = hotkey.clone();
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(move |app, shortcut, event| {
+                    if shortcut == &hotkey && event.state() == ShortcutState::Pressed {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.emit("probe:ghost-toggle", ());
+                        }
+                    }
+                })
+                .build(),
+        )
+        .setup(move |app| {
+            if let Err(e) = app.global_shortcut().register(to_register) {
+                eprintln!("Горячая клавиша Ctrl+Alt+G занята другой программой: {e}");
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![probe_load])
         .run(tauri::generate_context!())
         .expect("Пульт (проба Tauri) не запустился");

@@ -45,13 +45,39 @@
     for (const [r, original] of darkRules) r.media.mediaText = scheme === 'dark' ? 'all' : scheme === 'light' ? 'not all' : original;
     win.setTheme?.(scheme === 'system' ? null : scheme).catch(() => {}); // scrollbars and system parts of the window
   }
+  let zoomByWebview = false; // true: Webview.setZoom; false: CSS zoom (getBoundingClientRect already scaled)
   const clampZoom = z => Math.round(Math.min(1.5, Math.max(0.8, Number(z) || 1)) * 100) / 100;
   async function applyZoom(z) {
     const wv = T.webview?.getCurrentWebview?.();
-    try { if (!wv?.setZoom) throw new Error('no webview zoom'); await wv.setZoom(z); document.documentElement.style.zoom = ''; }
-    catch { document.documentElement.style.zoom = String(z); } // older Tauri: CSS zoom
+    try { if (!wv?.setZoom) throw new Error('no webview zoom'); await wv.setZoom(z); document.documentElement.style.zoom = ''; zoomByWebview = true; }
+    catch { document.documentElement.style.zoom = String(z); zoomByWebview = false; } // older Tauri: CSS zoom
   }
   const applyLevel = level => win.setAlwaysOnTop(level === 'top').catch(e => console.error('always on top:', e));
+
+  // Click-through. Electron forwards mouse moves to an ignoring window, so the page sees the cursor over its
+  // «unlock» handle; Tauri does not, so the probe watches the cursor itself and lets the mouse in over the handle.
+  const ghost = { on: false, timer: null, passing: null };
+  async function ghostTick() {
+    if (!ghost.on) return;
+    const el = document.getElementById('unlock');
+    const r = el && el.getBoundingClientRect();
+    let over = false;
+    if (r && r.width) {
+      const [cur, pos, scale] = await Promise.all([T.window.cursorPosition(), win.outerPosition(), win.scaleFactor()]);
+      const k = scale * (zoomByWebview ? (local.zoom ?? 1) : 1), pad = 6 * scale;
+      const x = (cur.x - pos.x) / k, y = (cur.y - pos.y) / k;
+      over = x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+    }
+    if (ghost.passing !== !over) { ghost.passing = !over; await win.setIgnoreCursorEvents(!over); }
+  }
+  async function setGhost(on) {
+    ghost.on = !!on;
+    clearInterval(ghost.timer); ghost.timer = null; ghost.passing = null;
+    if (ghost.on) { await win.setIgnoreCursorEvents(true); ghost.passing = true; ghost.timer = setInterval(() => ghostTick().catch(() => {}), 80); }
+    else await win.setIgnoreCursorEvents(false);
+    pushState();
+  }
+  T.event.listen('probe:ghost-toggle', () => setGhost(!ghost.on));
 
   const winListeners = [];
   async function windowState() {
@@ -61,7 +87,7 @@
       alwaysOnTop: level === 'top', level, desktopSupported: false,
       theme: local.theme || s.theme || 'system', zoom: clampZoom(local.zoom ?? s.zoom ?? 1), compact: false,
       maximized: await win.isMaximized(), opacity: local.opacity ?? s.opacity ?? 0.82, // translucency is CSS over a transparent window
-      clickThrough: false, autostart: false, hotkey: '',
+      clickThrough: ghost.on, autostart: false, hotkey: 'Ctrl+Alt+G',
     };
   }
   const pushState = async () => { const st = await windowState(); for (const cb of winListeners) cb(st); };
@@ -113,7 +139,8 @@
     setZoom: z => { const zoom = clampZoom(z); remember({ zoom }); applyZoom(zoom); pushState(); },
     setLevel: level => { if (level !== 'top' && level !== 'normal') return; remember({ level }); applyLevel(level); pushState(); },
     setAlwaysOnTop: on => known.setLevel(on ? 'top' : 'normal'),
-    setClickThrough: () => {}, hoverUnlock: () => {}, setCompact: () => {},
+    setClickThrough: on => setGhost(on),
+    hoverUnlock: () => {}, setCompact: () => {},
     fbList: async () => [],
     getJournal: async () => [],
     autoBackupGet: async () => ({ dir: '' }),

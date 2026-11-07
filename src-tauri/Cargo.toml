@@ -10,6 +10,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 serde_json = "1"
+tauri-plugin-global-shortcut = "2"
 
 # Small binary: the point of the probe is to measure size.
 [profile.release]

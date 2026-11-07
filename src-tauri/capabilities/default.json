@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window of the probe: own title bar (drag, minimize, maximize, resize), always on top, theme, zoom.",
+  "description": "Main window of the probe: own title bar, always on top, theme, zoom, click-through.",
   "windows": [
     "main"
   ],
@@ -16,6 +16,10 @@
     "core:window:allow-set-size",
     "core:window:allow-set-always-on-top",
     "core:window:allow-set-theme",
-    "core:webview:allow-set-webview-zoom"
+    "core:webview:allow-set-webview-zoom",
+    "core:window:allow-set-ignore-cursor-events",
+    "core:window:allow-cursor-position",
+    "core:window:allow-outer-position",
+    "core:window:allow-scale-factor"
   ]
 }
