@@ -89,6 +89,24 @@ app.on('browser-window-created', (_e, win) => {
         check('«Сохранить и выйти»: saved and closed', data().tasks['demo-t3'].note === 'И выйти' && !(await js(`!!document.querySelector('#dform')`)));
         await shot('40-01-card');
       });
+
+      await step('bookmarks: opened projects stay as tabs (no separate windows in Electron)', async () => {
+        await click('[data-act="tab"][data-id="projects"]'); await wait(200);
+        await js(`localStorage.removeItem('glavspec.docTabs')`);
+        const open = id => js(`(() => { const b = document.createElement('button'); b.dataset.act = 'project-page'; b.dataset.id = ${JSON.stringify(id)}; document.body.append(b); b.click(); b.remove(); })()`);
+        const ids = Object.keys(data().projects).filter(id => !data().projects[id].deletedAt && !data().projects[id].archived).slice(0, 2);
+        for (const id of ids) { await open(id); await wait(200); }
+        const tabs = await js(`[...document.querySelectorAll('.doc-tabs .dtab[data-doc]')].map(t => t.dataset.docId).join()`);
+        check('two tabs, the last one shown', tabs === ids.join() && (await js(`window.AppBridge.state.openProjectId`)) === ids[1], tabs);
+        check('no ⧉ where windows cannot be opened', !(await js(`!!document.querySelector('[data-act="win-detach"]')`)));
+        await click('.doc-tabs .dtab.home'); await wait(200);
+        check('«Все проекты» shows the list, tabs stay', (await js(`window.AppBridge.state.openProjectId`)) === null && (await js(`document.querySelectorAll('.doc-tabs .dtab[data-doc]').length`)) === 2);
+        await click(`.dtab[data-doc-id="${ids[0]}"] .dt-open`); await wait(200);
+        await click(`.dtab[data-doc-id="${ids[0]}"] [data-act="dtab-close"]`); await wait(200);
+        check('× on the shown tab: the next one opens', (await js(`window.AppBridge.state.openProjectId`)) === ids[1] && (await js(`document.querySelectorAll('.doc-tabs .dtab[data-doc]').length`)) === 1);
+        check('remembered', (await js(`localStorage.getItem('glavspec.docTabs')`)) === JSON.stringify([ids[1]]));
+        await shot('40-02-bookmarks');
+      });
     } catch (e) { log.push('[smoke error] ' + (e.stack || e)); }
     fs.writeFileSync(path.join(outDir, 'log.txt'), log.join('\n'));
     app.exit(0);
