@@ -81,14 +81,16 @@
       store, journal, settings, A: window.Access, L, Composition: window.Composition,
       diffBatch: window.JournalDiff.diffBatch, StoreError: SC.StoreError, changed: () => onChanged(),
     });
+    const chats = window.createChats({ store, A: window.Access, currentUser: () => core.currentUser(), changed: () => onChanged() });
     core.migrateUsers();
+    try { chats.migrateProjectChats(); } catch (e) { console.error('Не удалось перенести чаты проектов:', e); }
     try { core.purgeTrash(); } catch (e) { console.error('Не удалось очистить корзину:', e); }
     await flush();
 
     const copied = loaded.copiedFrom
       ? `Проба Tauri работает на своей копии данных (${loaded.dir}), взятой из обычного Пульта. Обычный Пульт она не меняет.`
       : '';
-    return { core, store, settings, flush, warning: store.warning || copied || null };
+    return { core, chats, store, settings, flush, warning: store.warning || copied || null };
   }
 
   window.TauriCore = { init };

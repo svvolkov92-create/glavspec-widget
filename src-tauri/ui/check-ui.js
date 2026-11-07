@@ -67,7 +67,31 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   // Reload: everything comes back from disk.
   await p.reload(); await wait(1200);
   check('after restart: same user, data, theme', await js(() => window.AppBridge.state.me?.id) === 'u-gip' && await js(() => document.documentElement.dataset.theme) === 'tandem' && await js(id => window.AppBridge.state.tasks.get(id)?.readiness, tid) === 90);
-  const r5 = await js(() => window.api.chatSend('x', 'y'));
+  // Messenger: shared rules from src/core/chats.js.
+  check('sample chats written', Object.keys(disk.data.chats || {}).length === 3, Object.keys(disk.data.chats || {}).join());
+  await p.click('[data-act="msg-open"]'); await wait(300);
+  const chatId = await js(() => document.querySelector('[data-act="msg-chat"]')?.dataset.id);
+  await p.click(`[data-act="msg-chat"][data-id="${chatId}"]`); await wait(300);
+  await p.fill('#msg-text', 'Проверка @все'); await p.press('#msg-text', 'Enter'); await wait(600);
+  const sent = disk.data.chats[chatId].messages.at(-1);
+  check('chat message saved with mentions, field empty', sent.text === 'Проверка @все' && sent.mentions.length >= 1 && (await js(() => document.querySelector('#msg-text').value)) === '', JSON.stringify(sent));
+  await p.click(`[data-act="mc-edit"][data-id="${sent.id}"]`); await wait(200);
+  await p.fill('#mc-edit', 'Проверка'); await p.press('#mc-edit', 'Enter'); await wait(600);
+  const ed = disk.data.chats[chatId].messages.at(-1);
+  check('chat message corrected', ed.text === 'Проверка' && !!ed.editedAt && ed.mentions.length === 0, JSON.stringify(ed));
+  const g = await js(async () => window.api.chatCreate({ title: 'Проба Tauri', members: [] }));
+  check('group chat needs members', !g.ok, JSON.stringify(g));
+  const g2 = await js(async () => window.api.chatCreate({ title: 'Проба Tauri', members: ['demo-u1'] }));
+  check('group chat created', g2.ok && disk.data.chats[g2.id]?.title === 'Проба Tauri', JSON.stringify(g2));
+  await p.click('[data-act="msg-close"]').catch(() => {}); await wait(200);
+  // «Запросить у заказчика» (ИРД): an ordinary checked write of the project.
+  await js(() => { const pid = [...window.AppBridge.state.projects.keys()][0]; document.body.insertAdjacentHTML('beforeend', `<button id="aq-open" data-act="ask-customer" data-id="${pid}"></button>`); });
+  await p.click('#aq-open'); await wait(300);
+  await p.fill('#aq-title', 'ТУ на водоснабжение'); await js(() => document.querySelector('.modal form, form.modal').requestSubmit()); await wait(700);
+  const pid = await js(() => [...window.AppBridge.state.projects.keys()][0]);
+  const pr = disk.data.projects[pid];
+  check('ИРД request saved (request + ИРД row)', (pr.requests || []).some(r => /ТУ на водоснабжение/.test(r.title)) && (pr.ird || []).some(r => /ТУ на водоснабжение/.test(r.title)), JSON.stringify({ req: pr.requests, ird: pr.ird }).slice(0, 300));
+  const r5 = await js(() => window.api.exportReport('xlsx', 'all'));
   check('not moved yet → clear message', !r5.ok && /следующем этапе/.test(r5.message));
   await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-check.png' });
   check('no page errors', errs.length === 0, errs.join(' | '));

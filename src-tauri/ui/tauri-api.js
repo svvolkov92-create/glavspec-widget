@@ -108,6 +108,15 @@
     editComment: async (id, commentId, text) => { const c = await ready(); return saved(c.core.taskCommentEdit(id, commentId, text)); },
     clearDemo: async () => { const c = await ready(); return saved(c.core.demoClear()); },
     getJournal: async since => { const c = await ready(); return c.core.journalGet({ since }); },
+    // Messenger: the shared rules (src/core/chats.js); each answer waits until the file is written.
+    chatSend: async (chatId, text, projectId) => { const c = await ready(); return saved(c.chats.send(chatId, text, projectId)); },
+    chatEdit: async (chatId, msgId, text) => { const c = await ready(); return saved(c.chats.edit(chatId, msgId, text)); },
+    chatSeen: async chatId => { const c = await ready(); return saved(c.chats.seen(chatId)); },
+    chatDirect: async uid => { const c = await ready(); return saved(c.chats.direct(uid)); },
+    chatCreate: async input => { const c = await ready(); return saved(c.chats.create(input)); },
+    chatUpdate: async (chatId, input) => { const c = await ready(); return saved(c.chats.update(chatId, input)); },
+    chatLeave: async chatId => { const c = await ready(); return saved(c.chats.leave(chatId)); },
+    chatSeedDemo: async () => { const c = await ready(); return saved(c.chats.seedDemo()); },
     reloadWindow: async () => { location.reload(); return { ok: true }; },
 
     getWindowState: async () => { await startLook(); return windowState(); },
