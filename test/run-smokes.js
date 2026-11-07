@@ -17,7 +17,7 @@ function electronBinary(arg) {
 const bin = electronBinary(process.argv[2]);
 const filter = process.argv[3] || '';
 const testDir = __dirname;
-const smokes = fs.readdirSync(testDir).filter(f => /^smoke-.*\.js$/.test(f) && f.includes(filter)).sort();
+const smokes = fs.readdirSync(testDir).filter(f => /^smoke-.*\.js$/.test(f) && f !== 'smoke-env.js' && f.includes(filter)).sort();
 const outRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glavspec-smokes-'));
 let failed = 0;
 
@@ -27,10 +27,11 @@ for (const file of smokes) {
   const out = path.join(outRoot, name, 'out');
   fs.mkdirSync(profile, { recursive: true });
   fs.mkdirSync(out, { recursive: true });
-  // app.getPath('appData') is %APPDATA% on Windows and $XDG_CONFIG_HOME on Linux.
-  const env = { ...process.env, APPDATA: profile, XDG_CONFIG_HOME: profile };
+  // Electron reads the Windows profile folder from the system, not from %APPDATA%,
+  // so smoke-env.js moves app.getPath('appData') to this folder before the smoke starts.
+  const env = { ...process.env, GLAVSPEC_TEST_APPDATA: profile };
   const started = Date.now();
-  const r = spawnSync(bin, ['--no-sandbox', path.join(testDir, file), out], { env, encoding: 'utf8', timeout: 5 * 60 * 1000 });
+  const r = spawnSync(bin, ['--no-sandbox', path.join(testDir, 'smoke-env.js'), path.join(testDir, file), out], { env, encoding: 'utf8', timeout: 5 * 60 * 1000 });
   const logFile = path.join(out, 'log.txt');
   const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
   const lines = log.split('\n').filter(Boolean);

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost">
+<title>Пульт главспеца</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="shell" id="shell">
+  <header class="bar" id="bar">
+    <div class="bar-row">
+      <div class="brand drag"><img class="brand-logo" src="brand/tandem-logo.svg" alt="Тандем"><b id="app-title">Пульт главспеца</b>
+        <div class="menu-wrap user-wrap">
+          <button class="user-chip" id="btn-user" data-act="user-menu" type="button" title="Кто работает с программой — сменить пользователя" aria-haspopup="menu" aria-expanded="false"><span id="user-name">…</span>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="menu user-menu" id="user-menu" role="menu" hidden></div>
+        </div>
+      </div>
+      <div class="att-wrap menu-wrap" id="att-wrap"></div>
+      <div class="drag drag-fill"></div>
+      <div class="winctl">
+        <button class="icon fb-btn" id="btn-fb" data-fb="toggle" type="button" title="Режим пометок для разработчика (Ctrl+Shift+F): щёлкните по элементу и оставьте комментарий" aria-pressed="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span id="fb-count" class="fb-count"></span></button>
+        <div class="menu-wrap view-wrap">
+          <button class="btn ghostbtn win-btn" id="btn-view" data-act="view-menu" type="button" title="Окно: прозрачность, поверх окон, сквозные клики, тема, масштаб" aria-haspopup="dialog" aria-expanded="false">
+            <svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2 5.6h12" stroke="currentColor" stroke-width="1.4"/></svg><span class="lbl">Окно</span>
+            <svg class="caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="menu view-menu" id="view-menu" hidden>
+            <div class="vm-sec"><span class="vm-h">Прозрачность</span>
+              <label class="alpha" title="Непрозрачность окна">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor"/></svg>
+                <input type="range" id="alpha" min="25" max="100" step="1" aria-label="Непрозрачность окна"></label></div>
+            <div class="vm-sec vm-toggles">
+              <button class="vm-tg" id="btn-pin" data-act="toggle-pin" type="button" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 2h5l-.8 4.2 2.3 2.3H4l2.3-2.3zM8 8.5V14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg><span>Поверх всех окон</span></button>
+              <button class="vm-tg" id="btn-ghost" data-act="ghost-on" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2l4.2 11 1.6-4.6L13.4 7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 10l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="1.5 1.5"/></svg><span>Сквозные клики <kbd>Ctrl+Alt+G</kbd></span></button>
+            </div>
+            <div id="view-menu-body"></div>
+          </div>
+        </div>
+        <button class="icon" id="btn-compact" data-act="toggle-compact" type="button" title="Компактный виджет">
+          <svg viewBox="0 0 16 16" aria-hidden="true" class="i-shrink"><path d="M9.5 2.5v4h4M6.5 13.5v-4h-4M9.5 6.5l4.5-4.5M6.5 9.5L2 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg viewBox="0 0 16 16" aria-hidden="true" class="i-grow"><path d="M10 2h4v4M6 14H2v-4M14 2L9.5 6.5M2 14l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="icon" data-act="minimize" type="button" title="Свернуть">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <button class="icon" id="btn-max" data-act="toggle-max" type="button" title="На весь экран (F11, двойной щелчок по заголовку)">
+          <svg class="i-max" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+          <svg class="i-restore" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="5" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 3h6.5a1 1 0 0 1 1 1v6.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+        </button>
+        <button class="icon" data-act="hide" type="button" title="Скрыть в трей (выход — через значок в трее)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <button class="unlock" id="unlock" type="button" data-act="ghost-off" title="Вернуть управление окном">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+        <span>Управление · Ctrl+Alt+G</span>
+      </button>
+    </div>
+    </header>
+  <div class="body" id="body">
+    <nav class="nav full-only" id="nav" aria-label="Разделы">
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div class="adds drag-gap">
+        <div class="menu-wrap">
+          <button class="btn" id="btn-file" data-act="file-menu" type="button" aria-haspopup="menu" aria-expanded="false" title="Отчёты, страница для заказчика, импорт, журнал, резервные копии"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.8h5.2L12.5 5v9.2H4z M9 1.8V5.3h3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span class="lbl">Отчёты и данные</span>
+            <svg class="caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="menu file-menu" id="file-menu" role="menu" hidden>
+            <div class="menu-h" data-role-hide="spec">Отчёты</div>
+            <label class="menu-scope" for="rep-scope" data-role-hide="spec"><span>Отчёт по</span><select id="rep-scope"></select></label>
+            <label class="menu-scope" for="rep-period" id="rep-period-wrap" hidden><span>Период</span><select id="rep-period"><option value="month">30 дней</option><option value="quarter" selected>3 месяца</option><option value="year">Год</option><option value="all">Всё время</option></select></label>
+            <button role="menuitem" data-role-hide="spec" data-act="export" data-format="xlsx" type="button"><span class="fmt fmt-x">XLSX</span><span><b>Excel</b><small>Сводка, карточки, исполнители и платежи на отдельных листах</small></span></button>
+            <button role="menuitem" data-role-hide="spec" data-act="export" data-format="docx" type="button"><span class="fmt fmt-w">DOCX</span><span><b id="word-title">Word</b><small id="word-sub">Отчёт для печати: что требует внимания, таблицы по проектам и исполнителям</small></span></button>
+            <button role="menuitem" data-role-hide="spec" data-act="customer-pdf" id="mi-customer" type="button"><span class="fmt fmt-p">HTML</span><span><b>Страница для заказчика</b><small id="cust-sub">Стадия, готовность и изменения разделов — без денег и фамилий. Выберите проект выше</small></span></button>
+            <button role="menuitem" data-act="weekly" type="button"><span class="fmt fmt-i">TXT</span><span><b>Сводка за неделю</b><small>Короткий текст для руководства: принято, сдано, перенесено, сорвано</small></span></button>
+            <div class="menu-h">Данные</div>
+            <button role="menuitem" data-role-hide="gip" data-act="import" type="button"><span class="fmt fmt-i">ИМП</span><span><b>Импорт из Excel или CSV…</b><small>Перенести проекты и карточки из своей таблицы</small></span></button>
+            <button role="menuitem" data-role-hide="gip" data-act="backup-save" type="button"><span class="fmt fmt-b">JSON</span><span><b>Сохранить резервную копию…</b><small>Вся база одним файлом — на флешку или для переноса на другой ПК</small></span></button>
+            <button role="menuitem" data-role-hide="gip" data-act="backup-restore" type="button"><span class="fmt fmt-b">JSON</span><span><b>Восстановить из копии…</b><small>Текущие данные перед заменой сохраняются в папку backups</small></span></button>
+            <button role="menuitem" data-role-hide="gip" data-act="autobackup" type="button"><span class="fmt fmt-b">AUTO</span><span><b>Автокопия в папку…</b><small id="ab-sub">Раз в день — копия базы на флешку или в сетевую папку</small></span></button>
+            <button role="menuitem" data-role-hide="gip" data-act="delete-all-projects" type="button"><span class="fmt fmt-i">✕</span><span><b>Удалить все проекты…</b><small>Проекты и их карточки — в корзину, 30 дней можно восстановить</small></span></button>
+            <button role="menuitem" data-act="open-data-folder" type="button"><span class="fmt fmt-b">📁</span><span><b>Папка с данными</b><small>Файл базы и ежедневные резервные копии</small></span></button>
+            <div class="menu-h">Сервис</div>
+            <button role="menuitem" data-act="techcard" type="button"><span class="fmt fmt-i">?</span><span><b>Техкарта проектирования</b><small>Этапы, волны разделов, задания смежникам, ПД → РД</small></span></button>
+            <button role="menuitem" data-act="open-journal" type="button"><span class="fmt fmt-i">LOG</span><span><b>Журнал действий</b><small>Что создано, перенесено, оплачено — по дням (Ctrl+J)</small></span></button>
+            <button role="menuitem" data-act="open-trash" type="button"><span class="fmt fmt-i">🗑</span><span><b id="mi-trash">Корзина</b><small>Удалённое хранится 30 дней</small></span></button>
+            <button role="menuitem" data-act="usage" type="button"><span class="fmt fmt-i">%</span><span><b>Статистика использования</b><small>Что из программы вы реально используете</small></span></button>
+            <button role="menuitem" data-fb="list" type="button"><span class="fmt fmt-i">💬</span><span><b>Пометки для разработчика…</b><small>Список пометок и выгрузка одним файлом (Ctrl+Shift+F)</small></span></button>
+            <button role="menuitem" data-act="help" type="button"><span class="fmt fmt-i">F1</span><span><b>Горячие клавиши</b><small>Ctrl+K — поиск, Ctrl+N — карточка, Ctrl+Z — отменить</small></span></button>
+          </div>
+        </div>
+        <div class="menu-wrap create-wrap" data-role-hide="spec">
+          <button class="btn primary" id="btn-create" data-act="create-menu" type="button" aria-haspopup="menu" aria-expanded="false" title="Создать карточку, проект, подрядчика или сотрудника (Ctrl+N — карточка)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span class="lbl">Создать</span>
+            <svg class="caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="menu create-menu" id="create-menu" role="menu" hidden>
+            <button role="menuitem" data-act="new-task" type="button"><span class="fmt fmt-i">＋</span><span><b>Карточка</b><small>Раздел проекта: марки, ответственный, сроки (Ctrl+N)</small></span></button>
+            <button role="menuitem" data-act="new-project" type="button"><span class="fmt fmt-i">📁</span><span><b>Проект</b><small>Объект, шифр, заказчик — можно сразу по шаблону состава</small></span></button>
+            <button role="menuitem" data-act="new-contractor" type="button"><span class="fmt fmt-i">👷</span><span><b>Подрядчик</b><small>Внештатный исполнитель без доступа к программе</small></span></button>
+            <button role="menuitem" data-role-hide="gip" data-act="new-user" type="button"><span class="fmt fmt-i">👤</span><span><b>Сотрудник</b><small>Штатный: свой пульт в программе</small></span></button>
+          </div>
+        </div>
+        <button class="btn ghostbtn nav-mini-btn" data-act="nav-mini" type="button" title="Свернуть панель до значков"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Свернуть</span></button>
+      </div>
+    </nav>
+    <main id="app"><div class="hint">Загружаем данные…</div></main>
+  </div>
+  <div class="grip" id="grip" title="Изменить размер"></div>
+</div>
+<div id="drawer-root"></div>
+<div id="toast" class="toast" hidden></div>
+<script src="tauri-api.js"></script>
+<script src="calendar.js"></script>
+<script src="access.js"></script>
+<script src="logic.js"></script>
+<script src="importer.js"></script>
+<script src="messages.js"></script>
+<script src="composition.js"></script>
+<script src="techcard.js"></script>
+<script src="office.js"></script>
+<script src="app.js"></script>
+<script src="feedback-ui.js"></script>
+</body>
+</html>
