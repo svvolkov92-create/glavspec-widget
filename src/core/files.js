@@ -52,6 +52,19 @@
     ? { ok: false, message: 'Файл занят или защищён от записи — возможно, он открыт в Excel или Word. Закройте его или сохраните под другим именем.' }
     : { ok: false, message: `Не удалось сохранить ${what}: ${msgOf(e)}` });
 
+  // Project team for the customer page: participants with a customer-readable role («ГИП», «главный специалист,
+  // электрика», «инженер, слаботочка»). The contact person is shown separately and skipped here.
+  function customerTeam(p) {
+    const dirs = u => (u.directions || []).map(id => A.DIRECTIONS.find(d => d.id === id)?.label.toLowerCase()).filter(Boolean).join(', ');
+    const role = u => (u.role === 'gip' ? 'ГИП' : `${u.role === 'chief' ? 'главный специалист' : 'инженер'}${dirs(u) ? ', ' + dirs(u) : ''}`);
+    return (Array.isArray(p.members) ? p.members : []).filter(id => id !== p.contactId).map(id => store.data.users[id]).filter(u => u && !u.deletedAt).map(u => ({ name: u.name, role: role(u) }));
+  }
+  // The GIP contact shown to the customer: the project's «контакт для заказчика».
+  function customerContact(p) {
+    const u = p.contactId ? store.data.users[p.contactId] : null;
+    return u && !u.deletedAt ? { name: u.name, role: A.ROLES[u.role]?.label || '', phone: u.phone || '', email: u.email || '' } : null;
+  }
+
   /* ---------- reports ---------- */
   async function exportReport(format, rawScope) {
     const fmt = REPORT_FORMATS[format];
@@ -88,7 +101,7 @@
     const montserrat = opts.font === 'montserrat';
     const text = bytes => (typeof bytes === 'string' ? bytes : Buffer.from(bytes).toString('utf8'));
     const html = R.customerHtml({
-      project: { ...p, id: projectId }, tasks: view.tasks, contact: deps.customerContact(p), team: deps.customerTeam(p), today: stamp,
+      project: { ...p, id: projectId }, tasks: view.tasks, contact: customerContact(p), team: customerTeam(p), today: stamp,
       logoSvg: text(await io.asset('brand/tandem-logo.svg')),
       fontName: montserrat ? 'Montserrat' : 'Golos Text',
       fontBase64: Buffer.from(await io.asset(montserrat ? 'fonts/Montserrat.ttf' : 'fonts/GolosText.ttf')).toString('base64'),
@@ -301,5 +314,5 @@
   }
 
   return { exportReport, customerPage, composition, docDefaults, openTemplates, openLast, openProjectFolder, openTaskFolder, pickFolder, contactOpen,
-    backupSave, backupRestore, autoBackup, autoBackupGet, autoBackupSet, importPick, safeName };
+    backupSave, backupRestore, autoBackup, autoBackupGet, autoBackupSet, importPick, safeName, customerTeam, customerContact };
 });
