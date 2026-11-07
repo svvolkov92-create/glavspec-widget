@@ -1451,3 +1451,23 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .msg-edit { display: grid; gap: 6px; margin-top: 2px }
 .msg-edit textarea { width: 100%; resize: vertical; min-height: 52px }
 .msg-edit .row-in { display: flex; gap: 6px; align-items: center; flex-wrap: wrap }
+
+/* Messenger sections, card and customer threads, pins */
+.mc-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 12px }
+.mc-tab { appearance: none; border: 1px solid var(--line); background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 999px; cursor: pointer; display: inline-flex; gap: 5px; align-items: center }
+.mc-tab:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)) }
+.mc-tab.on { background: var(--accent-soft); color: var(--accent-text, var(--accent)); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); font-weight: 600 }
+.mc-tab i { font-style: normal; font-size: 10.5px; font-weight: 700; min-width: 16px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: #fff; text-align: center }
+.mc-row { position: relative }
+.mc-pin { position: absolute; right: 6px; bottom: 5px; appearance: none; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 2px; border-radius: 4px; opacity: 0; line-height: 0 }
+.mc-row:hover .mc-pin, .mc-pin:focus-visible, .mc-pin.on { opacity: 1 }
+.mc-pin.on, .mc-pinbtn.on { color: var(--accent) }
+.mc-pin .ico { width: 13px; height: 13px }
+.mc-pinbtn .ico { width: 14px; height: 14px }
+.mc-ic.task { border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, var(--sunk)); font-size: 15px }
+.mc-ic.cust { border-radius: 8px; background: color-mix(in srgb, #1E7A45 16%, var(--sunk)); color: #1E7A45 }
+.mc-ic.cust.urgent { background: color-mix(in srgb, #B3261E 18%, var(--sunk)); color: #B3261E }
+.mc-n.urgent { background: #B3261E }
+.chat-msg.cust.urgent { border-color: color-mix(in srgb, #B3261E 45%, var(--line)) }
+.chat-msg.submit { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)) }
+.mc-note { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line) }

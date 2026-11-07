@@ -120,6 +120,15 @@ app.on('browser-window-created', (_e, win) => {
         const panel = await text('.cab-inbox');
         check('overview: «От заказчиков» with unread', /От заказчиков/.test(panel) && /Горящий вопрос/.test(panel), panel.slice(0, 80));
         await shot('32-03-overview');
+        // The same messages in the messenger: «От заказчиков», one thread per project.
+        await js(`document.querySelector('[data-act="msg-open"]').click()`); await wait(300);
+        check('messenger: «От заказчиков» section with unread', await js(`!!document.querySelector('.mc-tab[data-v="cust"] i')`));
+        await js(`document.querySelector('.mc-tab[data-v="cust"]').click()`); await wait(200);
+        await js(`document.querySelector('[data-act="msg-chat"][data-id="c:demo-p1"]').click()`); await wait(400);
+        const th = await text('#mc-msgs');
+        check('customer thread shows the messages', /Экспертиза просит КР раньше/.test(th) && /Горящий вопрос/.test(th) && /Просьба перезвонить/.test(th), th.slice(0, 120));
+        await shot('32-03b-messenger-customers');
+        await js(`document.querySelector('[data-act="msg-close"]').click()`); await wait(200);
         // a new message arrives later → toast notification on the regular sync
         srv.store.data.seq += 1;
         srv.store.data.inbox.push({ seq: srv.store.data.seq, id: 'late1', projectId: 'demo-p1', kind: 'urgent', text: 'Где РД по ОВ?', customerName: 'Иванов', projectName: 'x', ts: new Date().toISOString() });

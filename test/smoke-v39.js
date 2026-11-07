@@ -89,7 +89,7 @@ app.on('browser-window-created', (_e, win) => {
 
       await step('messenger: empty after send, edit own', async () => {
         await click('[data-act="msg-open"]'); await wait(300);
-        const chatId = await js(`document.querySelector('[data-act="msg-chat"]')?.dataset.id`);
+        const chatId = await js(`[...document.querySelectorAll('[data-act="msg-chat"]')].map(b => b.dataset.id).find(id => !/^[tc]:/.test(id))`);
         await click(`[data-act="msg-chat"][data-id="${chatId}"]`); await wait(300);
         await setVal('#msg-text', 'Привет @все, првоерка');
         await js(`document.querySelector('#msg-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`); await wait(800);
@@ -102,6 +102,31 @@ app.on('browser-window-created', (_e, win) => {
         const m2 = data().chats[chatId].messages.at(-1);
         check('corrected, mentions re-read', m2.text === 'Привет, проверка' && !!m2.editedAt && m2.mentions.length === 0 && /изменено/.test(await text('#mc-msgs')), JSON.stringify(m2));
         await shot('39-03-chat-edit');
+      });
+
+      await step('messenger: sections, card discussions, pins', async () => {
+        await click('[data-act="msg-back"]').catch(() => {}); await wait(200);
+        if (!(await js(`!!document.querySelector('.mc-tabs')`))) { await click('[data-act="msg-open"]'); await wait(300); }
+        const tabs = await js(`[...document.querySelectorAll('.mc-tab')].map(b => b.dataset.v).join()`);
+        check('sections: Все, Проекты, Задачи, Прочие, @ (no customers without a cabinet)', tabs === 'all,proj,task,other,at', tabs);
+        await click('.mc-tab[data-v="task"]'); await wait(200);
+        const keys = await js(`[...document.querySelectorAll('.mc-list [data-act="msg-chat"]')].map(b => b.dataset.id)`);
+        check('«Задачи» lists card discussions', keys.length >= 1 && keys.every(k => k.startsWith('t:')) && keys.includes('t:demo-t3'), keys.join());
+        await click('[data-act="msg-chat"][data-id="t:demo-t3"]'); await wait(300);
+        check('card thread shows the discussion', /Проверка опечатки/.test(await text('#mc-msgs')) && /обсуждение карточки/.test(await text('.mc-head')));
+        await setVal('#msg-text', 'Ответ из мессенджера');
+        await js(`document.querySelector('#msg-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`); await wait(800);
+        check('message goes to the card discussion, field empty', data().tasks['demo-t3'].comments.at(-1).text === 'Ответ из мессенджера' && (await js(`document.querySelector('#msg-text').value`)) === '');
+        await click('[data-act="msg-back"]'); await wait(200);
+        await click('.mc-tab[data-v="all"]'); await wait(200);
+        const lastKey = await js(`[...document.querySelectorAll('.mc-list [data-act="msg-chat"]')].map(b => b.dataset.id).at(-1)`);
+        await click(`.mc-pin[data-id="${lastKey}"]`); await wait(200);
+        const first = await js(`document.querySelector('.mc-list [data-act="msg-chat"]').dataset.id`);
+        check('pinned goes to the top under «Закреплённые»', first === lastKey && /Закреплённые/.test(await text('.mc-list')), `${first} vs ${lastKey}`);
+        await click('[data-act="tab"][data-id="tasks"]'); await wait(300);
+        check('pin kept after re-render', (await js(`document.querySelector('.mc-list [data-act="msg-chat"]')?.dataset.id`)) === lastKey);
+        await shot('39-04-messenger-sections');
+        await click(`.mc-pin[data-id="${lastKey}"]`); await wait(150);
       });
     } catch (e) { log.push('[smoke error] ' + (e.stack || e)); }
     fs.writeFileSync(path.join(outDir, 'log.txt'), log.join('\n'));
