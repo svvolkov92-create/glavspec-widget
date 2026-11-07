@@ -325,15 +325,9 @@ function createTray() {
 // The GIP contact shown to the customer: the project's «контакт для заказчика».
 // Project team for the customer page: participants with a customer-readable role («ГИП», «главный специалист,
 // электрика», «инженер, слаботочка»). The contact person is shown separately and skipped here.
-function customerTeam(p) {
-  const dirs = u => (u.directions || []).map(id => A.DIRECTIONS.find(d => d.id === id)?.label.toLowerCase()).filter(Boolean).join(', ');
-  const role = u => (u.role === 'gip' ? 'ГИП' : `${u.role === 'chief' ? 'главный специалист' : 'инженер'}${dirs(u) ? ', ' + dirs(u) : ''}`);
-  return (Array.isArray(p.members) ? p.members : []).filter(id => id !== p.contactId).map(id => store.data.users[id]).filter(u => u && !u.deletedAt).map(u => ({ name: u.name, role: role(u) }));
-}
-function customerContact(p) {
-  const u = p.contactId ? store.data.users[p.contactId] : null;
-  return u && !u.deletedAt ? { name: u.name, role: A.ROLES[u.role]?.label || '', phone: u.phone || '', email: u.email || '' } : null;
-}
+// The customer page's team and contact: src/core/files.js.
+const customerTeam = p => files.customerTeam(p);
+const customerContact = p => files.customerContact(p);
 // What the cabinet gets for a project: the same customer-safe model as the HTML page, built from the full
 // project record and the cards the current user sees. null when the user may not publish it.
 /* ---------- files: src/core/files.js (shared with the Tauri version); Windows side here ---------- */
@@ -701,7 +695,7 @@ if (!app.requestSingleInstanceLock()) {
       changed: ({ user = false } = {}) => { sendData(); updateTrayTooltip(); if (user) sendCabinet(); } });
     files = createFiles({ store, journal, settings, A, L, Composition, StoreError, Buffer, io: electronIo(), appVersion: app.getVersion(),
       R: { buildReport, buildXlsx, buildDocx, buildCompositionXlsx, customerHtml, fillTemplate, TEMPLATES, TemplateError, readTableBytes, ImportError, contactUrl },
-      currentUser, userView, customerContact, customerTeam, changed: () => { sendData(); updateTrayTooltip(); } });
+      currentUser, userView, changed: () => { sendData(); updateTrayTooltip(); } });
     feedback = new Feedback(app.getPath('userData'));
     core.migrateUsers();
     try { core.purgeTrash(); } catch (e) { console.error('Не удалось очистить корзину:', e); }
