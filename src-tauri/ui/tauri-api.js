@@ -2,7 +2,7 @@
 // Bridge: gives the unchanged interface the same `window.api` the Electron preload gives, on top of Tauri.
 // Data and settings go through the shared core (tauri-core.js → src/core/handlers.js → Rust files).
 // The window, the tray, notifications: Tauri window API + Rust commands (src-tauri/src/system.rs).
-// What is not moved yet (reports, import, backups, cabinet) answers with a clear message.
+// What is not moved yet (the customer cabinet) answers with a clear message.
 (function () {
   const T = window.__TAURI__;
   const win = T.window.getCurrentWindow();
@@ -230,6 +230,9 @@
     digestStarted = true;
     setTimeout(() => morningDigest(), 15 * 1000);
     setInterval(() => { morningDigest(); trayLater(); }, 5 * 60 * 1000);
+    // The automatic copy into the GIP's folder, as in Electron: shortly after start, then every 30 minutes.
+    setTimeout(() => ctx.files.autoBackup(), 30 * 1000);
+    setInterval(() => ctx.files.autoBackup(), 30 * 60 * 1000);
   }
   const setting = async patch => { (await ready()).settings.set(patch); pushState(); };
 
@@ -265,6 +268,22 @@
     chatLeave: async chatId => { const c = await ready(); return saved(c.chats.leave(chatId)); },
     chatSeedDemo: async () => { const c = await ready(); return saved(c.chats.seedDemo()); },
     reloadWindow: async () => { location.reload(); return { ok: true }; },
+    // Files: the shared rules (src/core/files.js); a change the file brings (restore) is saved before the answer.
+    exportReport: async (format, scope) => (await ready()).files.exportReport(format, scope),
+    openLastReport: async () => (await ready()).files.openLast(),
+    customerPage: async (projectId, opts) => (await ready()).files.customerPage(projectId, opts),
+    exportComposition: async (projectId, format, opts) => (await ready()).files.composition(projectId, format, opts),
+    docDefaults: async () => (await ready()).files.docDefaults(),
+    openTemplates: async () => (await ready()).files.openTemplates(),
+    openProjectFolder: async id => (await ready()).files.openProjectFolder(id),
+    openTaskFolder: async id => (await ready()).files.openTaskFolder(id),
+    pickFolder: async current => (await ready()).files.pickFolder(current),
+    openContact: async req => (await ready()).files.contactOpen(req),
+    backupSave: async () => (await ready()).files.backupSave(),
+    backupRestore: async () => { const c = await ready(); return saved(await c.files.backupRestore()); },
+    autoBackupGet: async () => (await ready()).files.autoBackupGet(),
+    autoBackupSet: async off => (await ready()).files.autoBackupSet(off),
+    importPick: async () => (await ready()).files.importPick(),
 
     getWindowState: async () => { await startLook(); return windowState(); },
     onWindowState: cb => { winListeners.push(cb); return () => winListeners.splice(winListeners.indexOf(cb), 1); },
@@ -282,7 +301,6 @@
     setCompact: on => { ready().then(() => setCompact(on)); },
     hoverUnlock: () => {},
     fbList: async () => [],
-    autoBackupGet: async () => ({ dir: '' }),
     cabinetGet: async () => null,
   };
 

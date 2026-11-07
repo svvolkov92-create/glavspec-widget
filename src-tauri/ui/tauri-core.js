@@ -57,6 +57,13 @@
         finally { if (applied) this.save(); }
       },
       save() { dirty = true; kick(); },
+      // Restore from a backup: the whole data set at once (records with invalid ids are skipped).
+      replaceAll(raw) {
+        const { data, count } = SC.fromBackup(raw);
+        this.data = data;
+        this.save();
+        return count;
+      },
     };
 
     const journal = {
@@ -82,6 +89,14 @@
       diffBatch: window.JournalDiff.diffBatch, StoreError: SC.StoreError, changed: () => onChanged(),
     });
     const chats = window.createChats({ store, A: window.Access, currentUser: () => core.currentUser(), changed: () => onChanged() });
+    // Files: the shared rules (src/core/files.js) with the report and import code of the Electron version
+    // (node-modules.js); Windows access through the Rust commands (src-tauri/src/io.rs).
+    const dirs = await invoke('known_dirs');
+    const files = window.createFiles({
+      store, journal, settings, A: window.Access, L, Composition: window.Composition, StoreError: SC.StoreError, Buffer: window.Buffer,
+      io: tauriIo(dirs), appVersion: 'Tauri', R: reportCode(),
+      currentUser: () => core.currentUser(), userView: () => core.userView(), changed: () => onChanged(),
+    });
     core.migrateUsers();
     try { chats.migrateProjectChats(); } catch (e) { console.error('Не удалось перенести чаты проектов:', e); }
     try { core.purgeTrash(); } catch (e) { console.error('Не удалось очистить корзину:', e); }
@@ -90,7 +105,40 @@
     const copied = loaded.copiedFrom
       ? `Проба Tauri работает на своей копии данных (${loaded.dir}), взятой из обычного Пульта. Обычный Пульт она не меняет.`
       : '';
-    return { core, chats, store, settings, flush, warning: store.warning || copied || null };
+    return { core, chats, files, store, settings, flush, warning: store.warning || copied || null };
+  }
+
+  // The report, template and import code written for Node, loaded in the window (see prepare-ui.js).
+  function reportCode() {
+    const m = id => window.NodeModules.load(id);
+    const { buildXlsx, buildCompositionXlsx } = m('report/xlsx.js'), { buildDocx } = m('report/docx.js');
+    const { fillTemplate, TEMPLATES, TemplateError } = m('report/doc-template.js'), { readTableBytes, ImportError } = m('import/read.js');
+    return { buildReport: m('report/model.js').buildReport, buildXlsx, buildDocx, buildCompositionXlsx, customerHtml: m('report/customer.js').customerHtml,
+      fillTemplate, TEMPLATES, TemplateError, readTableBytes, ImportError, contactUrl: m('contact.js').contactUrl };
+  }
+  // `io` of src/core/files.js on top of the Rust commands; bytes travel as base64.
+  function tauriIo(dirs) {
+    const B = window.Buffer, P = window.NodeModules.load('node:path');
+    const io = {
+      saveDialog: ({ title, defaultPath, filters }) => invoke('dialog_save', { title, defaultPath: defaultPath || null, filters: filters || [] }),
+      openDialog: ({ title, defaultPath, filters, directory }) => invoke('dialog_open', { title, defaultPath: defaultPath || null, filters: filters || [], directory: !!directory }),
+      confirm: ({ title, message, detail, ok }) => invoke('dialog_confirm', { title: title || '', message, detail: detail || '', ok: ok || 'Да' }),
+      writeFile: (path, data) => invoke('fs_write', typeof data === 'string' ? { path, text: data, base64: null } : { path, text: null, base64: B.from(data).toString('base64') }),
+      readFile: async path => B.from(await invoke('fs_read', { path }), 'base64'),
+      exists: path => invoke('fs_exists', { path: String(path || '') }),
+      mkdir: path => invoke('fs_mkdir', { path }),
+      copyFile: async (from, to) => io.writeFile(to, await io.readFile(from)),
+      listDir: path => invoke('fs_list', { path }),
+      remove: path => invoke('fs_remove', { path }),
+      openPath: path => invoke('open_path', { path }),
+      openExternal: url => invoke('open_url', { url }),
+      // No print engine of our own: the page opens in the browser with its print dialog («Сохранить как PDF»).
+      pdf: async html => { await invoke('print_html', { html }); return { ok: true, viaBrowser: true }; },
+      asset: async rel => { const r = await fetch(rel); if (!r.ok) throw new Error('нет файла ' + rel); return B.from(await r.arrayBuffer()); },
+      dirs: () => dirs,
+      join: (...p) => P.join(...p), dirname: p => P.dirname(p), basename: p => P.basename(p), extname: p => P.extname(p),
+    };
+    return io;
   }
 
   window.TauriCore = { init };

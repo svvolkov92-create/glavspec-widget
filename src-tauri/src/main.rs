@@ -7,6 +7,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod files;
+mod io;
 mod system;
 use files::Files;
 use tauri::State;
@@ -62,6 +63,8 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| system::show_main(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(files)
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -103,7 +106,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             store_load, store_save, settings_load, settings_save, journal_append, journal_read,
             system::tray_set, system::notify, system::autostart_get, system::autostart_set,
-            system::window_to_bottom, system::desktop_supported, system::open_data_folder, system::app_quit
+            system::window_to_bottom, system::desktop_supported, system::open_data_folder, system::app_quit,
+            io::dialog_save, io::dialog_open, io::dialog_confirm, io::fs_write, io::fs_read, io::fs_exists, io::fs_mkdir,
+            io::fs_list, io::fs_remove, io::open_path, io::open_url, io::known_dirs, io::print_html
         ])
         .run(tauri::generate_context!())
         .expect("Пульт (проба Tauri) не запустился");
