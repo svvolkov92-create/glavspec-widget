@@ -1,17 +1,24 @@
 [package]
 name = "pult-glavspeca"
-version = "3.99.1"
-description = "Пульт главспеца на Tauri — проба, этап 2"
+version = "3.99.2"
+description = "Пульт главспеца на Tauri — проба, этап 3"
 edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-serde = "1"
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 # Small binary: the point of the probe is to measure size.
 [profile.release]

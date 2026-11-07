@@ -7,6 +7,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod files;
+mod system;
 use files::Files;
 use tauri::State;
 
@@ -57,6 +58,10 @@ fn main() {
         }
     };
     tauri::Builder::default()
+        // A second start brings the running window forward instead of opening another copy.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| system::show_main(app)))
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_notification::init())
         .manage(files)
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -74,9 +79,32 @@ fn main() {
             if let Err(e) = app.global_shortcut().register(to_register) {
                 eprintln!("Горячая клавиша Ctrl+Alt+G занята другой программой: {e}");
             }
+            system::create_tray(app.handle())?;
+            // The window starts hidden and shows itself once its saved size and place are applied.
+            // If the page fails to do that, show it anyway.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                if let Some(w) = handle.get_webview_window("main") {
+                    if !w.is_visible().unwrap_or(true) {
+                        let _ = w.show();
+                    }
+                }
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![store_load, store_save, settings_load, settings_save, journal_append, journal_read])
+        // The close button and Alt+F4 hide the window to the tray; quitting is in the tray menu.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            store_load, store_save, settings_load, settings_save, journal_append, journal_read,
+            system::tray_set, system::notify, system::autostart_get, system::autostart_set,
+            system::window_to_bottom, system::desktop_supported, system::open_data_folder, system::app_quit
+        ])
         .run(tauri::generate_context!())
         .expect("Пульт (проба Tauri) не запустился");
 }

@@ -5,7 +5,8 @@ const fs = require('fs'), path = require('path'), http = require('http');
 const root = path.resolve('build/tauri-ui');
 const srv = http.createServer((q, res) => { const u = decodeURIComponent(q.url.split('?')[0]); const f = path.join(root, u === '/' ? 'index.html' : u);
   fs.readFile(f, (e, d) => { if (e) { res.writeHead(404); return res.end(); } res.writeHead(200, { 'content-type': f.endsWith('.css') ? 'text/css' : f.endsWith('.js') ? 'text/javascript' : f.endsWith('.html') ? 'text/html; charset=utf-8' : 'application/octet-stream' }); res.end(d); }); }).listen(8766);
-const disk = { data: null, settings: {}, journal: [], version: 0, seen: 0, saves: 0 };
+const disk = { data: null, settings: { fullBounds: { x: 200, y: 100, width: 1200, height: 800 } }, journal: [], version: 0, seen: 0, saves: 0 };
+const sysCalls = [];
 const log = []; const check = (n, ok, x = '') => log.push(`${ok ? 'OK  ' : 'FAIL'} ${n}${x ? ' — ' + x : ''}`);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
@@ -19,14 +20,34 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       case 'settings_save': disk.settings = JSON.parse(JSON.stringify(args.values)); return null;
       case 'journal_append': disk.journal.push(...args.lines); return null;
       case 'journal_read': return [...disk.journal].reverse().filter(e => !args.since || e.ts >= args.since);
+      case 'desktop_supported': return true;
+      case 'autostart_get': return false;
+      case 'autostart_set': sysCalls.push('autostart:' + args.on); return args.on;
+      case 'tray_set': disk.tray = args; return null;
+      case 'notify': sysCalls.push('notify:' + args.body); return true;
+      case 'window_to_bottom': sysCalls.push('bottom'); return true;
+      case 'open_data_folder': sysCalls.push('folder'); return null;
+      case 'app_quit': sysCalls.push('quit'); return null;
       default: throw 'unknown command ' + cmd;
     }
   });
   await ctx.addInitScript(() => {
-    const win = { isMaximized: async () => false, onResized: () => {}, minimize: async () => {}, maximize: async () => {}, unmaximize: async () => {}, setSize: async () => {}, startDragging: async () => {},
-      setAlwaysOnTop: async () => {}, setTheme: async () => {}, setIgnoreCursorEvents: async () => {}, outerPosition: async () => ({ x: 0, y: 0 }), scaleFactor: async () => 1 };
-    window.__TAURI__ = { core: { invoke: (c, a) => window.__rust(c, a || {}) }, event: { listen: async () => {} },
-      window: { getCurrentWindow: () => win, LogicalSize: function () {}, cursorPosition: async () => ({ x: 0, y: 0 }) }, webview: { getCurrentWebview: () => ({ setZoom: async () => {} }) } };
+    // A stand-in window that remembers its place and what was asked of it.
+    const w = window.__win = { x: 0, y: 0, width: 1320, height: 860, visible: false, top: null, skip: null, min: null, calls: [] };
+    const listeners = {};
+    const win = { isMaximized: async () => false, isMinimized: async () => false, isVisible: async () => w.visible, onResized: () => {}, onMoved: () => {}, onFocusChanged: () => {},
+      minimize: async () => {}, maximize: async () => {}, unmaximize: async () => {}, startDragging: async () => {},
+      setSize: async s => { w.width = s.width; w.height = s.height; }, setPosition: async p => { w.x = p.x; w.y = p.y; }, setMinSize: async s => { w.min = s; },
+      outerPosition: async () => ({ x: w.x, y: w.y }), outerSize: async () => ({ width: w.width, height: w.height }), scaleFactor: async () => 1,
+      show: async () => { w.visible = true; w.calls.push('show'); }, hide: async () => { w.visible = false; w.calls.push('hide'); },
+      setAlwaysOnTop: async on => { w.top = on; }, setSkipTaskbar: async on => { w.skip = on; }, setTheme: async () => {}, setIgnoreCursorEvents: async () => {} };
+    function Size(width, height) { this.width = width; this.height = height; }
+    function Pos(x, y) { this.x = x; this.y = y; }
+    window.__emit = (name, payload) => (listeners[name] || []).forEach(f => f({ payload }));
+    window.__TAURI__ = { core: { invoke: (c, a) => window.__rust(c, a || {}) }, event: { listen: async (n, f) => { (listeners[n] ||= []).push(f); } },
+      dpi: { LogicalSize: Size, LogicalPosition: Pos },
+      window: { getCurrentWindow: () => win, availableMonitors: async () => [{ position: { x: 0, y: 0 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 }], cursorPosition: async () => ({ x: 0, y: 0 }) },
+      webview: { getCurrentWebview: () => ({ setZoom: async () => {} }) } };
   });
   const p = await ctx.newPage();
   const errs = []; p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
@@ -70,7 +91,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   // Messenger: shared rules from src/core/chats.js.
   check('sample chats written', Object.keys(disk.data.chats || {}).length === 3, Object.keys(disk.data.chats || {}).join());
   await p.click('[data-act="msg-open"]'); await wait(300);
-  const chatId = await js(() => document.querySelector('[data-act="msg-chat"]')?.dataset.id);
+  const chatId = await js(() => [...document.querySelectorAll('[data-act="msg-chat"]')].map(b => b.dataset.id).find(id => !/^[tc]:/.test(id)));
   await p.click(`[data-act="msg-chat"][data-id="${chatId}"]`); await wait(300);
   await p.fill('#msg-text', 'Проверка @все'); await p.press('#msg-text', 'Enter'); await wait(600);
   const sent = disk.data.chats[chatId].messages.at(-1);
@@ -93,6 +114,28 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check('ИРД request saved (request + ИРД row)', (pr.requests || []).some(r => /ТУ на водоснабжение/.test(r.title)) && (pr.ird || []).some(r => /ТУ на водоснабжение/.test(r.title)), JSON.stringify({ req: pr.requests, ird: pr.ird }).slice(0, 300));
   const r5 = await js(() => window.api.exportReport('xlsx', 'all'));
   check('not moved yet → clear message', !r5.ok && /следующем этапе/.test(r5.message));
+  // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
+  const w0 = await js(() => window.__win);
+  check('window shown at its saved place', w0.visible && w0.calls.includes('show') && w0.x === 200 && w0.width === 1200, JSON.stringify(w0));
+  check('tray menu sent', Array.isArray(disk.tray?.items) && disk.tray.items.some(i => i.id === 'quit') && /Пульт главспеца/.test(disk.tray.tooltip), JSON.stringify(disk.tray?.items?.map(i => i.id)));
+  await js(() => window.__emit('tray:action', 'compact')); await wait(500);
+  const w1 = await js(() => window.__win);
+  check('tray: compact mode — small window, own min size, full bounds kept', disk.settings.compact === true && w1.width === 360 && w1.min.width === 280 && disk.settings.fullBounds.width === 1200, JSON.stringify({ w1, c: disk.settings.compact }));
+  check('interface in compact mode', await js(() => window.AppBridge.state.win.compact === true));
+  await js(() => window.__emit('tray:action', 'compact')); await wait(500);
+  check('back to the full window at its place', (await js(() => window.__win.width)) === 1200 && disk.settings.compact === false);
+  await js(() => window.api.setLevel('desktop')); await wait(300);
+  check('«на рабочем столе»: not on top, no taskbar button, sent under the windows', (await js(() => window.__win.top)) === false && (await js(() => window.__win.skip)) === true && sysCalls.includes('bottom') && disk.settings.windowLevel === 'desktop');
+  await js(() => window.api.setLevel('top')); await wait(300);
+  check('back on top', (await js(() => window.__win.top)) === true && (await js(() => window.__win.skip)) === false);
+  await js(() => window.__emit('tray:action', 'autostart')); await wait(800);
+  check('tray: start with Windows', sysCalls.includes('autostart:true') && disk.tray.items.find(i => i.id === 'autostart').checked === true);
+  await js(() => window.__emit('tray:action', 'digest-now')); await wait(300);
+  check('tray: digest now → notification', sysCalls.some(c => c.startsWith('notify:')));
+  await js(() => window.api.hide()); await wait(100);
+  check('hide → hidden (back via the tray)', (await js(() => window.__win.visible)) === false);
+  await js(() => window.__emit('tray:action', 'quit')); await wait(100);
+  check('tray: quit', sysCalls.includes('quit'));
   await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-check.png' });
   check('no page errors', errs.length === 0, errs.join(' | '));
   console.log(log.join('\n')); process.exitCode = log.some(l => l.startsWith('FAIL')) ? 1 : 0;
