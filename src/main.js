@@ -11,16 +11,17 @@ const { buildReport } = require('./report/model');
 const { buildXlsx, buildCompositionXlsx } = require('./report/xlsx');
 const { buildDocx, buildCompositionDocx } = require('./report/docx');
 const { customerHtml, pageModel } = require('./report/customer');
-const { fillTemplate, templateFile, TemplateError, TEMPLATES } = require('./report/doc-template');
+const { fillTemplate, TemplateError, TEMPLATES } = require('./report/doc-template');
 const { Cabinet, normalizeUrl, isLocalHost, KINDS: CAB_KINDS } = require('./cabinet');
 const Composition = require('./renderer/composition.js');
-const { readTable, ImportError } = require('./import/read');
+const { readTableBytes, ImportError } = require('./import/read');
 const { contactUrl } = require('./contact');
 const { DesktopLevel } = require('./desktop-level');
 const { Journal, diffBatch } = require('./journal');
 const { Feedback } = require('./feedback'); // testing aid: notes on the interface
 const createCore = require('./core/handlers');
 const createChats = require('./core/chats');
+const createFiles = require('./core/files');
 
 const APP_TITLE = 'Пульт главспеца';
 const APP_ID = 'ru.glavspec.widget';
@@ -335,30 +336,49 @@ function customerContact(p) {
 }
 // What the cabinet gets for a project: the same customer-safe model as the HTML page, built from the full
 // project record and the cards the current user sees. null when the user may not publish it.
+/* ---------- files: src/core/files.js (shared with the Tauri version); Windows side here ---------- */
+let files = null;
+// Built-in files the shared code asks for: the logo, fonts of the customer page, the office's Word templates.
+const ASSET_DIRS = { brand: path.join(__dirname, 'renderer', 'brand'), fonts: path.join(__dirname, 'renderer', 'fonts'), templates: path.join(__dirname, 'report', 'templates') };
+function electronIo() {
+  const filtersOf = list => (list || []).map(f => ({ name: f.name, extensions: f.extensions }));
+  return {
+    async saveDialog({ title, defaultPath, filters }) { const r = await dialog.showSaveDialog(win, { title, defaultPath, filters: filtersOf(filters) }); return r.canceled ? null : r.filePath || null; },
+    async openDialog({ title, defaultPath, filters, directory }) {
+      const r = await dialog.showOpenDialog(win, { title, defaultPath, filters: directory ? undefined : filtersOf(filters), properties: directory ? ['openDirectory', 'createDirectory'] : ['openFile'] });
+      return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+    },
+    async confirm({ title, message, detail, ok }) {
+      const { response } = await dialog.showMessageBox(win, { type: 'warning', buttons: [ok || 'Да', 'Отмена'], defaultId: 1, cancelId: 1, noLink: true, title, message, detail });
+      return response === 0;
+    },
+    writeFile: async (file, data) => fs.writeFileSync(file, data, typeof data === 'string' ? 'utf8' : undefined),
+    readFile: async file => fs.readFileSync(file),
+    exists: async file => fs.existsSync(file),
+    mkdir: async dir => { fs.mkdirSync(dir, { recursive: true }); },
+    copyFile: async (from, to) => fs.copyFileSync(from, to),
+    listDir: async dir => fs.readdirSync(dir),
+    remove: async file => fs.unlinkSync(file),
+    openPath: file => shell.openPath(file),
+    openExternal: url => shell.openExternal(url),
+    async pdf(html, target) {
+      const pdfWin = new BrowserWindow({ show: false, width: 1240, height: 1600, webPreferences: { sandbox: true, javascript: false } });
+      try {
+        await pdfWin.loadURL('data:text/html;charset=utf-8;base64,' + Buffer.from(html).toString('base64'));
+        fs.writeFileSync(target, await pdfWin.webContents.printToPDF({ pageSize: 'A4', landscape: true, printBackground: true, margins: { marginType: 'custom', top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 } }));
+        return { ok: true };
+      } finally { pdfWin.destroy(); }
+    },
+    async asset(rel) { const [dir, ...rest] = rel.split('/'); if (!ASSET_DIRS[dir]) throw new Error('нет такого файла: ' + rel); return fs.readFileSync(path.join(ASSET_DIRS[dir], ...rest)); },
+    dirs: () => ({ documents: app.getPath('documents'), userData: app.getPath('userData') }),
+    join: (...p) => path.join(...p), dirname: p => path.dirname(p), basename: p => path.basename(p), extname: p => path.extname(p),
+  };
+}
+
 /* ---------- messenger: src/core/chats.js (shared with the Tauri version) ---------- */
 let chats = null;
 
 
-let autoBackupError = '';
-function autoBackup(force = false) {
-  const dir = settings.get('autoBackupDir');
-  if (!dir) return { ok: true };
-  const day = L.todayStr();
-  if (!force && settings.get('autoBackupLast') === day) return { ok: true };
-  try {
-    if (!fs.existsSync(dir)) throw new Error('папка недоступна (флешка не вставлена или сеть отключена)');
-    const payload = { format: 'glavspec-backup', version: 1, app: app.getVersion(), createdAt: new Date().toISOString(), auto: true, data: store.data };
-    fs.writeFileSync(path.join(dir, `Пульт главспеца — автокопия ${day}.json`), JSON.stringify(payload), 'utf8');
-    const old = fs.readdirSync(dir).filter(f => /^Пульт главспеца — автокопия \d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
-    for (const f of old.slice(0, Math.max(0, old.length - 14))) fs.unlinkSync(path.join(dir, f));
-    settings.set({ autoBackupLast: day });
-    autoBackupError = '';
-    return { ok: true };
-  } catch (e) {
-    autoBackupError = e.message;
-    return { ok: false, message: `Автокопия не сохранена: ${e.message}` };
-  }
-}
 function cabinetModel(projectId) {
   const me = currentUser();
   if (!me || A.isSpecialist(me)) return null;
@@ -588,161 +608,30 @@ function registerIpc() {
   });
   ipcMain.on('app:open-data-folder', () => shell.openPath(app.getPath('userData')));
 
-  ipcMain.handle('report:export', (_e, format, scope) => exportReport(format, scope));
+  ipcMain.handle('report:export', (_e, format, scope) => files.exportReport(format, scope));
   // Opens only the file this app just saved, never an arbitrary path from the page.
-  ipcMain.on('report:open-last', () => { if (lastExport) shell.openPath(lastExport); });
+  ipcMain.on('report:open-last', () => files.openLast());
 
   // The page passes a project id; the folder path is taken from the stored record.
-  ipcMain.handle('project:open-folder', async (_e, id) => {
-    const p = typeof id === 'string' ? store.data.projects[id] : null;
-    const folder = p && typeof p.folder === 'string' ? p.folder.trim() : '';
-    if (!folder) return { ok: false, message: 'У проекта не указана папка.' };
-    if (!fs.existsSync(folder)) return { ok: false, message: `Папка не найдена: ${folder}. Проверьте путь или доступ к сетевому диску.` };
-    const err = await shell.openPath(folder);
-    return err ? { ok: false, message: `Не удалось открыть папку: ${err}` } : { ok: true };
-  });
+  ipcMain.handle('project:open-folder', (_e, id) => files.openProjectFolder(id));
   // A section's own folder (drawings of one mark); the path comes from the stored card, never from the page.
-  ipcMain.handle('task:open-folder', async (_e, id) => {
-    const me = currentUser(), t = typeof id === 'string' ? store.data.tasks[id] : null;
-    if (!t || !A.canSeeTask(me, t, store.snapshot().users)) return { ok: false, message: 'Карточка не найдена.' };
-    const folder = typeof t.folder === 'string' ? t.folder.trim() : '';
-    if (!folder) return { ok: false, message: 'У раздела не указана папка.' };
-    if (!fs.existsSync(folder)) return { ok: false, message: `Папка не найдена: ${folder}. Проверьте путь или доступ к сетевому диску.` };
-    const err = await shell.openPath(folder);
-    return err ? { ok: false, message: `Не удалось открыть папку: ${err}` } : { ok: true };
-  });
+  ipcMain.handle('task:open-folder', (_e, id) => files.openTaskFolder(id));
   // «Спасибо» under a comment: one per person, not for own comments; toggles. Not undoable, journaled briefly.
   ipcMain.handle('task:thank', (_e, id, commentId) => core.taskThank(id, commentId));
   // Customer page of one project: one HTML file (logo and font inside) or the same page printed to PDF.
   // Built from the full project record (the plan incl. «Договор»), cards as the user sees them; no money, no contractors.
-  ipcMain.handle('report:customer-page', async (_e, projectId, opts = {}) => {
-    const me = currentUser();
-    if (!me || A.isSpecialist(me)) return { ok: false, message: 'Страницу для заказчика делают ГИП и главспецы.' };
-    const view = userView();
-    if (!view.projects.some(x => x.id === projectId)) return { ok: false, message: 'Выберите проект.' };
-    const p = store.data.projects[projectId];
-    const format = opts.format === 'pdf' ? 'pdf' : 'html';
-    const stamp = L.todayStr();
-    const lastDir = settings.get('reportDir');
-    const dir = lastDir && fs.existsSync(lastDir) ? lastDir : app.getPath('documents');
-    const { canceled, filePath } = await dialog.showSaveDialog(win, {
-      title: 'Сохранить страницу для заказчика', defaultPath: path.join(dir, `Статус проекта — ${safeName(p.name)} ${stamp}.${format}`),
-      filters: [format === 'pdf' ? { name: 'PDF', extensions: ['pdf'] } : { name: 'Веб-страница', extensions: ['html'] }],
-    });
-    if (canceled || !filePath) return { ok: false, canceled: true };
-    const target = path.extname(filePath).toLowerCase() === '.' + format ? filePath : `${filePath}.${format}`;
-    const contact = customerContact(p);
-    const montserrat = opts.font === 'montserrat';
-    const html = customerHtml({
-      project: { ...p, id: projectId }, tasks: view.tasks, contact, team: customerTeam(p), today: stamp,
-      logoSvg: fs.readFileSync(path.join(__dirname, 'renderer', 'brand', 'tandem-logo.svg'), 'utf8'),
-      fontName: montserrat ? 'Montserrat' : 'Golos Text',
-      fontBase64: fs.readFileSync(path.join(__dirname, 'renderer', 'fonts', montserrat ? 'Montserrat.ttf' : 'GolosText.ttf')).toString('base64'),
-    });
-    try {
-      if (format === 'html') fs.writeFileSync(target, html, 'utf8');
-      else {
-        const pdfWin = new BrowserWindow({ show: false, width: 1240, height: 1600, webPreferences: { sandbox: true, javascript: false } });
-        try {
-          await pdfWin.loadURL('data:text/html;charset=utf-8;base64,' + Buffer.from(html).toString('base64'));
-          fs.writeFileSync(target, await pdfWin.webContents.printToPDF({ pageSize: 'A4', landscape: true, printBackground: true, margins: { marginType: 'custom', top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 } }));
-        } finally { pdfWin.destroy(); }
-      }
-      lastExport = target;
-      settings.set({ reportDir: path.dirname(target) });
-      return { ok: true, name: path.basename(target) };
-    } catch (e) {
-      if (['EBUSY', 'EPERM', 'EACCES'].includes(e.code)) return { ok: false, message: 'Файл занят или защищён от записи — возможно, он открыт. Закройте его или сохраните под другим именем.' };
-      console.error(e);
-      return { ok: false, message: `Не удалось сохранить страницу: ${e.message}` };
-    }
-  });
+  ipcMain.handle('report:customer-page', (_e, projectId, opts) => files.customerPage(projectId, opts));
   // «Состав проектной документации» of a project: Word or Excel, form after ГОСТ Р 21.101.
   // «Состав проектной документации» and «Ведомость основных комплектов рабочих чертежей»:
   // Word from the office's templates (sp / vok), or both lists in one Excel workbook.
-  ipcMain.handle('report:composition', async (_e, projectId, format, opts = {}) => {
-    const me = currentUser();
-    if (!me || A.isSpecialist(me)) return { ok: false, message: 'Состав проекта выгружают ГИП и главспецы.' };
-    const p = userView().projects.find(x => x.id === projectId);
-    if (!p?.composition) return { ok: false, message: 'У проекта ещё нет состава.' };
-    const kind = format === 'vok' ? 'vok' : format === 'xlsx' ? 'xlsx' : 'sp';
-    const ext = kind === 'xlsx' ? 'xlsx' : 'docx';
-    const code = String(p.code || '').trim();
-    const sp = Composition.spRows(p.composition, code);
-    const rd = Composition.rdRows(p.composition, code);
-    if (kind === 'vok' && !rd.length) return { ok: false, message: 'В составе рабочей документации нет разделов.' };
-    const stamp = L.todayStr();
-    const label = { sp: 'Состав ПД', vok: 'ВОК', xlsx: 'Состав ПД и ВОК' }[kind];
-    const lastDir = settings.get('reportDir');
-    const dir = lastDir && fs.existsSync(lastDir) ? lastDir : app.getPath('documents');
-    const { canceled, filePath } = await dialog.showSaveDialog(win, {
-      title: `Сохранить: ${label}`, defaultPath: path.join(dir, `${code ? safeName(code) + ' ' : ''}${label} — ${safeName(p.name)}.${ext}`),
-      filters: [REPORT_FORMATS[ext]],
-    });
-    if (canceled || !filePath) return { ok: false, canceled: true };
-    const target = path.extname(filePath).toLowerCase() === '.' + ext ? filePath : `${filePath}.${ext}`;
-    try {
-      let out;
-      if (kind === 'xlsx') {
-        out = buildCompositionXlsx(sp.map(r => ({ tom: r.tom, code: r.code, name: `${r.label} «${r.title}»`, note: '' })),
-          { title: 'Состав проектной документации', project: p.name, code, rdRows: rd.map(r => ({ tom: r.tom, code: r.code, name: r.title, note: r.note })) });
-      } else {
-        const t = templateFile(kind, path.join(app.getPath('userData'), 'templates'));
-        const str = (v, max) => String(v ?? '').trim().slice(0, max);
-        const gip = str(opts.gip, 60), names = { gip, gipShort: gip.split(/\s+/)[0] || '', director: str(opts.director, 60), developer: str(opts.developer, 60).split(/\s+/)[0] || '' };
-        const name = str(p.name, 300);
-        out = fillTemplate(fs.readFileSync(t.file), {
-          prefix: code ? code + '-' : '', object: /^«.*»$/.test(name) ? name : `«${name}»`, customer: str(opts.customer ?? p.client, 300),
-          year: str(opts.year, 4) || stamp.slice(0, 4), names: Object.fromEntries(Object.entries(names).filter(([, v]) => v)), from: t.names,
-          stage: kind === 'vok' ? 'Р' : 'П', fromStage: t.stage,
-          rows: kind === 'vok' ? rd.map(r => ({ tom: r.tom, code: r.code, title: r.title, note: r.note }))
-            : sp.map(r => ({ tom: r.tom, code: r.code, label: r.label, title: r.title, note: '', heading: !r.vol })),
-        });
-        settings.set({ docNames: { director: names.director || settings.get('docNames')?.director || '' } });
-      }
-      fs.writeFileSync(target, out);
-      lastExport = target;
-      settings.set({ reportDir: path.dirname(target) });
-      return { ok: true, name: path.basename(target) };
-    } catch (e) {
-      if (['EBUSY', 'EPERM', 'EACCES'].includes(e.code)) return { ok: false, message: 'Файл занят или защищён от записи — возможно, он открыт. Закройте его или сохраните под другим именем.' };
-      if (e instanceof TemplateError) return { ok: false, message: e.message };
-      console.error(e);
-      return { ok: false, message: `Не удалось сохранить: ${e.message}` };
-    }
-  });
+  ipcMain.handle('report:composition', (_e, projectId, format, opts) => files.composition(projectId, format, opts));
   // Defaults for the export dialog: the director last typed, the folder with the user's own templates.
-  ipcMain.handle('report:doc-defaults', () => {
-    const dir = path.join(app.getPath('userData'), 'templates');
-    return { director: settings.get('docNames')?.director || TEMPLATES.sp.names.director, templatesDir: dir, own: ['sp', 'vok'].filter(k => fs.existsSync(path.join(dir, TEMPLATES[k].file))) };
-  });
-  ipcMain.handle('report:open-templates', () => {
-    const dir = path.join(app.getPath('userData'), 'templates');
-    fs.mkdirSync(dir, { recursive: true });
-    for (const k of ['sp', 'vok']) { const f = path.join(dir, 'образец-' + TEMPLATES[k].file); if (!fs.existsSync(f)) fs.copyFileSync(path.join(__dirname, 'report', 'templates', TEMPLATES[k].file), f); }
-    shell.openPath(dir);
-    return { ok: true };
-  });
-  ipcMain.handle('project:pick-folder', async (_e, current) => {
-    const res = await dialog.showOpenDialog(win, {
-      title: 'Папка проекта', properties: ['openDirectory'],
-      defaultPath: typeof current === 'string' && current && fs.existsSync(current) ? current : undefined,
-    });
-    return res.canceled || !res.filePaths.length ? { canceled: true } : { path: res.filePaths[0] };
-  });
+  ipcMain.handle('report:doc-defaults', () => files.docDefaults());
+  ipcMain.handle('report:open-templates', () => files.openTemplates());
+  ipcMain.handle('project:pick-folder', (_e, current) => files.pickFolder(current));
 
   // Opens mail / WhatsApp / Telegram for a stored contractor; the URL is built here, never taken from the page.
-  ipcMain.handle('contact:open', async (_e, { contractorId, kind, subject, text } = {}) => {
-    const c = typeof contractorId === 'string' ? store.data.contractors[contractorId] : null;
-    if (!c) return { ok: false, message: 'Подрядчик не найден.' };
-    const url = contactUrl(c, kind, { subject: String(subject || '').slice(0, 300), text: String(text || '').slice(0, 6000) });
-    if (!url) {
-      const need = { mail: 'адрес почты', whatsapp: 'номер телефона', telegram: 'ник Telegram (@имя) или телефон' }[kind] || 'контакт';
-      return { ok: false, message: `В карточке подрядчика не указан ${need}.` };
-    }
-    try { await shell.openExternal(url); return { ok: true }; }
-    catch (e) { return { ok: false, message: `Не удалось открыть приложение: ${e.message}` }; }
-  });
+  ipcMain.handle('contact:open', (_e, args) => files.contactOpen(args));
 
   // Interface notes for the developer (testing aid).
   ipcMain.handle('fb:list', () => feedback.list());
@@ -778,153 +667,15 @@ function registerIpc() {
   });
 
   // Automatic copy (3.6): once a day into a folder the GIP chose (flash drive, network share), the last 14 kept.
-  ipcMain.handle('autobackup:get', () => ({ dir: settings.get('autoBackupDir') || '', last: settings.get('autoBackupLast') || '', error: autoBackupError }));
-  ipcMain.handle('autobackup:set', async (_e, off) => {
-    if (!A.canUseDataTools(currentUser())) return { ok: false, message: 'Автокопию настраивает ГИП.' };
-    if (off) { settings.set({ autoBackupDir: '' }); return { ok: true, dir: '' }; }
-    const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Папка для автокопии (флешка, сетевая папка)', properties: ['openDirectory', 'createDirectory'] });
-    if (canceled || !filePaths?.[0]) return { canceled: true };
-    settings.set({ autoBackupDir: filePaths[0], autoBackupLast: '' });
-    const r = autoBackup(true);
-    return { ok: r.ok, dir: filePaths[0], message: r.message };
-  });
-  ipcMain.handle('backup:save', async () => {
-    if (!A.canUseDataTools(currentUser())) return { ok: false, message: 'Импорт и резервные копии доступны только ГИПу.' };
-    const stamp = L.todayStr();
-    const { canceled, filePath } = await dialog.showSaveDialog(win, {
-      title: 'Сохранить резервную копию',
-      defaultPath: path.join(settings.get('backupDir') && fs.existsSync(settings.get('backupDir')) ? settings.get('backupDir') : app.getPath('documents'), `Пульт главспеца — копия ${stamp}.json`),
-      filters: [{ name: 'Резервная копия', extensions: ['json'] }],
-    });
-    if (canceled || !filePath) return { canceled: true };
-    try {
-      const payload = { format: 'glavspec-backup', version: 1, app: app.getVersion(), createdAt: new Date().toISOString(), data: store.data };
-      fs.writeFileSync(filePath, JSON.stringify(payload, null, 1), 'utf8');
-      settings.set({ backupDir: path.dirname(filePath) });
-      const s = store.snapshot();
-      return { ok: true, name: path.basename(filePath), counts: { projects: s.projects.length, contractors: s.contractors.length, tasks: s.tasks.length } };
-    } catch (e) {
-      return { ok: false, message: `Не удалось сохранить копию: ${e.message}` };
-    }
-  });
+  ipcMain.handle('autobackup:get', () => files.autoBackupGet());
+  ipcMain.handle('autobackup:set', (_e, off) => files.autoBackupSet(off));
+  ipcMain.handle('backup:save', () => files.backupSave());
 
-  ipcMain.handle('backup:restore', async () => {
-    if (!A.canUseDataTools(currentUser())) return { ok: false, message: 'Импорт и резервные копии доступны только ГИПу.' };
-    const res = await dialog.showOpenDialog(win, {
-      title: 'Восстановить из резервной копии', properties: ['openFile'],
-      defaultPath: settings.get('backupDir') && fs.existsSync(settings.get('backupDir')) ? settings.get('backupDir') : app.getPath('documents'),
-      filters: [{ name: 'Резервная копия', extensions: ['json'] }],
-    });
-    if (res.canceled || !res.filePaths.length) return { canceled: true };
-    let parsed;
-    try { parsed = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8')); }
-    catch { return { ok: false, message: 'Файл не читается как резервная копия (повреждён или это другой файл).' }; }
-    // Accepts our backup file, data.json itself, or a daily copy from the backups folder.
-    const data = parsed && parsed.format === 'glavspec-backup' ? parsed.data : parsed;
-    const count = col => (data && typeof data[col] === 'object' && data[col] ? Object.keys(data[col]).length : 0);
-    if (!data || !['projects', 'contractors', 'tasks'].some(col => data[col] && typeof data[col] === 'object')) {
-      return { ok: false, message: 'В файле нет данных Пульта главспеца.' };
-    }
-    const when = parsed.createdAt ? ` от ${new Date(parsed.createdAt).toLocaleString('ru-RU')}` : '';
-    const now = store.snapshot();
-    const { response } = await dialog.showMessageBox(win, {
-      type: 'warning', buttons: ['Восстановить', 'Отмена'], defaultId: 1, cancelId: 1, noLink: true,
-      title: 'Восстановление', message: `Заменить текущие данные копией${when}?`,
-      detail: `В копии: проектов ${count('projects')}, исполнителей ${count('contractors')}, карточек ${count('tasks')}.
-`
-        + `Сейчас: проектов ${now.projects.length}, исполнителей ${now.contractors.length}, карточек ${now.tasks.length}.
+  ipcMain.handle('backup:restore', () => files.backupRestore());
 
-`
-        + 'Текущие данные будут сохранены в папку backups, так что их можно будет вернуть.',
-    });
-    if (response !== 0) return { canceled: true };
-    try {
-      const keep = path.join(app.getPath('userData'), 'backups', `before-restore-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-      fs.writeFileSync(keep, JSON.stringify(store.data, null, 1), 'utf8');
-      const n = store.replaceAll(data);
-      journal.append([{ col: 'all', id: '-', kind: 'restore-backup', title: `Восстановлено из резервной копии${when}`, changes: [{ f: 'summary', label: 'Записей', to: String(n) }] }], { action: 'Восстановление из копии' });
-      sendData();
-      updateTrayTooltip();
-      return { ok: true, count: n };
-    } catch (e) {
-      return { ok: false, message: e instanceof StoreError ? e.message : `Не удалось восстановить: ${e.message}` };
-    }
-  });
-
-  ipcMain.handle('import:pick', async () => {
-    if (!A.canUseDataTools(currentUser())) return { ok: false, message: 'Импорт и резервные копии доступны только ГИПу.' };
-    const res = await dialog.showOpenDialog(win, {
-      title: 'Импорт из таблицы', properties: ['openFile'],
-      defaultPath: settings.get('importDir') && fs.existsSync(settings.get('importDir')) ? settings.get('importDir') : app.getPath('documents'),
-      filters: [{ name: 'Таблицы', extensions: ['xlsx', 'xlsm', 'csv'] }, { name: 'Все файлы', extensions: ['*'] }],
-    });
-    if (res.canceled || !res.filePaths.length) return { canceled: true };
-    const file = res.filePaths[0];
-    settings.set({ importDir: path.dirname(file) });
-    try {
-      return { ok: true, name: path.basename(file), sheets: readTable(file) };
-    } catch (e) {
-      if (e instanceof ImportError) return { ok: false, message: e.message };
-      if (['EBUSY', 'EPERM', 'EACCES'].includes(e.code)) return { ok: false, message: 'Файл занят или недоступен — возможно, он открыт в Excel. Закройте его и повторите.' };
-      console.error(e);
-      return { ok: false, message: `Не удалось прочитать файл: ${e.message}` };
-    }
-  });
+  ipcMain.handle('import:pick', () => files.importPick());
 }
 
-/* ---------- reports ---------- */
-const REPORT_FORMATS = {
-  xlsx: { name: 'Книга Excel', build: buildXlsx },
-  docx: { name: 'Документ Word', build: buildDocx },
-};
-let lastExport = null;
-const safeName = s => String(s).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
-
-function cleanScope(scope) {
-  if (scope && (scope.type === 'project' || scope.type === 'contractor') && typeof scope.id === 'string') return { type: scope.type, id: scope.id };
-  if (scope && scope.type === 'user' && typeof scope.id === 'string') return { type: 'user', id: scope.id, period: ['month', 'quarter', 'year', 'all'].includes(scope.period) ? scope.period : 'quarter' };
-  return { type: 'all' };
-}
-
-async function exportReport(format, rawScope) {
-  const fmt = REPORT_FORMATS[format];
-  if (!fmt) return { ok: false, message: 'Неизвестный формат отчёта.' };
-  const scope = cleanScope(rawScope);
-  const now = new Date();
-  const stamp = L.todayStr(now);
-  const me = currentUser();
-  if (A.isSpecialist(me)) return { ok: false, message: 'Отчёты доступны ГИПу и главспецам.' };
-  const report = buildReport(userView(), stamp, scope);
-  report.money = A.canSeeMoney(me);
-  if (!report.money && scope.type === 'contractor' && format === 'docx') return { ok: false, message: 'Акт сверки содержит суммы — нужен доступ к бюджету.' };
-  if (scope.type !== 'all' && !report.scope.title) return { ok: false, message: 'Проект, подрядчик или сотрудник не найден.' };
-  if (scope.type === 'user' && !A.isGip(me) && !A.teamIds(me, store.snapshot().users).has(scope.id)) return { ok: false, message: 'Отчёт можно сделать только по своей команде.' };
-  const base = scope.type === 'user' ? `Отчёт по сотруднику — ${safeName(report.scope.title)}`
-    : scope.type === 'contractor' && format === 'docx' ? `Акт сверки — ${safeName(report.scope.title)}`
-    : scope.type === 'all' ? 'Отчёт главспеца' : `Отчёт — ${safeName(report.scope.title)}`;
-  const lastDir = settings.get('reportDir');
-  const dir = lastDir && fs.existsSync(lastDir) ? lastDir : app.getPath('documents');
-  const { canceled, filePath } = await dialog.showSaveDialog(win, {
-    title: 'Сохранить отчёт',
-    defaultPath: path.join(dir, `${base} ${stamp}.${format}`),
-    filters: [{ name: fmt.name, extensions: [format] }],
-  });
-  if (canceled || !filePath) return { ok: false, canceled: true };
-
-  try {
-    const target = path.extname(filePath).toLowerCase() === `.${format}` ? filePath : `${filePath}.${format}`;
-    fs.writeFileSync(target, fmt.build(report, now));
-    lastExport = target;
-    settings.set({ reportDir: path.dirname(target) });
-    return { ok: true, name: path.basename(target) };
-  } catch (e) {
-    if (['EBUSY', 'EPERM', 'EACCES'].includes(e.code)) {
-      return { ok: false, message: 'Файл занят или защищён от записи — возможно, он открыт в Excel или Word. Закройте его или сохраните под другим именем.' };
-    }
-    console.error(e);
-    return { ok: false, message: `Не удалось сохранить отчёт: ${e.message}` };
-  }
-}
 
 /* ---------- start ---------- */
 if (!app.requestSingleInstanceLock()) {
@@ -948,6 +699,9 @@ if (!app.requestSingleInstanceLock()) {
     journal = new Journal(app.getPath('userData'));
     core = createCore({ store, journal, settings, A, L, Composition, diffBatch, StoreError, TRASH_DAYS,
       changed: ({ user = false } = {}) => { sendData(); updateTrayTooltip(); if (user) sendCabinet(); } });
+    files = createFiles({ store, journal, settings, A, L, Composition, StoreError, Buffer, io: electronIo(), appVersion: app.getVersion(),
+      R: { buildReport, buildXlsx, buildDocx, buildCompositionXlsx, customerHtml, fillTemplate, TEMPLATES, TemplateError, readTableBytes, ImportError, contactUrl },
+      currentUser, userView, customerContact, customerTeam, changed: () => { sendData(); updateTrayTooltip(); } });
     feedback = new Feedback(app.getPath('userData'));
     core.migrateUsers();
     try { core.purgeTrash(); } catch (e) { console.error('Не удалось очистить корзину:', e); }
@@ -966,8 +720,8 @@ if (!app.requestSingleInstanceLock()) {
     // Customer cabinet: the built-in server comes back with the app; first look soon after start, then every two minutes.
     if (settings.get('cabinetLocal')) startLocalCabinet().then(sendCabinet).catch(e => console.error('Кабинет на этом компьютере:', e.message));
     setTimeout(() => cabinetSync(), 20 * 1000);
-    setTimeout(() => autoBackup(), 30 * 1000);
-    setInterval(() => autoBackup(), 30 * 60 * 1000);
+    setTimeout(() => files.autoBackup(), 30 * 1000);
+    setInterval(() => files.autoBackup(), 30 * 60 * 1000);
     setInterval(() => cabinetSync(), 2 * 60 * 1000);
   });
 
