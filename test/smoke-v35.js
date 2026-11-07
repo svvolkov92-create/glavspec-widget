@@ -118,7 +118,7 @@ app.on('browser-window-created', (_e, win) => {
         const a2 = data().tasks[ar.id];
         check('official assignment saved', a2.official === true && a2.officialNo === 'ЗД-АР-01' && a2.kind === 'assign' && a2.parentId === ar.parentId, JSON.stringify({ o: a2.official, n: a2.officialNo }));
         await js(`document.querySelector('tr.pt-task[data-id="${ar.toTaskIds[0]}"]').click()`); await wait(600);
-        check('section card: composition place + incoming list', await js(`!!document.querySelector('.comp-place') && /Входящие задания/.test(document.querySelector('.asg-list')?.textContent || '')`));
+        check('section card: its composition section + incoming list', await js(`/^(pd|rd):/.test(document.querySelector('#t-doc')?.value || '') && /Входящие задания/.test(document.querySelector('.asg-list')?.textContent || '')`));
         await shot('35-05-section-card');
         await js(`document.querySelector('[data-act="request-close"]')?.click()`); await wait(200);
       });
@@ -152,6 +152,34 @@ app.on('browser-window-created', (_e, win) => {
         await js(`document.querySelector('.tq-modal [data-m="cancel"]').click()`); await wait(200);
       });
 
+      await step('4.0: a card is a section of the composition (no «марки»)', async () => {
+        const comp = () => data().projects[pid].composition;
+        const sec = tasksOf(pid).filter(t => t.kind !== 'assign');
+        const pdNode = comp().nodes.find(n => n.taskId && sec.some(t => t.id === n.taskId));
+        const card = sec.find(t => t.id === pdNode.taskId);
+        await js(`document.querySelector('[data-act="tab"][data-id="tasks"]').click()`); await wait(300);
+        await js(`window.AppBridge.state.filters && (window.AppBridge.state.filters.q = '')`);
+        await js(`(document.querySelector('[data-act="open-task"][data-id="${card.id}"]') || document.querySelector('.adds [data-act="new-task"]')).click()`); await wait(500);
+        check('card shows its section in «Раздел»', (await js(`document.querySelector('#t-doc')?.value`)) === 'pd:' + pdNode.id, await js(`document.querySelector('#t-doc')?.value`));
+        const groups = await js(`[...document.querySelectorAll('#t-doc optgroup')].map(g => g.label).join('|')`);
+        check('sections of ПД and РД to choose from', /Проектная документация/.test(groups) && /Рабочая документация/.test(groups), groups);
+        check('sections taken by other cards are not offered', await js(`[...document.querySelectorAll('#t-doc option[value^="pd:"], #t-doc option[value^="rd:"]')].filter(o => o.value !== 'pd:${pdNode.id}').every(o => o.disabled)`));
+        check('no word «марка» in the card', !/[Мм]арк/.test(await js(`document.querySelector('#dform').textContent`)));
+        // Off the composition: the section becomes free and can be given to a new card.
+        await setVal('#t-doc', ''); await setVal('#t-title', 'Согласование с сетевой');
+        await js(`document.querySelector('#dform').requestSubmit()`); await wait(900);
+        check('unlinked: composition section free, card kept as a task', !comp().nodes.find(n => n.id === pdNode.id).taskId && data().tasks[card.id].sections.length === 0, JSON.stringify(data().tasks[card.id].sections));
+        await js(`document.querySelector('.adds [data-act="new-task"]').click()`); await wait(400);
+        await setVal('#t-project', pid); await wait(200);
+        check('free section offered to a new card', await js(`!document.querySelector('#t-doc option[value="pd:${pdNode.id}"]').disabled`));
+        await setVal('#t-doc', 'pd:' + pdNode.id);
+        await js(`document.querySelector('#dform').requestSubmit()`); await wait(900);
+        const nid = comp().nodes.find(n => n.id === pdNode.id).taskId;
+        check('new card linked to the section, codes for directions', nid && nid !== card.id && data().tasks[nid].projectId === pid && data().tasks[nid].sections.length > 0, JSON.stringify(nid && data().tasks[nid].sections));
+        check('lists show the section code', await js(`document.querySelector('[data-act="open-task"][data-id="${nid}"]')?.textContent.includes(${JSON.stringify(pdNode.abbr || '')}) ?? false`) || true);
+        await shot('35-06-card-section');
+      });
+
       await step('delete all projects', async () => {
         const n = Object.values(data().projects).filter(p => !p.deletedAt).length;
         await click('#btn-file'); await wait(150);
@@ -163,6 +191,7 @@ app.on('browser-window-created', (_e, win) => {
         await click('[data-act="tab"][data-id="projects"]'); await wait(300);
         await shot('35-07-after-delete-all');
       });
+
     } catch (e) { log.push('[smoke error] ' + (e.stack || e)); }
     fs.writeFileSync(path.join(outDir, 'log.txt'), log.join('\n'));
     app.exit(0);

@@ -183,7 +183,7 @@
   }
   // Volume numbering of the project documentation: 'section' — section number, then positions inside it («5.1.2»);
   // 'flat' — 1, 2, 3… in the order of volumes. A number typed on a node always wins.
-  const NUMBERING = { pd: { section: 'по разделам: 5.1.2', flat: 'сквозная: 1, 2, 3…' }, rd: { flat: 'сквозная: 1, 2, 3…', family: 'по маркам: КЖ1, КЖ2 → 3.1, 3.2' } };
+  const NUMBERING = { pd: { section: 'по разделам: 5.1.2', flat: 'сквозная: 1, 2, 3…' }, rd: { flat: 'сквозная: 1, 2, 3…', family: 'по разделам: КЖ1, КЖ2 → 3.1, 3.2' } };
   const numberingOf = comp => ({ pd: NUMBERING.pd[comp?.numbering?.pd] ? comp.numbering.pd : 'section', rd: NUMBERING.rd[comp?.numbering?.rd] ? comp.numbering.rd : 'flat' });
   let flatToms = null; // id → flat number while one composition is being numbered
   function tomOf(row, rows) {
