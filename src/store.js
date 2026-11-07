@@ -3,16 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const COLLECTIONS = ['projects', 'contractors', 'tasks', 'users', 'chats'];
-const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const MAX_DOC_BYTES = 256 * 1024;
+const { COLLECTIONS, StoreError, isPlainObject, emptyData, fromParsed, snapshot, fromBackup, applyOp } = require('./core/store-core');
 const BACKUPS_TO_KEEP = 30;
-
-class StoreError extends Error {}
-
-function isPlainObject(v) {
-  return v !== null && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
-}
 
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -40,10 +32,6 @@ function localDate(d = new Date()) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-function emptyData() {
-  return { version: 1, projects: {}, contractors: {}, tasks: {}, users: {}, chats: {} };
-}
-
 /**
  * All records live in one JSON file. The data set is small (hundreds of records),
  * so whole-file synchronous writes keep things simple and never interleave.
@@ -67,11 +55,7 @@ class Store {
       throw e;
     }
     try {
-      const parsed = JSON.parse(raw);
-      if (!isPlainObject(parsed)) throw new Error('root is not an object');
-      const data = emptyData();
-      for (const col of COLLECTIONS) data[col] = isPlainObject(parsed[col]) ? parsed[col] : {};
-      return data;
+      return fromParsed(JSON.parse(raw));
     } catch (e) {
       // Keep the broken file for manual recovery instead of overwriting it.
       const aside = path.join(this.dir, `data.corrupt-${this.now().getTime()}.json`);
@@ -82,28 +66,12 @@ class Store {
   }
 
   snapshot() {
-    const out = {};
-    for (const col of COLLECTIONS) {
-      out[col] = Object.entries(this.data[col]).map(([id, doc]) => ({ ...doc, id }));
-    }
-    return out;
+    return snapshot(this.data);
   }
 
   // Replaces everything (restore from a backup). Records with invalid ids are skipped.
   replaceAll(raw) {
-    if (!isPlainObject(raw)) throw new StoreError('В файле нет данных программы.');
-    const data = emptyData();
-    let count = 0;
-    for (const col of COLLECTIONS) {
-      if (raw[col] !== undefined && !isPlainObject(raw[col])) throw new StoreError('Файл повреждён: неверная структура данных.');
-      for (const [id, doc] of Object.entries(raw[col] || {})) {
-        if (!ID_RE.test(id) || !isPlainObject(doc)) continue;
-        const clean = JSON.parse(JSON.stringify(doc));
-        delete clean.id;
-        data[col][id] = clean;
-        count++;
-      }
-    }
+    const { data, count } = fromBackup(raw);
     this.backupOncePerDay();
     this.data = data;
     writeJsonAtomic(this.file, this.data);
@@ -122,27 +90,7 @@ class Store {
   }
 
   apply(op, { save = true } = {}) {
-    if (!isPlainObject(op)) throw new StoreError('Некорректная операция.');
-    const { type, col, id, data } = op;
-    if (!COLLECTIONS.includes(col)) throw new StoreError(`Неизвестная коллекция: ${col}`);
-    if (typeof id !== 'string' || !ID_RE.test(id)) throw new StoreError('Некорректный идентификатор записи.');
-    const docs = this.data[col];
-
-    if (type === 'delete') {
-      delete docs[id];
-    } else if (type === 'set' || type === 'update') {
-      if (!isPlainObject(data)) throw new StoreError('Данные записи должны быть объектом.');
-      const clean = JSON.parse(JSON.stringify(data)); // drops functions/undefined, detaches from caller
-      delete clean.id;
-      if (type === 'update') {
-        if (!docs[id]) throw new StoreError('Запись не найдена — возможно, её уже удалили.');
-        Object.assign(clean, { ...docs[id], ...clean });
-      }
-      if (Buffer.byteLength(JSON.stringify(clean)) > MAX_DOC_BYTES) throw new StoreError('Запись слишком большая.');
-      docs[id] = clean;
-    } else {
-      throw new StoreError(`Неизвестный тип операции: ${type}`);
-    }
+    applyOp(this.data, op);
     if (save) this.save();
   }
 
