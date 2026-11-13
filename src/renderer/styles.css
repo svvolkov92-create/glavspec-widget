@@ -898,6 +898,9 @@ section.panel[id^="p-"], .cards > .card, .kb-lane, #gantt > .tl-row:not(.tl-head
 .code.k-water { border-left-color: #1D6FD1 }
 .code.k-sewer { border-left-color: #8B5A2B }
 .code.k-ov { border-left-color: #D23C2C }
+.code.k-ar { border-left-color: #7A4FB0 }
+.code.k-kr { border-left-color: #4A5A68 }
+.code.k-pos { border-left-color: #B07A00 }
 .code .kico { width: 11px; height: 11px }
 
 /* header: attention button, «Окно» menu, create menu */
@@ -1148,6 +1151,8 @@ details.more[open] { padding-bottom: 10px }
 :root[data-theme="tandem"] .btn.ghostbtn { background: none; border-color: transparent; color: var(--muted); min-height: 28px; padding: 0 8px }
 :root[data-theme="tandem"] .btn.ghostbtn:hover { color: var(--accent-text); background: var(--accent-soft) }
 :root[data-theme="tandem"] .btn.danger { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)) }
+:root[data-theme="tandem"] .btn.danger.solid { background: var(--bad); border-color: var(--bad); color: #fff }
+:root[data-theme="tandem"] .btn.danger.solid:hover { background: color-mix(in srgb, var(--bad) 88%, #000) }
 :root[data-theme="tandem"] .btn.on, :root[data-theme="tandem"] .office-panel .btn.on, :root[data-theme="tandem"] .stage-bar .btn.on, :root[data-theme="tandem"] .g-mode .btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); box-shadow: inset 0 -2px 0 var(--accent) }
 :root[data-theme="tandem"] .btn.burn, :root[data-theme="tandem"] #btn-create.primary { }
 :root[data-theme="tandem"] .seg { display: inline-flex; gap: 0 !important; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent) }
@@ -1529,3 +1534,147 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .solo #app-title { overflow: hidden; text-overflow: ellipsis }
 .solo .drag-fill { flex: 0 0 12px }
 @media (max-width: 640px) { .solo #btn-view .lbl { display: none } }
+
+/* =================== 4.1 =================== */
+/* Gantt: no executor — a red person with «?» instead of the hazard tape */
+#gantt .tl-bar.noexec { border: 1px solid currentColor; background: var(--idle-soft) }
+.noexec-ic { width: 13px; height: 13px; color: var(--bad); vertical-align: -2px; margin-right: 3px; flex: none }
+.tl-bar .noexec-ic { background: #fff; border-radius: 3px; padding: 1px; width: 14px; height: 14px; box-sizing: border-box }
+.sm-chk { font-size: 12.5px; white-space: nowrap; gap: 6px }
+/* Kanban: board scrolls inside itself — sticky column heads, full-height columns */
+.kb.kb-fit { overflow: auto; align-items: stretch; padding-bottom: 0 }
+.kb.kb-fit .kb-col { min-height: 100%; grid-template-rows: auto 1fr; align-self: stretch }
+.kb.kb-fit .kb-col-h { position: sticky; top: 0; z-index: 2; background: var(--surface); border-radius: 8px 8px 0 0 }
+:root[data-theme="tandem"] .kb.kb-fit .kb-col-h { border-radius: 0 }
+.kb-col.over .kb-list { background: color-mix(in srgb, var(--accent) 6%, transparent) }
+.kb-view { position: relative }
+.kb-view > summary { list-style: none; cursor: pointer }
+.kb-view > summary::-webkit-details-marker { display: none }
+.kb-view-m { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 240px; display: grid; gap: 8px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(20, 24, 33, .16) }
+.sm-chk { flex: none; display: inline-flex }
+.filters .sm-chk input, .gantt-bar .sm-chk input { width: 15px; min-width: 0; flex: none; padding: 0 }
+/* Focus on a task: a small bar at the bottom left with the running time */
+.focus-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 44; display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; max-width: min(560px, 60vw);
+  background: var(--surface); border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line)); border-radius: 10px; box-shadow: 0 8px 24px rgba(20, 24, 33, .18); text-shadow: none }
+:root[data-theme="tandem"] .focus-bar { border-radius: 0 }
+.fb-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; animation: fb-pulse 1.6s ease-in-out infinite }
+@keyframes fb-pulse { 50% { opacity: .35 } }
+@media (prefers-reduced-motion: reduce) { .fb-dot { animation: none } }
+.fb-t { appearance: none; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 }
+.fb-time { font: 600 15px/1 var(--f-mono); color: var(--accent-text, var(--accent)) }
+.focus-slot { display: inline-flex; gap: 8px; align-items: center }
+/* Interface density «Компактно» (4.1): the whole window, not only table rows — smaller type, tighter gaps and controls */
+.shell.dense { font-size: 12.5px; line-height: 1.38 }
+.shell.dense main { padding: 10px 10px 20px; gap: 10px }
+.shell.dense .tab { padding: 6px 8px }
+.shell.dense .panel-h { padding: 7px 10px }
+.shell.dense .panel-h h3 { font-size: 13px }
+.shell.dense .kpi { padding: 7px 10px }
+.shell.dense .btn { padding: 3px 8px }
+.shell.dense .btn.sm { padding: 2px 7px; font-size: 11.5px }
+:root[data-theme="tandem"] .shell.dense .btn { min-height: 28px; padding: 0 10px; font-size: 12px }
+:root[data-theme="tandem"] .shell.dense .btn.sm { min-height: 24px; padding: 0 8px; font-size: 11.5px }
+.shell.dense .filters select, .shell.dense .filters input { padding: 3px 6px }
+.shell.dense th, .shell.dense td { padding-left: 8px; padding-right: 8px }
+.shell.dense .kb { gap: 6px }
+.shell.dense .kb-card { padding: 6px 7px; gap: 2px }
+.shell.dense .kb-list { gap: 5px; padding: 5px }
+.shell.dense .kb-col-h { padding: 6px 8px }
+.shell.dense .tl-name { font-size: 12px }
+.focus-bar.in-compact { left: 8px; right: 8px; bottom: 8px; transform: none; max-width: none; padding: 4px 6px 4px 10px }
+/* Small text in the system font (Segoe UI on Windows) — sharper at 11–12 px than the brand font */
+.hint, .meta, small, .tag, .chip { font-family: 'Segoe UI', system-ui, var(--f-ui) }
+/* Windows high contrast: let the system colours win, keep borders and the focus ring visible */
+@media (forced-colors: active) {
+  .btn, .chip, .tag, .panel, .kb-card, .kb-col, .tl-bar, .drawer, .msg-panel, .focus-bar { border: 1px solid CanvasText !important }
+  .btn.primary, .btn.on, .tab[aria-selected="true"] { forced-color-adjust: none; background: Highlight !important; color: HighlightText !important }
+  :focus-visible { outline: 2px solid Highlight !important }
+  .shell { text-shadow: none !important }
+}
+/* Transparency (4.1, user's list 08.11): controls stay solid whatever the window transparency —
+   the user chip and «Требует внимания», the active tab / left-menu item and its counter, active segments,
+   buttons (+ Сотрудник, + Подрядчик, Отчёты и данные, Создать, Свернуть), checkboxes, «Сообщения». */
+.user-chip, .att-btn, .msg-fab, .nav-mini-btn { background: var(--surface) }
+.btn:not(.ghostbtn):not(.primary):not(.on):not(.danger.solid) { background: var(--surface) }
+:root[data-theme="tandem"] .btn:not(.ghostbtn):not(.primary):not(.on):not(.danger.solid) { background: var(--surface) }
+.tab[aria-selected="true"], .tab .cnt { background-color: var(--surface) }
+:root[data-theme="tandem"] .tab[aria-selected="true"] { background-color: var(--accent-soft) }
+.seg > .btn.on, :root[data-theme="tandem"] .seg > .btn.on, :root[data-theme="tandem"] .btn.on { background: color-mix(in srgb, var(--accent) 14%, var(--surface)) }
+.chk input[type="checkbox"] { background: var(--surface) }
+/* Grey hints get darker as the window gets more transparent, so they stay readable */
+.hint, .meta, .tab, .kb-col-h .cnt { color: color-mix(in srgb, var(--muted) calc(var(--alpha) * 100%), var(--ink)) }
+.tab[aria-selected="true"] { color: var(--ink) }
+:root[data-theme="tandem"] .tab[aria-selected="true"] { color: var(--accent-text) }
+/* Right-click menu of a card */
+.menu.card-menu { position: fixed; right: auto; top: 0; left: 0; width: 290px; z-index: 95; background: var(--surface); box-shadow: 0 10px 30px rgba(20, 24, 33, .22) }
+.card-menu .cm-h { display: grid; padding: 6px 8px 8px; border-bottom: 1px solid var(--line); margin-bottom: 2px }
+.card-menu .cm-h .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.card-menu button { padding: 6px 8px; justify-content: space-between }
+.card-menu button:hover, .card-menu button:focus-visible { background: var(--accent-soft) }
+/* «Кто делает» (4.1): responsible · executor · co-executor; executor picked by typing a surname or a name */
+.who-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)) }
+.exec-pick label .hint { font-weight: 400 }
+.ep-box { position: relative; display: flex }
+.ep-box .ep-q { flex: 1; min-width: 0; padding-right: 30px }
+.ep-clear { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); min-height: 0 !important; padding: 0 6px !important }
+.ep-list { position: absolute; z-index: 25; left: 0; right: 0; top: calc(100% + 3px); max-height: 280px; overflow: auto; display: grid; padding: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 28px rgba(20, 24, 33, .18) }
+.ep-opt { appearance: none; border: 0; background: none; text-align: left; font: inherit; color: inherit; padding: 6px 8px; border-radius: 6px; cursor: pointer; display: grid; gap: 1px }
+.ep-opt b { font-weight: 600 }
+.ep-opt .chip { justify-self: start; font-size: 10.5px }
+.ep-opt.act, .ep-opt:hover { background: var(--accent-soft) }
+.ep-opt.sel b::after { content: ' ✓'; color: var(--accent) }
+.ep-none { padding: 8px }
+.exec-fit { margin-top: 6px }
+.legacy-co { margin-top: 6px }
+/* Project phases (4.1): length in days, chain, small Gantt */
+.ph-t input[type="date"] { min-width: 124px }
+.ph-t .ph-days, :root[data-theme="tandem"] .ph-t .ph-days { width: 74px; min-width: 74px; padding: 0 6px; text-align: right }
+.ph-t td.c { text-align: center }
+.ph-t input[readonly] { background: var(--sunk); color: var(--muted) }
+.ph-g { --ph-l: 130px; position: relative; display: grid; gap: 3px; margin: 10px 0 4px; padding: 6px 0; font-size: 12px }
+.ph-gr { display: grid; grid-template-columns: var(--ph-l) minmax(0, 1fr); align-items: center; min-height: 18px }
+.ph-gl { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px }
+.ph-gt { position: relative; height: 14px }
+.ph-gm .ph-gt { height: 16px; border-bottom: 1px solid var(--line) }
+.ph-gm .ph-gt span { position: absolute; top: 0; font-size: 10.5px; color: var(--muted); white-space: nowrap; transform: translateX(-2px) }
+.ph-bar { position: absolute; top: 2px; height: 10px; border-radius: 3px; background: var(--idle-soft); border: 1px solid var(--idle) }
+.ph-bar.ph-done { background: var(--ok-soft); border-color: var(--ok) }
+.ph-bar.ph-now { background: var(--accent-soft); border-color: var(--accent) }
+.ph-bar.ph-late { background: var(--bad-soft); border-color: var(--bad) }
+.ph-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .7 }
+.ph-ms { position: absolute; bottom: 2px; width: 8px; height: 8px; margin-left: -4px; transform: rotate(45deg); background: var(--review) }
+.tq-modal { width: min(980px, 96vw) }
+/* «Оргструктура» (4.1): cards top-down with connector lines, like a corporate portal */
+.org-panel .org-note { padding: 8px 12px 0 }
+.org-scroll { overflow: auto; padding: 16px 12px 20px }
+.org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; gap: 0 }
+.org-tree { min-width: max-content }
+.org-tree li { position: relative; display: flex; flex-direction: column; align-items: center; padding: 18px 8px 0 }
+.org-tree > li { padding-top: 0 }
+.org-tree ul { padding-top: 0; position: relative }
+/* connectors: vertical from the parent, horizontal across siblings, vertical into each child */
+.org-tree li li::before { content: ''; position: absolute; top: 0; left: 50%; height: 18px; border-left: 1px solid var(--muted) }
+.org-tree li li::after { content: ''; position: absolute; top: 0; left: 0; right: 0; border-top: 1px solid var(--muted) }
+.org-tree li li:first-child::after { left: 50% }
+.org-tree li li:last-child::after { right: 50% }
+.org-tree li li:only-child::after { display: none }
+.org-tree li > ul { margin-top: 18px; position: relative }
+.org-tree li > ul::before { content: ''; position: absolute; top: -18px; left: 50%; height: 18px; border-left: 1px solid var(--muted) }
+.org-card { width: 236px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; text-align: left; box-shadow: 0 1px 2px rgba(20, 24, 33, .06) }
+:root[data-theme="tandem"] .org-card { border-radius: 0 }
+.org-card.mine { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent) }
+.org-card.none { border-style: dashed }
+.org-name { display: flex; gap: 6px; align-items: center; flex-wrap: wrap }
+.org-name b { font-weight: 700; flex: 1; min-width: 0 }
+.org-name .chip { font-size: 10.5px }
+.org-head { display: flex; gap: 8px; align-items: center; font-size: 12.5px; line-height: 1.3 }
+.org-head .pt-ava { width: 34px; height: 34px; font-size: 12px; flex: none }
+.org-foot { display: flex; gap: 10px; align-items: center; border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px }
+.org-foot .linkbtn { color: var(--muted) }
+.org-add { margin-left: auto; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--accent); font-weight: 700; cursor: pointer; line-height: 1 }
+.org-add:hover { border-color: var(--accent) }
+.org-people { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px }
+.org-people .pt-member.me b, .org-people .pt-member.me { color: var(--accent-text, var(--accent)) }
+.org-modal { width: min(560px, 94vw) }
+.org-mem .chk-row { max-height: 200px; overflow: auto }

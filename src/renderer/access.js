@@ -14,11 +14,16 @@
   };
 
   // Directions a chief can lead (any combination). Marks link a direction to the card's sections.
+  // 4.1 (the user's list, 11.11): ПОС separate (ПОД is part of it), ПБ and ОДИ with the architects, АСКУЭ with low current,
+  // ООС and the rest — «Прочие» (no direction). ЭЭ is not a section.
   const DIRECTIONS = [
-    { id: 'el', label: 'Электрика', marks: ['ЭОМ', 'ЭС', 'ЭМ', 'ЭО', 'ЭН', 'КЭ', 'АСКУЭ'] },
-    { id: 'ss', label: 'Слаботочка', marks: ['СС', 'СКС', 'АПС', 'СОУЭ', 'СОТ', 'СКУД', 'ОС', 'ДС'] },
-    { id: 'vk', label: 'Водоснабжение и канализация', marks: ['ВК', 'НВК', 'АУПТ'] },
+    { id: 'ar', label: 'Архитекторы', marks: ['АР', 'АС', 'ГП', 'ПЗУ', 'ПБ', 'ОДИ', 'АИ'] },
+    { id: 'kr', label: 'Конструкторы', marks: ['КР', 'КЖ', 'КМ', 'КЖО', 'КМД', 'КД'] },
+    { id: 'el', label: 'Электрики', marks: ['ЭОМ', 'ЭС', 'ЭМ', 'ЭО', 'ЭН', 'КЭ'] },
+    { id: 'ss', label: 'Слаботочники', marks: ['СС', 'СКС', 'АПС', 'СОУЭ', 'СОТ', 'СКУД', 'ОС', 'ДС', 'АСКУЭ'] },
+    { id: 'vk', label: 'Водоснабжение и канализация', marks: ['ВК', 'НВК', 'НВ', 'НК', 'АУПТ'] },
     { id: 'ov', label: 'Отопление и вентиляция', marks: ['ОВ', 'ТС', 'ИТП', 'ТМ'] },
+    { id: 'pos', label: 'ПОС', marks: ['ПОС', 'ПОД'] },
   ];
 
   // Icon and colour of a mark: the direction, with water split into supply (tap) and sewerage (drops).
@@ -45,7 +50,7 @@
   // Fields that reveal money. Hidden from users without budget access and never writable by them.
   const MONEY_FIELDS = ['budget', 'payments', 'plan', 'invoiceReceived', 'invoiceDate', 'actSigned', 'actDate', 'contractNo', 'contractDate'];
   // What a specialist may change on own cards.
-  const SPECIALIST_FIELDS = ['status', 'history', 'milestones', 'note'];
+  const SPECIALIST_FIELDS = ['status', 'history', 'milestones', 'note', 'timeLog'];
 
   const roleOf = u => (u && ROLES[u.role] ? u.role : null);
   const isGip = u => roleOf(u) === 'gip';
@@ -146,7 +151,9 @@
     const chats = (snapshot.chats || []).filter(c => canSeeChat(user, c, snapshot.projects || []));
     // «Договор» in the project plan and the customer's contract, payments and bills are for GIPs only.
     if (!isGip(user)) projects = projects.map(p => { const { contract, payments, bills, ...rest } = p; return Array.isArray(p.phases) ? { ...rest, phases: p.phases.filter(ph => ph.key !== 'contract') } : rest; });
-    return { projects, contractors, tasks, users, chats };
+    // The org structure is seen by every staff member (4.1).
+    const depts = (snapshot.depts || []).filter(d => !d.deletedAt);
+    return { projects, contractors, tasks, users, chats, depts };
   }
   // A non-GIP saves the plan without the hidden «Договор» row: keep the stored one.
   function keepHiddenPhases(user, before, data) {
@@ -196,6 +203,7 @@
       if (before && after && changedKeys(before, after).every(k => k === 'absences') && canEditAbsences(user, target)) return null;
       return 'Состав команды меняет только ГИП.';
     }
+    if (col === 'depts') return isGip(user) ? null : 'Оргструктуру ведёт ГИП.';
     if (col === 'projects' || col === 'contractors') return !canManageCatalog(user) ? 'Проекты и внештатных исполнителей ведут ГИП и главспецы.' : col === 'projects' ? projectDataError(after) : null;
     if (col !== 'tasks') return 'Неизвестный раздел данных.';
     // A card cannot be handed to someone without its direction unless the assigner confirmed it

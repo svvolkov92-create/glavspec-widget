@@ -43,7 +43,7 @@ test('corrupted file is set aside, not overwritten', () => {
   fs.writeFileSync(path.join(dir, 'data.json'), '{ broken');
   const s = new Store(dir);
   assert.ok(s.warning);
-  assert.deepEqual(s.snapshot(), { projects: [], contractors: [], tasks: [], users: [], chats: [] });
+  assert.deepEqual(s.snapshot(), { projects: [], contractors: [], tasks: [], users: [], chats: [], depts: [] });
   const aside = fs.readdirSync(dir).filter(f => f.startsWith('data.corrupt-'));
   assert.equal(aside.length, 1);
   assert.equal(fs.readFileSync(path.join(dir, aside[0]), 'utf8'), '{ broken');

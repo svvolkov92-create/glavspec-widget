@@ -50,6 +50,67 @@
     return { phases: states, current, behind, next: ms, daysToNext: ms ? dayNum(ms.date) - dayNum(today) : null, planned: states.length > 0 };
   }
 
+  // 4.1: duration ↔ end date, and «сразу после предыдущего». Calendar days, both ends included.
+  // `days` is kept on a phase only while it has no start (a start computes the finish from it).
+  const phaseDays = ph => (isDate(ph?.start) && isDate(ph?.finish) ? dayNum(ph.finish) - dayNum(ph.start) + 1 : Number(ph?.days) > 0 ? Math.round(Number(ph.days)) : '');
+  // After an edit of phases[i].field ('start' | 'finish' | 'days' | 'chain'): what was typed stays, the rest follows.
+  // Chained phases start the day after the previous one ends and keep their own length.
+  function planPhases(list, i = -1, field = '') {
+    const out = (list || []).map(ph => ({ ...ph }));
+    const ph = out[i];
+    if (ph) {
+      if (field === 'days') {
+        const d = Math.round(Number(ph.days));
+        if (!(d > 0)) delete ph.days;
+        else if (isDate(ph.start)) { ph.finish = addDays(ph.start, d - 1); delete ph.days; }
+        else ph.days = d;
+      } else if (field === 'start' && isDate(ph.start)) {
+        // A length typed before the start now gives the finish; otherwise the finish stays and the length follows.
+        if (Number(ph.days) > 0) ph.finish = addDays(ph.start, Math.round(Number(ph.days)) - 1);
+        delete ph.days;
+      } else if (field === 'finish') delete ph.days;
+    }
+    for (let k = 1; k < out.length; k++) {
+      const x = out[k], prev = out[k - 1];
+      if (!x.chain || !isDate(prev.finish)) continue;
+      const d = Number(x.days) > 0 ? Math.round(Number(x.days)) : phaseDays(x) || 0;
+      x.start = addDays(prev.finish, 1);
+      if (d > 0) { x.finish = addDays(x.start, d - 1); delete x.days; } else if (isDate(x.finish) && x.finish < x.start) x.finish = '';
+    }
+    return out;
+  }
+
+  // 4.1: kinds of project documents and how long they stay valid from the date of issue. Only the rules that are
+  // one fixed term are automatic; ТУ, СТУ, geology and ecology (СП 47.13330 tables by site conditions) are typed by hand.
+  const DOC_KINDS = [
+    ['gpzu', 'ГПЗУ', { years: 3, basis: '3 года с даты выдачи — ч. 10 ст. 57.3 ГрК РФ' }],
+    ['geodesy', 'Инженерно-геодезические изыскания (топосъёмка)', { years: 2, basis: 'топографический план — не старше 2 лет (СП 47.13330, СП 317.1325800)' }],
+    ['geology', 'Инженерно-геологические изыскания', null],
+    ['ecology', 'Инженерно-экологические изыскания', null],
+    ['tu', 'Технические условия (ТУ)', null],
+    ['stu', 'Специальные технические условия (СТУ)', null],
+    ['other', 'Другое', null],
+  ];
+  const docRule = kind => (DOC_KINDS.find(k => k[0] === kind) || [])[2] || null;
+  // The automatic «действует до» (the last valid day), or '' when the kind has no fixed term.
+  function docUntil(kind, issued) {
+    const r = docRule(kind);
+    if (!r || !isDate(issued)) return '';
+    const [y, m, d] = issued.split('-').map(Number);
+    return addDays(todayStr(new Date(y + (r.years || 0), m - 1, d)), -1);
+  }
+  // A document's kind guessed from its title (documents typed before 4.1).
+  function docKindOf(title) {
+    const t = String(title || '').toLowerCase();
+    if (/гпзу|градостроительн\S* план/.test(t)) return 'gpzu';
+    if (/геодез|топо/.test(t)) return 'geodesy';
+    if (/геолог/.test(t)) return 'geology';
+    if (/эколог/.test(t)) return 'ecology';
+    if (/(^|[^а-яё])сту([^а-яё]|$)|специальн\S* техническ/.test(t)) return 'stu';
+    if (/(^|[^а-яё])ту([^а-яё]|$)|техническ\S* услови/.test(t)) return 'tu';
+    return 'other';
+  }
+
   // Allowed status changes: statuses change only by these actions (buttons, the status cell, the kanban).
   const TRANSITIONS = {
     not_started: [['in_progress', 'Начать работу'], ['paused', 'Приостановить']],
@@ -61,22 +122,32 @@
   };
 
   // Standard drawing sets (марки) offered as checkboxes; anything else goes into the free-text field.
+  // `dir` — the direction (access.js DIRECTIONS) the group belongs to.
   const MARK_GROUPS = [
-    { title: 'Электрика', marks: [
-      ['ЭОМ', 'Электрооборудование и электроосвещение'], ['ЭС', 'Электроснабжение'], ['ЭМ', 'Силовое электрооборудование'],
-      ['ЭО', 'Электроосвещение'], ['ЭН', 'Наружное освещение'], ['КЭ', 'Кабельные линии'], ['АСКУЭ', 'Учёт электроэнергии'],
+    { dir: 'ar', title: 'Архитекторы', marks: [
+      ['АР', 'Архитектурные решения'], ['ГП', 'Генеральный план'], ['ПЗУ', 'Схема планировочной организации участка'],
+      ['ПБ', 'Мероприятия по пожарной безопасности'], ['ОДИ', 'Доступ инвалидов'],
     ] },
-    { title: 'Слаботочка', marks: [
+    { dir: 'kr', title: 'Конструкторы', marks: [
+      ['КР', 'Конструктивные решения'], ['КЖ', 'Конструкции железобетонные'], ['КМ', 'Конструкции металлические'],
+    ] },
+    { dir: 'el', title: 'Электрики', marks: [
+      ['ЭОМ', 'Электрооборудование и электроосвещение'], ['ЭС', 'Электроснабжение'], ['ЭМ', 'Силовое электрооборудование'],
+      ['ЭО', 'Электроосвещение'], ['ЭН', 'Наружное освещение'], ['КЭ', 'Кабельные линии'],
+    ] },
+    { dir: 'ss', title: 'Слаботочники', marks: [
       ['СС', 'Сети связи'], ['СКС', 'Структурированная кабельная система'], ['АПС', 'Пожарная сигнализация'],
       ['СОУЭ', 'Оповещение и управление эвакуацией'], ['СОТ', 'Охранное телевидение'], ['СКУД', 'Контроль доступа'],
-      ['ОС', 'Охранная сигнализация'], ['ДС', 'Диспетчеризация'],
+      ['ОС', 'Охранная сигнализация'], ['ДС', 'Диспетчеризация'], ['АСКУЭ', 'Учёт электроэнергии'],
     ] },
-    { title: 'Водоснабжение и канализация', marks: [
+    { dir: 'vk', title: 'Водоснабжение и канализация', marks: [
       ['ВК', 'Водоснабжение и канализация'], ['НВК', 'Наружные сети ВК'], ['АУПТ', 'Автоматическое пожаротушение'],
     ] },
-    { title: 'Отопление и вентиляция', marks: [
+    { dir: 'ov', title: 'Отопление и вентиляция', marks: [
       ['ОВ', 'Отопление и вентиляция'], ['ТС', 'Тепловые сети'], ['ИТП', 'Индивидуальный тепловой пункт'], ['ТМ', 'Тепломеханические решения'],
     ] },
+    { dir: 'pos', title: 'ПОС', marks: [['ПОС', 'Проект организации строительства'], ['ПОД', 'Проект организации работ по сносу (демонтажу)']] },
+    { dir: '', title: 'Прочие', marks: [['ООС', 'Охрана окружающей среды']] },
   ];
   const MARK_ORDER = new Map(MARK_GROUPS.flatMap(g => g.marks.map(m => m[0])).map((m, i) => [m, i]));
 
@@ -463,7 +534,7 @@
   const shiftsOf = memo(t => shiftsOfRaw(t));
 
   return {
-    STATUSES, ACTIVE, PROJECT_STATUSES, PHASES, phaseLabel, defaultPhases, phaseState, projectNow, TRANSITIONS, firstTime, projectGoal, thanksFor, MARK_GROUPS, SHIFT_REASONS, PAY_TRIGGERS, progress, readiness, readinessManual, READY_MIN, READY_MAX,
+    STATUSES, ACTIVE, PROJECT_STATUSES, PHASES, phaseLabel, defaultPhases, phaseState, projectNow, phaseDays, planPhases, DOC_KINDS, docRule, docUntil, docKindOf, TRANSITIONS, firstTime, projectGoal, thanksFor, MARK_GROUPS, SHIFT_REASONS, PAY_TRIGGERS, progress, readiness, readinessManual, READY_MIN, READY_MAX,
     normalizeMarks, splitMarks, sectionsOf, todayStr, isDate, dayNum, addDays, fmtDate, parseMoney, cents,
     budgetOf, paidOf, restOf, timing, totals, sortByDeadline,
     visible, historyOf, shiftsOf, depsOf, dependencyIssues, wouldCycle, Cal, reviewStats, lateness, reliability, paymentPlan, milestonesOf, matchCount, attention, digestText,

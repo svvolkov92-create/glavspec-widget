@@ -252,10 +252,11 @@ app.on('browser-window-created', (_e, win) => {
           f.querySelector('#t-project').dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
         await wait(100);
-        const groups = await js(`[...document.querySelectorAll('#t-contractor optgroup')].map(g => g.label + ': ' + [...g.children].map(o => o.textContent).join(', ')).join(' | ')`);
-        check('contractor suggestions', /Подходят по специализации: Пример: ИП Кузнецов/.test(groups), groups);
+        await js(`document.querySelector('#t-exec-q').focus()`); await wait(100);
+        const groups = await js(`[...document.querySelectorAll('#t-exec-list .ep-opt b')].map(b => b.textContent).join(', ')`);
+        check('executor suggestions: fitting ones only, the contractor with АПС first', /^Пример: ИП Кузнецов/.test(groups), groups);
         await shot('04-new-card-main');
-        await js(`document.querySelector('#t-contractor').value = 'demo-c3'; document.querySelector('#t-finish').value = '2026-12-20'; document.querySelector('#t-budget').value = '200 000'`);
+        await click('#t-exec-list [data-ref="c:demo-c3"]'); await js(`document.querySelector('#t-finish').value = '2026-12-20'; document.querySelector('#t-budget').value = '200 000'`);
         await click('[data-act="dtab"][data-id="time"]');
         await click('[data-act="ms-add"]');
         await js(`(() => { const t = document.querySelector('#ms-box [data-k="title"]'); t.value = 'Задание смежникам'; t.dispatchEvent(new Event('input', { bubbles: true }));
@@ -530,7 +531,7 @@ app.on('browser-window-created', (_e, win) => {
       await step('roles: specialist', async () => {
         await switchTo('demo-u1');
         check('specialist title', (await title()) === 'Пульт специалиста', await title());
-        check('specialist tabs', !/people|team/.test(await tabs()), await tabs());
+        check('specialist tabs: «Люди» (staff and org structure) since 4.1', /people/.test(await tabs()) && !/team/.test(await tabs()), await tabs());
         check('no new card button', await js(`document.querySelector('.create-wrap').hidden`));
         const view = await js(`window.api.getData().then(r => r.data)`);
         check('specialist sees own cards', view.tasks.map(t => t.id).sort().join(',') === 'demo-t1,demo-t2,demo-t3', view.tasks.map(t => t.id).join(','));
