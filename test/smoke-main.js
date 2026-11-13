@@ -531,7 +531,7 @@ app.on('browser-window-created', (_e, win) => {
       await step('roles: specialist', async () => {
         await switchTo('demo-u1');
         check('specialist title', (await title()) === 'Пульт специалиста', await title());
-        check('specialist tabs', !/people|team/.test(await tabs()), await tabs());
+        check('specialist tabs: «Люди» (staff and org structure) since 4.1', /people/.test(await tabs()) && !/team/.test(await tabs()), await tabs());
         check('no new card button', await js(`document.querySelector('.create-wrap').hidden`));
         const view = await js(`window.api.getData().then(r => r.data)`);
         check('specialist sees own cards', view.tasks.map(t => t.id).sort().join(',') === 'demo-t1,demo-t2,demo-t3', view.tasks.map(t => t.id).join(','));
