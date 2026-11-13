@@ -2984,11 +2984,11 @@ function renderNow() {
   const app = $('#app');
   if (!state.loaded) { app.innerHTML = '<div class="hint">Загружаем данные…</div>'; return; }
   const active = document.activeElement?.id, caret = document.activeElement?.selectionStart;
-  if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); return; }
+  if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
   if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
   const view = { overview: viewOverview, projects: viewProjects, people: viewPeople, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
   app.innerHTML = view() + footer();
-  renderMsg(); msgNotify();
+  renderMsg(); msgNotify(); renderFocus();
   if (active === 'f-q') { const el = $('#f-q'); el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* not a text input any more */ } }
   if (state.tab === 'gantt') drawGanttLinks();
   if (state.tab === 'kanban') fitKanban();
@@ -3920,6 +3920,52 @@ async function sendMessage(via) {
   toast(via === 'telegram' ? 'Текст скопирован — вставьте его в чат (Ctrl+V)' : via === 'mail' ? 'Письмо открыто в почтовой программе' : 'Открыт WhatsApp');
 }
 
+/* ---------- 4.1: focus on a task — «Начать работу» starts a timer; the time is kept on the card ---------- */
+// One focus per computer user: { taskId, since }. Stopped by «Пауза», «Сдал на проверку», another focus or ✕.
+let focus = loadLocal('focus', null);
+const fmtSpent = min => (min >= 60 ? `${Math.floor(min / 60)} ч ${String(min % 60).padStart(2, '0')} мин` : `${min} мин`);
+const spentOf = (t, userId = null) => (Array.isArray(t?.timeLog) ? t.timeLog : []).filter(x => !userId || x.userId === userId)
+  .reduce((a, x) => a + Math.max(0, Math.round((Date.parse(x.to) - Date.parse(x.from)) / 60000)), 0);
+function focusBtn(t) {
+  const mine = focus?.taskId === t.id, spent = spentOf(t);
+  const can = ['in_progress', 'revision'].includes(t.status);
+  return `<span id="focus-slot" class="focus-slot">${can ? `<button class="btn sm ${mine ? 'on' : ''}" type="button" data-act="${mine ? 'focus-stop' : 'focus-start'}" data-id="${esc(t.id)}" title="${mine ? 'Остановить таймер' : 'Таймер работы над карточкой; время сохранится в карточке'}">${mine ? '⏸ Пауза' : '▶ Фокус'}</button>` : ''}${spent ? `<span class="hint" title="Время по таймеру «Фокус»">затрачено ${fmtSpent(spent)}</span>` : ''}</span>`;
+}
+// The card stays as it is (unsaved edits too): only its focus button is redrawn.
+function refreshFocusSlot() { const slot = $('#focus-slot'), t = state.drawer?.kind === 'task' && state.tasks.get(state.drawer.id); if (slot && t) slot.outerHTML = focusBtn(t); }
+async function focusStart(id) {
+  if (focus?.taskId === id) return;
+  if (focus) await focusStop({ quiet: true });
+  focus = { taskId: id, since: new Date().toISOString() };
+  saveLocal('focus', focus); renderFocus();
+}
+// Writes the stretch to the card (≥ 1 min). quiet: no toast (another focus starts or the card is handed in).
+async function focusStop({ quiet = false } = {}) {
+  if (!focus) return;
+  const f = focus; focus = null; saveLocal('focus', null); renderFocus();
+  const t = state.tasks.get(f.taskId), to = new Date().toISOString();
+  const min = Math.round((Date.parse(to) - Date.parse(f.since)) / 60000);
+  if (!t || min < 1 || !state.me) return;
+  const timeLog = [...(Array.isArray(t.timeLog) ? t.timeLog : []), { userId: state.me.id, from: f.since, to }].slice(-500);
+  await write(op.update('tasks', t.id, { timeLog }), quiet ? '' : `${marksText(t)}: +${fmtSpent(min)}`, { undo: false });
+}
+function focusAfterQuick(id, quick) {
+  if (['start', 'resume', 'reopen'].includes(quick)) focusStart(id);
+  else if (focus?.taskId === id) focusStop({ quiet: true });
+}
+function renderFocus() {
+  let el = document.getElementById('focus-bar');
+  const t = focus && state.tasks.get(focus.taskId);
+  if (!t || SOLO) { el?.remove(); clearInterval(renderFocus.tick); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'focus-bar'; el.className = 'focus-bar'; el.setAttribute('role', 'status'); document.body.append(el); }
+  el.innerHTML = `<span class="fb-dot"></span><button class="fb-t" type="button" data-act="open-task" data-id="${esc(t.id)}" title="Открыть карточку"><b>${esc(marksText(t))}</b> <span class="hint">${esc(projectOf(t)?.name || '')}</span></button>
+    <span class="fb-time num" id="fb-time"></span>
+    <button class="btn sm" type="button" data-act="focus-stop" title="Остановить таймер, время сохранится в карточке">⏸ Пауза</button>${state.win.compact ? '' : '<button class="btn ghostbtn sm" type="button" data-act="toggle-compact" title="Свернуть Пульт в маленький виджет поверх окон — таймер останется на виду">Свернуть</button>'}`;
+  el.classList.toggle('in-compact', !!state.win.compact);
+  const tick = () => { const s = Math.max(0, Math.floor((Date.now() - Date.parse(focus?.since || Date.now())) / 1000)); const n = document.getElementById('fb-time'); if (n) n.textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+  tick(); clearInterval(renderFocus.tick); renderFocus.tick = setInterval(tick, 1000);
+}
+
 // Card header as a drawing title block (штамп): object, marks, people, deadline, status, revision — and the actions.
 const lastRevision = t => (Array.isArray(t.revisions) && t.revisions.length ? t.revisions[t.revisions.length - 1] : null);
 function taskStrip(t) {
@@ -3941,6 +3987,7 @@ function taskStrip(t) {
     <div class="st-acts" data-transient>
       ${keys.map(k => `<button class="btn sm ${k === 'accept' ? 'okbtn' : k === 'remarks' ? 'warnbtn' : k === 'submit' || k === 'start' ? 'primary' : ''}" data-act="quick" data-q="${k}" type="button">${QUICK[k].label}</button>`).join('')}
       ${keys.length ? `<input id="qa-note" class="qa-in" placeholder="${note}" maxlength="500" aria-label="Комментарий к действию">` : ''}
+      ${focusBtn(t)}
       <span class="spacer"></span>
       ${t.folder ? `<button class="btn ghostbtn sm" type="button" data-act="open-task-folder" data-id="${esc(t.id)}" title="${esc(t.folder)}">📁 Папка</button>` : ''}
     </div>
@@ -4180,6 +4227,7 @@ async function submitTask(quick = null, { stay = false } = {}) {
   const ok = await write(ops.length > 1 ? ops : taskOp, old ? (quick ? QUICK[quick].okMsg : 'Карточка сохранена') : 'Карточка добавлена');
   if (!ok) return false;
   if (quick === 'accept' && old) celebrateAccept(id);
+  if (old && quick) focusAfterQuick(id, quick);
   if (quick || stay) { await refresh(); openTask(savedId, {}, tab); } else closeDrawer();
   return true;
 }
@@ -5223,7 +5271,7 @@ function viewSectionsHtml(full) {
   return theme + zoomHtml + `
     <div class="vm-sec"><span class="vm-h">Панель вкладок</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div>
       ${nav.pos === 'left' ? `<label class="chk vm-mini"><input type="checkbox" data-act="nav-mini-chk"${nav.mini ? ' checked' : ''}> Только значки</label>` : ''}</div>
-    <div class="vm-sec"><span class="vm-h">Строки в таблицах и списках</span><div class="seg"><button class="btn sm ${dense ? '' : 'on'}" type="button" data-act="set-dense" data-v="0">Просторно</button><button class="btn sm ${dense ? 'on' : ''}" type="button" data-act="set-dense" data-v="1">Компактно</button></div></div>
+    <div class="vm-sec"><span class="vm-h">Плотность интерфейса</span><div class="seg"><button class="btn sm ${dense ? '' : 'on'}" type="button" data-act="set-dense" data-v="0">Удобно</button><button class="btn sm ${dense ? 'on' : ''}" type="button" data-act="set-dense" data-v="1">Компактно</button></div><span class="hint">Компактно — мельче шрифт, плотнее строки, кнопки и отступы: больше помещается на экране.</span></div>
     <div class="vm-sec"><span class="vm-h">Положение окна</span>
       ${LEVELS.map(([k, l, d]) => `<label class="vm-level ${k === 'desktop' && w.desktopSupported === false ? 'off' : ''}"><input type="radio" name="vm-level" value="${k}" ${w.level === k ? 'checked' : ''} ${k === 'desktop' && w.desktopSupported === false ? 'disabled' : ''}>
         <span><b>${l}</b><small>${k === 'desktop' && w.desktopSupported === false ? 'Недоступно в этой системе' : d}</small></span></label>`).join('')}</div>`;
@@ -5780,6 +5828,8 @@ document.addEventListener('click', e => {
     case 'move-task': e.stopPropagation(); reassign(id, el.dataset.kind, el.dataset.from); break;
     case 'set-dense': dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); break;
     case 'set-anim': anim = el.dataset.v === '1'; saveLocal('anim', anim); applyAnim(); renderViewMenu(); break;
+    case 'focus-start': focusStart(el.dataset.id).then(refreshFocusSlot); break;
+    case 'focus-stop': focusStop().then(refreshFocusSlot); break;
     case 'kb-lanes': state.kanban.lanes = el.dataset.v; saveLocal('kbLanes', el.dataset.v); renderNow(); break;
     case 'kb-show-all': for (const [k] of KB_SHOW) state.kbShow[k] = el.dataset.v === '1'; saveLocal('kbShow', state.kbShow); renderKeepMenu('.kb-view'); break;
     case 'nav-pos': setNav({ pos: el.dataset.v }); break;

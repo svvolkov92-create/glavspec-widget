@@ -45,7 +45,7 @@
   // Fields that reveal money. Hidden from users without budget access and never writable by them.
   const MONEY_FIELDS = ['budget', 'payments', 'plan', 'invoiceReceived', 'invoiceDate', 'actSigned', 'actDate', 'contractNo', 'contractDate'];
   // What a specialist may change on own cards.
-  const SPECIALIST_FIELDS = ['status', 'history', 'milestones', 'note'];
+  const SPECIALIST_FIELDS = ['status', 'history', 'milestones', 'note', 'timeLog'];
 
   const roleOf = u => (u && ROLES[u.role] ? u.role : null);
   const isGip = u => roleOf(u) === 'gip';

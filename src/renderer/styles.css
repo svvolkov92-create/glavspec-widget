@@ -1550,3 +1550,41 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .kb-view-m { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 240px; display: grid; gap: 8px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(20, 24, 33, .16) }
 .sm-chk { flex: none; display: inline-flex }
 .filters .sm-chk input, .gantt-bar .sm-chk input { width: 15px; min-width: 0; flex: none; padding: 0 }
+/* Focus on a task: a small bar at the bottom left with the running time */
+.focus-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 44; display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; max-width: min(560px, 60vw);
+  background: var(--surface); border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line)); border-radius: 10px; box-shadow: 0 8px 24px rgba(20, 24, 33, .18); text-shadow: none }
+:root[data-theme="tandem"] .focus-bar { border-radius: 0 }
+.fb-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; animation: fb-pulse 1.6s ease-in-out infinite }
+@keyframes fb-pulse { 50% { opacity: .35 } }
+@media (prefers-reduced-motion: reduce) { .fb-dot { animation: none } }
+.fb-t { appearance: none; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 }
+.fb-time { font: 600 15px/1 var(--f-mono); color: var(--accent-text, var(--accent)) }
+.focus-slot { display: inline-flex; gap: 8px; align-items: center }
+/* Interface density «Компактно» (4.1): the whole window, not only table rows — smaller type, tighter gaps and controls */
+.shell.dense { font-size: 12.5px; line-height: 1.38 }
+.shell.dense main { padding: 10px 10px 20px; gap: 10px }
+.shell.dense .tab { padding: 6px 8px }
+.shell.dense .panel-h { padding: 7px 10px }
+.shell.dense .panel-h h3 { font-size: 13px }
+.shell.dense .kpi { padding: 7px 10px }
+.shell.dense .btn { padding: 3px 8px }
+.shell.dense .btn.sm { padding: 2px 7px; font-size: 11.5px }
+:root[data-theme="tandem"] .shell.dense .btn { min-height: 28px; padding: 0 10px; font-size: 12px }
+:root[data-theme="tandem"] .shell.dense .btn.sm { min-height: 24px; padding: 0 8px; font-size: 11.5px }
+.shell.dense .filters select, .shell.dense .filters input { padding: 3px 6px }
+.shell.dense th, .shell.dense td { padding-left: 8px; padding-right: 8px }
+.shell.dense .kb { gap: 6px }
+.shell.dense .kb-card { padding: 6px 7px; gap: 2px }
+.shell.dense .kb-list { gap: 5px; padding: 5px }
+.shell.dense .kb-col-h { padding: 6px 8px }
+.shell.dense .tl-name { font-size: 12px }
+.focus-bar.in-compact { left: 8px; right: 8px; bottom: 8px; transform: none; max-width: none; padding: 4px 6px 4px 10px }
+/* Small text in the system font (Segoe UI on Windows) — sharper at 11–12 px than the brand font */
+.hint, .meta, small, .tag, .chip { font-family: 'Segoe UI', system-ui, var(--f-ui) }
+/* Windows high contrast: let the system colours win, keep borders and the focus ring visible */
+@media (forced-colors: active) {
+  .btn, .chip, .tag, .panel, .kb-card, .kb-col, .tl-bar, .drawer, .msg-panel, .focus-bar { border: 1px solid CanvasText !important }
+  .btn.primary, .btn.on, .tab[aria-selected="true"] { forced-color-adjust: none; background: Highlight !important; color: HighlightText !important }
+  :focus-visible { outline: 2px solid Highlight !important }
+  .shell { text-shadow: none !important }
+}
