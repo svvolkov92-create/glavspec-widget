@@ -151,7 +151,9 @@
     const chats = (snapshot.chats || []).filter(c => canSeeChat(user, c, snapshot.projects || []));
     // «Договор» in the project plan and the customer's contract, payments and bills are for GIPs only.
     if (!isGip(user)) projects = projects.map(p => { const { contract, payments, bills, ...rest } = p; return Array.isArray(p.phases) ? { ...rest, phases: p.phases.filter(ph => ph.key !== 'contract') } : rest; });
-    return { projects, contractors, tasks, users, chats };
+    // The org structure is seen by every staff member (4.1).
+    const depts = (snapshot.depts || []).filter(d => !d.deletedAt);
+    return { projects, contractors, tasks, users, chats, depts };
   }
   // A non-GIP saves the plan without the hidden «Договор» row: keep the stored one.
   function keepHiddenPhases(user, before, data) {
@@ -201,6 +203,7 @@
       if (before && after && changedKeys(before, after).every(k => k === 'absences') && canEditAbsences(user, target)) return null;
       return 'Состав команды меняет только ГИП.';
     }
+    if (col === 'depts') return isGip(user) ? null : 'Оргструктуру ведёт ГИП.';
     if (col === 'projects' || col === 'contractors') return !canManageCatalog(user) ? 'Проекты и внештатных исполнителей ведут ГИП и главспецы.' : col === 'projects' ? projectDataError(after) : null;
     if (col !== 'tasks') return 'Неизвестный раздел данных.';
     // A card cannot be handed to someone without its direction unless the assigner confirmed it

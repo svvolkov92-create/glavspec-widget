@@ -218,6 +218,38 @@ app.on('browser-window-created', (_e, win) => {
         await shot('41-11-timeline');
         await js(`document.querySelector('.tq-modal [data-m="cancel"]').click()`); await wait(200);
       });
+
+      await step('30: org structure; 17: who sees whom in «Люди»', async () => {
+        await click('[data-act="tab"][data-id="people"]'); await wait(300);
+        await click('[data-act="people-mode"][data-v="org"]'); await wait(300);
+        check('virtual tree by roles', await js(`document.querySelectorAll('.org-card').length >= 3 && /ПМ «Тандем»/.test(document.querySelector('.org-tree').textContent)`));
+        await click('[data-act="org-from-groups"]'); await wait(600);
+        const depts = Object.values(data().depts || {});
+        check('«Создать отделы из групп»: departments stored, people placed', depts.length >= 3 && data().users['demo-u3'].deptId && depts.some(d => d.headId === 'demo-u2'), JSON.stringify(depts.map(d => d.name)));
+        await js(`document.querySelectorAll('[data-act="org-people"]')[1]?.click()`); await wait(200);
+        await shot('41-12-org');
+        // add a sub-department under the first department
+        await js(`document.querySelectorAll('.org-card [data-act="org-add"]')[1].click()`); await wait(200);
+        await setVal('#org-name', 'Сектор ВК'); await js(`(() => { const s = document.querySelector('#org-head'); s.value = 'demo-u3'; })()`);
+        await js(`document.querySelector('.org-modal').requestSubmit()`); await wait(600);
+        const sec = Object.values(data().depts).find(d => d.name === 'Сектор ВК');
+        check('sub-department with a head', !!sec && sec.parentId && sec.headId === 'demo-u3' && data().users['demo-u3'].deptId === Object.keys(data().depts).find(k => data().depts[k] === sec || data().depts[k].name === 'Сектор ВК'), JSON.stringify(sec));
+        // the specialist: «Люди» visible, staff only, the org structure with «Ваш отдел»
+        await js(`window.api.switchUser('demo-u3')`); await wait(700);
+        check('specialist sees «Люди»', await js(`!!document.querySelector('[data-act="tab"][data-id="people"]')`));
+        await click('[data-act="tab"][data-id="people"]'); await wait(300);
+        await click('[data-act="people-mode"][data-v="org"]'); await wait(300);
+        check('… «Ваш отдел» marked, no editing', await js(`!!document.querySelector('.org-card.mine') && !document.querySelector('[data-act="org-add"], [data-act="org-edit"]')`));
+        await click('[data-act="people-mode"][data-v="cards"]'); await wait(300);
+        check('… staff, no outside people', !(await js(`/Подрядчики/.test(document.querySelector('main').textContent)`)) && (await js(`document.querySelectorAll('.cards .card').length`)) >= 3);
+        await shot('41-13-specialist-people');
+        await js(`window.api.switchUser('demo-u2')`); await wait(700);
+        await click('[data-act="tab"][data-id="people"]'); await wait(300);
+        const chiefSees = await js(`[...document.querySelectorAll('[data-drop^="contractor:"]')].map(e => e.dataset.drop.slice(11)).join()`);
+        const mineC = new Set(Object.values(data().tasks).filter(t => ['demo-u2', 'demo-u3'].some(u => t.ownerId === u || (t.coOwnerIds || []).includes(u))).map(t => t.contractorId).filter(Boolean));
+        check('chief: all staff, own outside people only', (await js(`document.querySelectorAll('.cards .card').length`)) >= 3 && chiefSees.split(',').filter(Boolean).every(id => mineC.has(id)), `${chiefSees} / ${[...mineC]}`);
+        await js(`window.api.switchUser('u-gip')`); await wait(700);
+      });
     } catch (e) { log.push('[smoke error] ' + (e.stack || e)); }
     fs.writeFileSync(path.join(outDir, 'log.txt'), log.join('\n'));
     app.exit(0);

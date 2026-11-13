@@ -1645,3 +1645,36 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .ph-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .7 }
 .ph-ms { position: absolute; bottom: 2px; width: 8px; height: 8px; margin-left: -4px; transform: rotate(45deg); background: var(--review) }
 .tq-modal { width: min(980px, 96vw) }
+/* «Оргструктура» (4.1): cards top-down with connector lines, like a corporate portal */
+.org-panel .org-note { padding: 8px 12px 0 }
+.org-scroll { overflow: auto; padding: 16px 12px 20px }
+.org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; gap: 0 }
+.org-tree { min-width: max-content }
+.org-tree li { position: relative; display: flex; flex-direction: column; align-items: center; padding: 18px 8px 0 }
+.org-tree > li { padding-top: 0 }
+.org-tree ul { padding-top: 0; position: relative }
+/* connectors: vertical from the parent, horizontal across siblings, vertical into each child */
+.org-tree li li::before { content: ''; position: absolute; top: 0; left: 50%; height: 18px; border-left: 1px solid var(--muted) }
+.org-tree li li::after { content: ''; position: absolute; top: 0; left: 0; right: 0; border-top: 1px solid var(--muted) }
+.org-tree li li:first-child::after { left: 50% }
+.org-tree li li:last-child::after { right: 50% }
+.org-tree li li:only-child::after { display: none }
+.org-tree li > ul { margin-top: 18px; position: relative }
+.org-tree li > ul::before { content: ''; position: absolute; top: -18px; left: 50%; height: 18px; border-left: 1px solid var(--muted) }
+.org-card { width: 236px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; text-align: left; box-shadow: 0 1px 2px rgba(20, 24, 33, .06) }
+:root[data-theme="tandem"] .org-card { border-radius: 0 }
+.org-card.mine { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent) }
+.org-card.none { border-style: dashed }
+.org-name { display: flex; gap: 6px; align-items: center; flex-wrap: wrap }
+.org-name b { font-weight: 700; flex: 1; min-width: 0 }
+.org-name .chip { font-size: 10.5px }
+.org-head { display: flex; gap: 8px; align-items: center; font-size: 12.5px; line-height: 1.3 }
+.org-head .pt-ava { width: 34px; height: 34px; font-size: 12px; flex: none }
+.org-foot { display: flex; gap: 10px; align-items: center; border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px }
+.org-foot .linkbtn { color: var(--muted) }
+.org-add { margin-left: auto; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--accent); font-weight: 700; cursor: pointer; line-height: 1 }
+.org-add:hover { border-color: var(--accent) }
+.org-people { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px }
+.org-people .pt-member.me b, .org-people .pt-member.me { color: var(--accent-text, var(--accent)) }
+.org-modal { width: min(560px, 94vw) }
+.org-mem .chk-row { max-height: 200px; overflow: auto }

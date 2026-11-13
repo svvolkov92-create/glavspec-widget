@@ -50,7 +50,11 @@ const FIELDS = {
     gipId: ['ГИП', (v, ctx) => ctx.users?.[v]?.name || '—'],
     folder: ['Папка', v => v || '—'], archived: ['В архиве', yesNo], note: ['Примечание', () => 'изменено'],
   },
+  depts: {
+    name: ['Отдел', v => v || '—'], headId: ['Руководитель', (v, ctx) => ctx.users?.[v]?.name || '—'], parentId: ['Входит в', () => 'изменено'],
+  },
   users: {
+    deptId: ['Отдел', () => 'изменён'],
     name: ['Имя', v => v || '—'],
     role: ['Роль', v => ({ gip: 'ГИП', chief: 'Главспец', specialist: 'Специалист' }[v] || '—')],
     directions: ['Направления', v => (Array.isArray(v) && v.length ? v.join(', ') : '—')],

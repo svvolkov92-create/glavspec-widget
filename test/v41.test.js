@@ -56,3 +56,30 @@ test('document validity: ГПЗУ 3 years, topography 2 years, ТУ by hand', ()
   assert.equal(L.docKindOf('Инженерные изыскания'), 'other');
   assert.equal(L.docKindOf('Топосъёмка М 1:500'), 'geodesy');
 });
+
+// Backlog item 15: what a specialist (executor) may not see or change.
+const A = require('../src/renderer/access.js');
+test('specialist: no renaming, no contract numbers, customer money, budgets, foreign projects', () => {
+  const users = [
+    { id: 'g', name: 'ГИП', role: 'gip' },
+    { id: 'c', name: 'Главспец', role: 'chief', directions: ['el'], canSeeBudget: true },
+    { id: 's', name: 'Специалист', role: 'specialist', directions: ['el'], chiefId: 'c', canSeeBudget: true },
+  ];
+  const snap = {
+    users,
+    projects: [
+      { id: 'p1', name: 'Мой', members: ['s'], contract: { no: '12/26' }, payments: [{ amount: 1 }], bills: [{}] },
+      { id: 'p2', name: 'Чужой', members: ['c'] },
+    ],
+    tasks: [{ id: 't1', projectId: 'p1', ownerId: 's', sections: ['ЭОМ'], budget: 100000, contractNo: 'Д-1', payments: [{ amount: 5 }] }],
+    contractors: [], chats: [],
+  };
+  const v = A.viewFor(users[2], snap);
+  assert.deepEqual(v.projects.map(p => p.id), ['p1'], 'only projects he takes part in');
+  assert.equal(v.projects[0].contract, undefined);
+  assert.equal(v.projects[0].payments, undefined);
+  assert.equal(v.tasks[0].budget, undefined);
+  assert.equal(v.tasks[0].contractNo, undefined);
+  assert.equal(v.tasks[0].payments, undefined);
+  assert.match(A.checkWrite(users[2], 'projects', snap.projects[0], { ...snap.projects[0], name: 'Новое' }, users), /ведут ГИП и главспецы/);
+});

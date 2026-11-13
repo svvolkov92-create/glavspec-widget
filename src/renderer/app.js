@@ -137,7 +137,7 @@ function setNav(patch) {
 }
 const TRASH_DAYS = 30;
 // Tabs depend on the role: a specialist has no outside contractors or team management.
-const visibleTabs = () => orderedTabs().filter(t => !(A.isSpecialist(state.me) && t.id === 'people'));
+const visibleTabs = () => orderedTabs(); // 4.1: «Люди» for everyone — a specialist sees staff and the org structure
 
 const state = {
   // Non-deleted records (archived projects included). Deleted ones live in state.trash.
@@ -243,6 +243,7 @@ function setData(snap) {
     state[col] = live;
   }
   state.chats = new Map((snap.chats || []).map(c => [c.id, c]));
+  state.depts = new Map((snap.depts || []).filter(d => !d.deletedAt).map(d => [d.id, d]));
   const first = !state.loaded;
   state.loaded = true;
   if (prevMe !== state.me?.id) { mentionSeenTs = null; msg.chatId = SOLO?.kind === 'chat' ? SOLO.id : ''; } // a chat window stays on its chat
@@ -1874,7 +1875,8 @@ function taskList(ct, kind = '', holderId = '') {
   ct = ct.slice(0, lim);
   return ct.length ? ct.map(t => {
     const p = projectOf(t), tm = timing(t);
-    const co = kind === 'staff' && t.ownerId !== holderId ? '<span class="chip tone-idle co-chip">соисполнитель</span>' : '';
+    const role = kind === 'staff' && t.ownerId !== holderId ? (executorOf(t)?.u?.id === holderId ? 'исполнитель' : 'соисполнитель') : '';
+    const co = role ? `<span class="chip tone-idle co-chip">${role}</span>` : '';
     return `<div class="ctask" data-act="open-task" data-id="${esc(t.id)}" role="button" tabindex="0"${movable ? ` draggable="true" data-move="${kind}:${esc(holderId)}"` : ''}>
       ${movable ? `<button class="btn ghostbtn sm ct-move" type="button" data-act="move-task" data-id="${esc(t.id)}" data-kind="${kind}" data-from="${esc(holderId)}" title="Передать другому (или перетащите карточку мышью на другого исполнителя)">⇄</button>` : ''}${co}
       <div class="l">${marksHtml(t)}<span class="num">${fmtDate(t.start)} → ${fmtDate(t.finish)}</span></div>
@@ -1986,23 +1988,144 @@ function staffList(staff, list) {
         <td class="nowrap">${A.canEditAbsences(state.me, u) ? `<button class="btn ghostbtn sm" type="button" data-act="absences" data-id="${esc(u.id)}">Отпуска</button>` : ''}${A.isGip(state.me) ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</td></tr>`;
     }).join('')}</tbody></table></div>`;
 }
+// «Люди» (4.1, backlog item 17): the GIP sees all staff and all outside people; a chief — all staff and own outside
+// people (added by him or working on his team's cards); a specialist — staff only.
+function peopleStaff() {
+  return liveUsers().filter(u => u.role !== 'gip').sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
+}
+function peopleOutside() {
+  if (A.isGip(state.me)) return contractorsArr();
+  if (isSpec()) return [];
+  const used = new Set(tasksArr().flatMap(t => [t.contractorId, String(t.coExecRef || '').startsWith('c:') ? t.coExecRef.slice(2) : '']).filter(Boolean));
+  return contractorsArr().filter(c => c.createdBy === state.me?.id || used.has(c.id));
+}
 function viewPeople() {
   if (isEmpty()) return emptyState();
-  const list = tasksArr(), staff = staffArr(), people = contractorsArr();
+  const list = tasksArr(), staff = peopleStaff(), people = peopleOutside();
   const gip = A.isGip(state.me);
   const head = (title, hint, btn) => `<div class="people-h"><h2>${title}</h2>${hint}<span class="spacer"></span>${btn}</div>`;
-  const mode = ['cards', 'list', 'tree'].includes(peopleMode) ? peopleMode : 'cards';
-  const modeSeg = `<span class="seg"><button class="btn sm ${mode === 'cards' ? 'on' : ''}" type="button" data-act="people-mode" data-v="cards" title="Карточки с контактами и задачами">Карточки</button><button class="btn sm ${mode === 'list' ? 'on' : ''}" type="button" data-act="people-mode" data-v="list" title="Одна строка на человека">Список</button><button class="btn sm ${mode === 'tree' ? 'on' : ''}" type="button" data-act="people-mode" data-v="tree" title="Структура: ГИП → главспецы → специалисты, цифры по группам, доступ к бюджету">Структура</button></span>`;
+  const mode = ['cards', 'list', 'tree', 'org'].includes(peopleMode) && !(peopleMode === 'tree' && isSpec()) ? peopleMode : 'cards';
+  const modeSeg = `<span class="seg"><button class="btn sm ${mode === 'cards' ? 'on' : ''}" type="button" data-act="people-mode" data-v="cards" title="Карточки с контактами и задачами">Карточки</button><button class="btn sm ${mode === 'list' ? 'on' : ''}" type="button" data-act="people-mode" data-v="list" title="Одна строка на человека">Список</button><button class="btn sm ${mode === 'tree' ? 'on' : ''}" type="button" data-act="people-mode" data-v="tree" title="Структура: ГИП → главспецы → специалисты, цифры по группам, доступ к бюджету"${isSpec() ? ' hidden' : ''}>Структура</button><button class="btn sm ${mode === 'org' ? 'on' : ''}" type="button" data-act="people-mode" data-v="org" title="Оргструктура: отделы и группы с руководителями — видна всем штатным">Оргструктура</button></span>`;
   return head(`Штатные <span class="cnt">${staff.length}</span>`, tip('people-staff', 'У каждого штатного свой пульт — войти можно, выбрав имя в заголовке.', 'inline'),
-      modeSeg + (gip && mode !== 'tree' ? '<button class="btn sm" data-act="new-user" data-role="specialist" type="button">+ Сотрудник</button>' : ''))
-    + (mode === 'tree' ? viewTeam()
+      modeSeg + (gip && mode !== 'tree' && mode !== 'org' ? '<button class="btn sm" data-act="new-user" data-role="specialist" type="button">+ Сотрудник</button>' : ''))
+    + (mode === 'org' ? viewOrg() : mode === 'tree' ? viewTeam()
       : !staff.length ? `<p class="hint people-empty">${gip ? 'Штатных сотрудников пока нет.' : 'Специалистов в вашей команде пока нет — их добавляет ГИП.'}</p>`
       : mode === 'list' ? staffList(staff, list)
       : foldAllBar(staff.map(u => 'u:' + u.id)) + `<div class="cards">${staff.map(u => staffCard(u, list)).join('')}</div>`)
-    + head(`Подрядчики <span class="cnt">${people.length}</span>`, tip('people-outside', 'Внештатные, без доступа к программе — сроки и оплату по ним ведёт главспец. Сгруппированы по направлениям из специализации.', 'inline'),
+    + (isSpec() ? '' : head(`Подрядчики <span class="cnt">${people.length}</span>`, tip('people-outside', 'Внештатные, без доступа к программе — сроки и оплату по ним ведёт главспец. Сгруппированы по направлениям из специализации.', 'inline'),
       `${people.length ? `<button class="btn ghostbtn sm" type="button" data-act="cg-all" data-on="1">▾ Раскрыть группы</button><button class="btn ghostbtn sm" type="button" data-act="cg-all" data-on="0">▸ Свернуть</button>` : ''}<button class="btn sm" data-act="new-contractor" type="button">+ Подрядчик</button>`)
     + (people.length ? contractorsGrouped(people, list)
-      : '<p class="hint people-empty">Добавьте подрядчиков с контактами — затем их можно будет назначать на карточки.</p>');
+      : `<p class="hint people-empty">${A.isGip(state.me) ? 'Добавьте подрядчиков с контактами — затем их можно будет назначать на карточки.' : 'Здесь — ваши подрядчики: добавленные вами и работающие по карточкам вашей группы.'}</p>`));
+}
+
+/* ---------- 4.1: «Оргструктура» — departments and groups top-down, seen by every staff member ----------
+   A department: { name, headId, parentId }; people belong by user.deptId. Without departments the tree is built from
+   the roles (company → chiefs' groups). The GIP adds, renames and moves departments; «+» on a card adds a sub-department. */
+let orgOpen = new Set(loadLocal('orgOpen', []));
+const orgToggle = id => { if (orgOpen.has(id)) orgOpen.delete(id); else orgOpen.add(id); saveLocal('orgOpen', [...orgOpen]); renderNow(); };
+function orgTree() {
+  const staff = liveUsers();
+  const depts = [...(state.depts?.values() || [])];
+  if (!depts.length) {
+    // Virtual: the company with the GIP(s) on top, a group per chief with the chief's specialists.
+    const gips = staff.filter(u => u.role === 'gip'), chiefs = staff.filter(u => u.role === 'chief').sort(byName);
+    const loose = staff.filter(u => u.role === 'specialist' && !chiefs.some(c => c.id === u.chiefId));
+    const groups = chiefs.map(c => ({ id: 'v:' + c.id, name: `Группа: ${A.directionLabels(c).join(', ') || c.name}`, head: c, people: staff.filter(u => u.role === 'specialist' && u.chiefId === c.id).sort(byName), kids: [], virtual: true }));
+    return [{ id: 'v:root', name: 'ПМ «Тандем»', head: gips[0] || null, people: [...gips.slice(1), ...loose], kids: groups, virtual: true }];
+  }
+  const build = d => ({ id: d.id, name: d.name, head: state.users.get(d.headId) || null, d,
+    people: staff.filter(u => u.deptId === d.id && u.id !== d.headId).sort(byName),
+    kids: depts.filter(x => x.parentId === d.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || byName(a, b)).map(build) });
+  const roots = depts.filter(d => !d.parentId || !state.depts.has(d.parentId)).sort(byName).map(build);
+  const placed = new Set(depts.flatMap(d => [d.headId]).concat(staff.filter(u => state.depts.has(u.deptId)).map(u => u.id)));
+  const outside = staff.filter(u => !placed.has(u.id)).sort(byName);
+  if (outside.length) roots.push({ id: 'v:none', name: 'Без отдела', head: null, people: outside, kids: [], virtual: true, none: true });
+  return roots;
+}
+const orgCount = n => (n.head ? 1 : 0) + n.people.length + n.kids.reduce((a, k) => a + orgCount(k), 0);
+const orgHas = (n, id) => n.head?.id === id || n.people.some(u => u.id === id);
+function orgNodeHtml(n, depth = 0) {
+  const gip = A.isGip(state.me), mine = orgHas(n, state.me?.id);
+  // Open: the top level, and the way down to the user's own department; what the user folded stays folded.
+  const inside = x => orgHas(x, state.me?.id) || x.kids.some(inside);
+  const open = orgOpen.has(n.id) || ((depth < 1 || n.kids.some(inside)) && !orgOpen.has('x:' + n.id));
+  const peopleOpen = orgOpen.has('p:' + n.id);
+  const h = n.head, total = orgCount(n), subs = n.kids.length;
+  const card = `<div class="org-card${mine ? ' mine' : ''}${n.none ? ' none' : ''}">
+    <div class="org-name"><b>${esc(n.name)}</b>${mine ? '<span class="chip tone-work">Ваш отдел</span>' : ''}${gip && !n.virtual ? `<button class="btn ghostbtn sm" type="button" data-act="org-edit" data-id="${esc(n.id)}" title="Изменить отдел">✎</button>` : ''}</div>
+    ${h ? `<div class="org-head"><span class="pt-ava">${esc(initials(h.name))}</span><span><b>${esc(h.name)}</b><br><span class="hint">${esc(A.ROLES[h.role]?.label || '')}${A.directionLabels(h).length ? ' · ' + esc(A.directionLabels(h).join(', ')) : ''}</span></span></div>` : n.none ? '' : '<div class="hint org-head">Руководитель не назначен</div>'}
+    <div class="org-foot"><button class="linkbtn" type="button" data-act="org-people" data-id="${esc(n.id)}" aria-expanded="${peopleOpen}">${total} ${plural(total, 'сотрудник', 'сотрудника', 'сотрудников')}</button>
+      ${subs ? `<button class="linkbtn" type="button" data-act="org-fold" data-id="${esc(n.id)}" data-open="${open}" aria-expanded="${open}">${subs} ${plural(subs, 'отдел', 'отдела', 'отделов')} ${open ? '▴' : '▾'}</button>` : ''}
+      ${gip && !n.none ? `<button class="org-add" type="button" data-act="org-add" data-parent="${esc(n.virtual ? '' : n.id)}" title="Добавить подотдел">+</button>` : ''}</div>
+    ${peopleOpen ? `<div class="org-people">${[h, ...n.people].filter(Boolean).map(u => `<span class="pt-member${u.id === state.me?.id ? ' me' : ''}"><span class="pt-ava">${esc(initials(u.name))}</span><span>${esc(u.name)}<br><span class="hint">${esc(A.ROLES[u.role]?.label || '')}</span></span></span>`).join('') || '<span class="hint">никого</span>'}</div>` : ''}
+  </div>`;
+  return `<li>${card}${subs && open ? `<ul>${n.kids.map(k => orgNodeHtml(k, depth + 1)).join('')}</ul>` : ''}</li>`;
+}
+function viewOrg() {
+  const roots = orgTree(), gip = A.isGip(state.me), virtual = !state.depts?.size;
+  return `<section class="panel org-panel"><div class="panel-h"><h3>Оргструктура</h3><span class="meta">видна всем штатным</span><span class="spacer"></span>
+      ${gip && virtual ? '<button class="btn sm" type="button" data-act="org-from-groups" title="Сделать отделы из групп главспецов — потом их можно переименовать и вложить друг в друга">Создать отделы из групп</button>' : ''}
+      ${gip ? '<button class="btn sm" type="button" data-act="org-add" data-parent="">+ Отдел</button>' : ''}</div>
+    ${virtual ? `<p class="hint org-note">Отделов пока нет — показана структура по ролям: ГИП, группы главспецов и их специалисты.${gip ? ' Создайте отделы, чтобы задать названия, руководителей и вложенность.' : ''}</p>` : ''}
+    <div class="org-scroll"><ul class="org-tree">${roots.map(r => orgNodeHtml(r)).join('')}</ul></div></section>`;
+}
+// Add or edit a department: name, head, parent; people are moved in by choosing the department in their card.
+function askDept(dept = null, parentId = '') {
+  const d = dept || { name: '', headId: '', parentId };
+  const others = [...state.depts.values()].filter(x => x.id !== d.id);
+  const staff = liveUsers().sort(byName);
+  const members = new Set(staff.filter(u => dept && u.deptId === dept.id).map(u => u.id));
+  const root = document.createElement('div');
+  root.className = 'modal-back';
+  root.innerHTML = `<form class="modal org-modal" role="dialog" aria-modal="true" aria-labelledby="org-t" novalidate><h2 id="org-t">${dept ? 'Отдел' : 'Новый отдел'}</h2>
+    <div class="f"><label class="req" for="org-name">Название</label><input id="org-name" maxlength="120" value="${esc(d.name)}" placeholder="Отдел инженерных систем"></div>
+    <div class="f"><label for="org-head">Руководитель</label><select id="org-head"><option value="">— не назначен —</option>${staff.map(u => `<option value="${esc(u.id)}"${u.id === d.headId ? ' selected' : ''}>${esc(u.name)} · ${esc(A.ROLES[u.role]?.label || '')}</option>`).join('')}</select></div>
+    <div class="f"><label for="org-parent">Входит в</label><select id="org-parent"><option value="">— верхний уровень —</option>${others.map(x => `<option value="${esc(x.id)}"${x.id === d.parentId ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+    <fieldset class="f org-mem"><legend>Сотрудники отдела</legend><div class="chk-row">${staff.map(u => `<label class="chk"><input type="checkbox" value="${esc(u.id)}"${members.has(u.id) ? ' checked' : ''}> ${esc(u.name)}${u.deptId && u.deptId !== d.id && state.depts.get(u.deptId) ? ` <span class="hint">(сейчас: ${esc(state.depts.get(u.deptId).name)})</span>` : ''}</label>`).join('')}</div></fieldset>
+    <div class="err" id="org-err" hidden></div>
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${dept ? '<button class="btn danger" type="button" data-m="del">Удалить отдел</button>' : ''}</div></form>`;
+  document.body.append(root);
+  const q = sel => root.querySelector(sel), close = () => root.remove();
+  q('#org-name').focus();
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  root.addEventListener('click', async e => {
+    if (e.target === root || e.target.dataset.m === 'cancel') close();
+    if (e.target.dataset.m === 'del') {
+      // Sub-departments move up a level, people become «без отдела».
+      const ops = [op.update('depts', dept.id, { deletedAt: new Date().toISOString() }),
+        ...others.filter(x => x.parentId === dept.id).map(x => op.update('depts', x.id, { parentId: dept.parentId || '' })),
+        ...staff.filter(u => u.deptId === dept.id).map(u => op.update('users', u.id, { deptId: '' }))];
+      if (await write(ops, `Отдел «${dept.name}» удалён`)) close();
+    }
+  });
+  q('form').addEventListener('submit', async e => {
+    e.preventDefault(); e.stopPropagation();
+    const name = q('#org-name').value.trim(), headId = q('#org-head').value, parent = q('#org-parent').value;
+    const err = t => { q('#org-err').textContent = t; q('#org-err').hidden = !t; };
+    if (!name) return err('Укажите название отдела.');
+    // No loops: the parent may not be inside this department.
+    for (let x = parent; x; x = state.depts.get(x)?.parentId) if (x === d.id) return err('Отдел не может входить сам в себя или в свой подотдел.');
+    const id = dept?.id || newId();
+    const chosen = new Set([...root.querySelectorAll('.org-mem input:checked')].map(i => i.value));
+    if (headId) chosen.add(headId);
+    const ops = [dept ? op.update('depts', id, { name, headId, parentId: parent }) : op.set('depts', id, { name, headId, parentId: parent, createdAt: new Date().toISOString() }),
+      ...staff.filter(u => chosen.has(u.id) && u.deptId !== id).map(u => op.update('users', u.id, { deptId: id })),
+      ...staff.filter(u => !chosen.has(u.id) && u.deptId === id).map(u => op.update('users', u.id, { deptId: '' }))];
+    if (await write(ops, dept ? 'Отдел сохранён' : `Отдел «${name}» добавлен`)) close();
+  });
+}
+// The groups of chiefs become departments under one top department with the GIP as its head.
+async function orgFromGroups() {
+  const gip = liveUsers().find(u => u.role === 'gip'), chiefs = liveUsers().filter(u => u.role === 'chief');
+  const top = newId(), at = new Date().toISOString();
+  const ops = [op.set('depts', top, { name: 'ПМ «Тандем»', headId: gip?.id || '', parentId: '', createdAt: at })];
+  if (gip) ops.push(op.update('users', gip.id, { deptId: top }));
+  for (const c of chiefs) {
+    const id = newId();
+    ops.push(op.set('depts', id, { name: `Группа: ${A.directionLabels(c).join(', ') || c.name}`, headId: c.id, parentId: top, createdAt: at }), op.update('users', c.id, { deptId: id }));
+    for (const s of liveUsers().filter(u => u.role === 'specialist' && u.chiefId === c.id)) ops.push(op.update('users', s.id, { deptId: id }));
+  }
+  await write(ops, `Создано отделов: ${chiefs.length + 1}`);
 }
 
 /* ---------- «Офис»: the team as people at desks, projects as buildings ---------- */
@@ -5148,7 +5271,7 @@ async function submitSimple(keepOpen = false) {
     if (!data.name) return formError('Укажите ФИО или название исполнителя.');
     if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.');
     ok = id ? await write(op.update('contractors', id, data), 'Исполнитель сохранён')
-      : await write(op.set('contractors', newId(), { ...data, ...created }), 'Исполнитель добавлен');
+      : await write(op.set('contractors', newId(), { ...data, ...created, createdBy: state.me?.id || '' }), 'Исполнитель добавлен');
   }
   if (ok && keepOpen && kind === 'project' && id) { await refresh(); state.draft = projectDraft(state.projects.get(id)); markClean(); return ok; }
   if (ok) closeDrawer();
@@ -5970,6 +6093,11 @@ document.addEventListener('click', e => {
     case 'weekly': setFileMenu(false); openWeekly(); break;
     case 'usage': setFileMenu(false); openUsage(); break;
     case 'help': setFileMenu(false); openHelp(); break;
+    case 'org-fold': { const id = el.dataset.id; if (el.dataset.open === 'true') { orgOpen.delete(id); orgOpen.add('x:' + id); } else { orgOpen.add(id); orgOpen.delete('x:' + id); } saveLocal('orgOpen', [...orgOpen]); renderNow(); break; }
+    case 'org-people': orgToggle('p:' + el.dataset.id); break;
+    case 'org-add': askDept(null, el.dataset.parent || ''); break;
+    case 'org-edit': { const d = state.depts.get(el.dataset.id); if (d) askDept(d); break; }
+    case 'org-from-groups': orgFromGroups(); break;
     case 'people-mode': peopleMode = el.dataset.v; saveLocal('peopleMode', peopleMode); renderNow(); break;
     case 'cg-toggle': toggleSet(cgOpen, id, 'cgOpen'); break;
     case 'co-toggle': toggleSet(coOpen, id, 'coOpen'); break;
