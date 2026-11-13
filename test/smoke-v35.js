@@ -39,13 +39,13 @@ app.on('browser-window-created', (_e, win) => {
         await setVal('#pr-name', 'Корпус 3'); await setVal('#pr-code', '0526-25');
         await js(`document.querySelector('#dform').requestSubmit()`); await wait(900);
         check('questionnaire opens', await js(`!!document.querySelector('.tq-modal')`));
-        await setVal('#tq-p-s', '2026-01-12'); await setVal('#tq-p-f', '2026-04-30');
-        await setVal('#tq-expertise-f', '2026-06-30');
-        check('expertise start suggested after П', (await js(`document.querySelector('#tq-expertise-s').value`)) === '2026-05-01');
-        check('Р start suggested after expertise', (await js(`document.querySelector('#tq-r-s').value`)) === '2026-07-01');
+        await setVal('[data-ph="3.start"]', '2026-01-12'); await setVal('[data-ph="3.finish"]', '2026-04-30');
+        await setVal('[data-ph="4.finish"]', '2026-06-30');
+        check('expertise start suggested after П', (await js(`document.querySelector('[data-ph="4.start"]').value`)) === '2026-05-01');
+        check('Р start suggested after expertise', (await js(`document.querySelector('[data-ph="5.start"]').value`)) === '2026-07-01');
         await js(`document.querySelector('.tq-modal input[name="tq-mode"][value="parallel"]').click()`); await wait(100);
-        check('parallel: Р right after П', (await js(`document.querySelector('#tq-r-s').value`)) === '2026-05-01');
-        await setVal('#tq-r-f', '2026-08-31');
+        check('parallel: Р right after П', (await js(`document.querySelector('[data-ph="5.start"]').value`)) === '2026-05-01');
+        await setVal('[data-ph="5.finish"]', '2026-08-31');
         await click('.tq-modal [data-m="ms-add"]'); await wait(100);
         await setVal('.tq-ms:last-child .tq-ms-t', 'Выдача ТУ на электроснабжение'); await setVal('.tq-ms:last-child .tq-ms-d', '2026-02-15');
         await shot('35-01-questionnaire');
@@ -148,7 +148,7 @@ app.on('browser-window-created', (_e, win) => {
 
       await step('«Сроки» on the project page', async () => {
         await click('[data-act="project-timeline"]'); await wait(300);
-        check('questionnaire prefilled', (await js(`document.querySelector('#tq-p-s').value`)) === '2026-01-12');
+        check('questionnaire prefilled', (await js(`document.querySelector('[data-ph="3.start"]').value`)) === '2026-01-12');
         await js(`document.querySelector('.tq-modal [data-m="cancel"]').click()`); await wait(200);
       });
 

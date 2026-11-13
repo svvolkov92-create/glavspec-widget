@@ -147,6 +147,77 @@ app.on('browser-window-created', (_e, win) => {
         await click('#btn-view'); await wait(150); await click('[data-act="set-dense"][data-v="0"]'); await wait(150);
         await js(`if (!document.querySelector('#view-menu').hidden) document.querySelector('#btn-view').click()`);
       });
+
+      await step('28: «Кто делает» — executor by surname, co-executor, old co-owners carried over', async () => {
+        // demo-t2 had a staff co-owner before 4.1 — it must show up as the co-executor next to the contractor
+        const before = data().tasks['demo-t2'];
+        await openTask('demo-t2');
+        check('three fields, no co-owner grid', await js(`!!document.querySelector('#t-owner') && !!document.querySelector('#t-exec-q') && !!document.querySelector('#t-coexec-q') && !document.querySelector('#co-box')`));
+        const exec = await js(`document.querySelector('#t-exec-q').value`), co = await js(`document.querySelector('#t-coexec-q').value`);
+        check('executor = the contractor', exec === data().contractors[before.contractorId]?.name, exec);
+        log.push(`info: co-owners before ${JSON.stringify(before.coOwnerIds || [])}, co-executor field «${co}»`);
+        if ((before.coOwnerIds || []).filter(id => id !== before.ownerId).length) check('old co-owner → co-executor', co === data().users[(before.coOwnerIds || []).filter(id => id !== before.ownerId)[0]].name, co);
+        // type a surname: staff and contractors are both offered; uncheck «only fitting»
+        await js(`(() => { const c = document.querySelector('#exec-fit'); if (c.checked) c.click(); })()`); await wait(100);
+        await js(`(() => { const q = document.querySelector('#t-coexec-q'); q.focus(); q.value = 'Белов'; q.dispatchEvent(new Event('input', { bubbles: true })); })()`); await wait(150);
+        const opts = await js(`[...document.querySelectorAll('#t-coexec-list .ep-opt')].map(o => o.dataset.ref).join()`);
+        check('typing «Белов» finds the staff member', /u:demo-u2/.test(opts) && !/c:/.test(opts), opts);
+        await js(`document.querySelector('#t-coexec-q').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`); await wait(150);
+        await shot('41-09-who');
+        check('misfit co-executor needs «Всё равно назначить»', await js(`!document.querySelector('#owner-warn').hidden`));
+        await js(`document.querySelector('#t-profile-ok').click()`);
+        await js(`document.querySelector('#dform button[type="submit"]').click()`); await wait(700);
+        const after = data().tasks['demo-t2'];
+        check('saved: contractor stays, co-executor u:demo-u2, in coOwnerIds', after.contractorId === before.contractorId && after.coExecRef === 'u:demo-u2' && after.coOwnerIds.includes('demo-u2') && after.execUserId === '', JSON.stringify({ c: after.contractorId, co: after.coExecRef, ids: after.coOwnerIds, x: after.execUserId }));
+        // a staff executor instead of a contractor
+        await openTask('demo-t9');
+        await js(`(() => { const q = document.querySelector('#t-exec-q'); q.focus(); q.value = 'Зайцев'; q.dispatchEvent(new Event('input', { bubbles: true })); })()`); await wait(150);
+        await js(`document.querySelector('#t-exec-list .ep-opt')?.click()`); await wait(150);
+        await js(`(() => { const c = document.querySelector('#t-profile-ok'); if (c && !c.checked && !document.querySelector('#owner-warn').hidden) c.click(); })()`);
+        await js(`document.querySelector('#dform button[type="submit"]').click()`); await wait(700);
+        const t9 = data().tasks['demo-t9'];
+        check('staff executor saved', t9.execUserId === 'demo-u3' && !t9.contractorId && t9.coOwnerIds.includes('demo-u3'), JSON.stringify({ x: t9.execUserId, c: t9.contractorId, ids: t9.coOwnerIds, err: '' }));
+        await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(200);
+        await click('[data-act="tab"][data-id="kanban"]'); await wait(300);
+        check('Kanban: no «нет исполнителя» on the card with a staff executor', !(await js(`document.querySelector('[data-kb-id="demo-t9"]').classList.contains('noexec')`)));
+        check('filter «Исполнитель» lists staff', await js(`!!document.querySelector('#kb-contractor option[value="u:demo-u3"]')`));
+      });
+
+      await step('2, 9, 19: phases and documents', async () => {
+        await click('[data-act="tab"][data-id="projects"]'); await wait(300);
+        await js(`document.querySelector('[data-act="project-back"]')?.click()`); await wait(150);
+        await click('[data-act="open-project"][data-id="demo-p1"]'); await wait(400);
+        await click('[data-act="dtab"][data-id="cust"]'); await wait(400);
+        const setPd = (path, v) => js(`(() => { const i = document.querySelector('[data-pd="${path}"]'); if (i.type === 'checkbox') i.checked = ${JSON.stringify(v)}; else i.value = ${JSON.stringify(v)}; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        const pv = path => js(`document.querySelector('[data-pd="${path}"]').value`);
+        const idx = k => js(`window.AppBridge.state.draft.phases.findIndex(x => x.key === '${k}')`);
+        const iP = await idx('p'), iE = await idx('expertise');
+        await setPd(`phases.${iP}.start`, '2027-01-11'); await wait(150);
+        await setPd(`phases.${iP}.days`, '60'); await wait(200);
+        check('2: 60 days → finish', (await pv(`phases.${iP}.finish`)) === '2027-03-11', await pv(`phases.${iP}.finish`));
+        await setPd(`phases.${iE}.chain`, true); await wait(200);
+        await setPd(`phases.${iE}.days`, '45'); await wait(200);
+        check('2: «сразу после предыдущего» → expertise starts the next day', (await pv(`phases.${iE}.start`)) === '2027-03-12' && (await pv(`phases.${iE}.finish`)) === '2027-04-25', `${await pv(`phases.${iE}.start`)} ${await pv(`phases.${iE}.finish`)}`);
+        check('2: mini-Gantt of phases', await js(`document.querySelectorAll('#cust-box .ph-g .ph-bar').length >= 2`));
+        // 19: documents — ГПЗУ from the date of issue
+        await click('[data-act="pd-add"][data-list="docs"]'); await wait(200);
+        const n = await js(`window.AppBridge.state.draft.docs.length - 1`);
+        await setPd(`docs.${n}.title`, 'ГПЗУ № RU27303000-0042'); await setPd(`docs.${n}.kind`, 'gpzu'); await setPd(`docs.${n}.no`, 'RU27303000-0042'); await setPd(`docs.${n}.issued`, '2026-02-10'); await wait(250);
+        check('19: ГПЗУ valid 3 years', (await pv(`docs.${n}.until`)) === '2029-02-09', await pv(`docs.${n}.until`));
+        await shot('41-10-phases-docs');
+        await js(`document.querySelector('#dform button[type="submit"]').click()`); await wait(800);
+        const p1 = data().projects['demo-p1'];
+        const doc = p1.docs.find(x => x.no === 'RU27303000-0042');
+        check('saved: phases with chain, document with kind, №, date of issue', p1.phases.find(x => x.key === 'expertise').chain === true && doc?.kind === 'gpzu' && doc.issued === '2026-02-10' && doc.until === '2029-02-09', JSON.stringify(doc));
+        // 9: «Сроки» shows the same phases
+        await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(200);
+        await page('demo-p1'); await wait(300);
+        await click('[data-act="project-timeline"]'); await wait(400);
+        const tq = await js(`(() => { const i = window.AppBridge.state.projects.get('demo-p1').phases.findIndex(x => x.key === 'p'); return document.querySelector('[data-ph="' + i + '.finish"]')?.value; })()`);
+        check('9: «Сроки» shows the same dates', tq === '2027-03-11', tq);
+        await shot('41-11-timeline');
+        await js(`document.querySelector('.tq-modal [data-m="cancel"]').click()`); await wait(200);
+      });
     } catch (e) { log.push('[smoke error] ' + (e.stack || e)); }
     fs.writeFileSync(path.join(outDir, 'log.txt'), log.join('\n'));
     app.exit(0);

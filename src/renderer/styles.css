@@ -1611,3 +1611,37 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .card-menu .cm-h .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .card-menu button { padding: 6px 8px; justify-content: space-between }
 .card-menu button:hover, .card-menu button:focus-visible { background: var(--accent-soft) }
+/* «Кто делает» (4.1): responsible · executor · co-executor; executor picked by typing a surname or a name */
+.who-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)) }
+.exec-pick label .hint { font-weight: 400 }
+.ep-box { position: relative; display: flex }
+.ep-box .ep-q { flex: 1; min-width: 0; padding-right: 30px }
+.ep-clear { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); min-height: 0 !important; padding: 0 6px !important }
+.ep-list { position: absolute; z-index: 25; left: 0; right: 0; top: calc(100% + 3px); max-height: 280px; overflow: auto; display: grid; padding: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 28px rgba(20, 24, 33, .18) }
+.ep-opt { appearance: none; border: 0; background: none; text-align: left; font: inherit; color: inherit; padding: 6px 8px; border-radius: 6px; cursor: pointer; display: grid; gap: 1px }
+.ep-opt b { font-weight: 600 }
+.ep-opt .chip { justify-self: start; font-size: 10.5px }
+.ep-opt.act, .ep-opt:hover { background: var(--accent-soft) }
+.ep-opt.sel b::after { content: ' ✓'; color: var(--accent) }
+.ep-none { padding: 8px }
+.exec-fit { margin-top: 6px }
+.legacy-co { margin-top: 6px }
+/* Project phases (4.1): length in days, chain, small Gantt */
+.ph-t input[type="date"] { min-width: 124px }
+.ph-t .ph-days, :root[data-theme="tandem"] .ph-t .ph-days { width: 74px; min-width: 74px; padding: 0 6px; text-align: right }
+.ph-t td.c { text-align: center }
+.ph-t input[readonly] { background: var(--sunk); color: var(--muted) }
+.ph-g { --ph-l: 130px; position: relative; display: grid; gap: 3px; margin: 10px 0 4px; padding: 6px 0; font-size: 12px }
+.ph-gr { display: grid; grid-template-columns: var(--ph-l) minmax(0, 1fr); align-items: center; min-height: 18px }
+.ph-gl { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px }
+.ph-gt { position: relative; height: 14px }
+.ph-gm .ph-gt { height: 16px; border-bottom: 1px solid var(--line) }
+.ph-gm .ph-gt span { position: absolute; top: 0; font-size: 10.5px; color: var(--muted); white-space: nowrap; transform: translateX(-2px) }
+.ph-bar { position: absolute; top: 2px; height: 10px; border-radius: 3px; background: var(--idle-soft); border: 1px solid var(--idle) }
+.ph-bar.ph-done { background: var(--ok-soft); border-color: var(--ok) }
+.ph-bar.ph-now { background: var(--accent-soft); border-color: var(--accent) }
+.ph-bar.ph-late { background: var(--bad-soft); border-color: var(--bad) }
+.ph-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .7 }
+.ph-ms { position: absolute; bottom: 2px; width: 8px; height: 8px; margin-left: -4px; transform: rotate(45deg); background: var(--review) }
+.tq-modal { width: min(980px, 96vw) }

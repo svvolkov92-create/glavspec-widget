@@ -378,7 +378,7 @@ const STATUS_RANK = { not_started: 1, in_progress: 2, revision: 3, review: 4, pa
 const SORT_KEYS = {
   project: t => projectOf(t)?.name || '',
   marks: t => sectionsOf(t).join(', '),
-  contractor: t => contractorOf(t)?.name || '',
+  contractor: t => executorOf(t)?.name || '',
   owner: t => ownerOf(t)?.name || '',
   start: t => t.start || '',
   finish: t => t.finish || '',
@@ -553,7 +553,7 @@ async function commitCell(id, field, value) {
     if ((t.contractorId || '') === value) return renderNow();
     if (value && misfitText(t, 'contractor', value)) { renderNow(); return reassign(id, 'contractor', t.contractorId || '', value); }
     const c = state.contractors.get(value);
-    return write(op.update('tasks', id, { contractorId: value }), `${marksText(t)}: ${c ? c.name : 'подрядчик снят'}`);
+    return write(op.update('tasks', id, { contractorId: value, ...(value ? { execUserId: '' } : {}) }), `${marksText(t)}: ${c ? c.name : 'подрядчик снят'}`);
   }
   if (field === 'ready') {
     const n = Math.round(Number(String(value).replace(',', '.')));
@@ -579,7 +579,7 @@ async function commitCell(id, field, value) {
 /* ---------- card tables: columns can be hidden and reordered («⚙ Столбцы») ---------- */
 const COLS = [
   { id: 'project', label: 'Проект' }, { id: 'marks', label: 'Разделы', fixed: true }, { id: 'owner', label: 'Ответственный' },
-  { id: 'contractor', label: 'Подрядчик' }, { id: 'start', label: 'Старт' }, { id: 'finish', label: 'Финиш' }, { id: 'status', label: 'Статус' }, { id: 'ready', label: 'Готовность' },
+  { id: 'contractor', label: 'Исполнитель' }, { id: 'start', label: 'Старт' }, { id: 'finish', label: 'Финиш' }, { id: 'status', label: 'Статус' }, { id: 'ready', label: 'Готовность' },
   { id: 'budget', label: 'Бюджет', money: true }, { id: 'paid', label: 'Оплачено', money: true }, { id: 'rest', label: 'Остаток', money: true },
 ];
 let colPrefs = { order: COLS.map(c => c.id), hidden: [], ...loadLocal('cols', {}) };
@@ -686,13 +686,13 @@ function taskTable(list, { showProject = true, showContractor = true, empty = '�
     .filter(c => (c.id !== 'project' || showProject) && (c.id !== 'contractor' || showContractor) && (c.id !== 'owner' || showOwner) && (!c.money || showMoney));
   const cell = (field, cls, inner) => `<td class="${cls}"${edit || field === 'status' ? ` data-edit="${field}" title="${EDIT_HINT}"` : ''}>${inner}</td>`;
   const HEAD = { project: () => sortTh('project', 'Проект'), marks: () => sortTh('marks', 'Разделы'), owner: () => sortTh('owner', 'Ответственный'),
-    contractor: () => sortTh('contractor', 'Подрядчик'), start: () => sortTh('start', 'Старт'), finish: () => sortTh('finish', 'Финиш'),
+    contractor: () => sortTh('contractor', 'Исполнитель'), start: () => sortTh('start', 'Старт'), finish: () => sortTh('finish', 'Финиш'),
     status: () => sortTh('status', 'Статус'), ready: () => sortTh('ready', 'Готовность'), budget: () => sortTh('budget', 'Бюджет', 'r'), paid: () => sortTh('paid', 'Оплачено', 'r'), rest: () => sortTh('rest', 'Остаток', 'r') };
   const CELL = {
     project: t => `<td>${esc(projectOf(t)?.name || '— проект удалён —')}</td>`,
     marks: t => `<td><div class="sec">${unread(t) ? '<span class="new-dot" title="Новое для вас"></span>' : ''}${marksHtml(t)}${t.title ? `<span class="t">${esc(t.title)}</span>` : ''}</div></td>`,
     owner: t => { const o = ownerOf(t); return cell('owner', '', o ? `${esc(o.name)}${coOwnersOf(t).length ? ` <span class="chip tone-idle" title="Соисполнители: ${esc(coOwnersOf(t).map(u => u.name).join(', '))}">+${coOwnersOf(t).length}</span>` : ''}<div class="hint role-hint">${esc(A.ROLES[o.role]?.label || '')}</div>${absHits(t).length ? `<div class="due warn" title="${esc(absHits(t).map(A.absenceText).join('; '))}">отпуск/больничный</div>` : ''}${gapsOf(t).length ? `<div class="due ${t.profileOk ? 'warn' : 'bad'}" title="${esc(gapsOf(t).map(x => x.text).join(' '))}">${t.profileOk ? 'не по профилю (подтверждено)' : 'не по профилю'}</div>` : ''}` : '<span class="hint">не назначен</span>'); },
-    contractor: t => { const c = contractorOf(t); return cell('contractor', '', c ? esc(c.name) : '<span class="hint">не назначен</span>'); },
+    contractor: t => { const e = executorOf(t); return cell('contractor', '', e ? execLine(t) : '<span class="hint">не назначен</span>'); },
     start: t => cell('start', 'num', fmtDate(t.start)),
     finish: t => { const tm = timing(t); return cell('finish', '', `<div class="num">${fmtDate(t.finish)}</div><div class="due ${tm.cls}">${esc(tm.text)}</div>${finishExtras(t)}`); },
     status: t => cell('status', '', statusChip(t)),
@@ -713,13 +713,13 @@ function taskTable(list, { showProject = true, showContractor = true, empty = '�
 
 // One row in an attention list; `side` overrides the default deadline text on the right.
 function attItem(t, side) {
-  const p = projectOf(t), c = contractorOf(t), tm = timing(t);
+  const p = projectOf(t), c = executorOf(t), tm = timing(t);
   const right = side ? side(t) : `<div class="due ${tm.cls}">${esc(tm.text)}</div><div class="num hint">${fmtDate(t.finish)}</div>`;
   return `<div class="att-item" data-act="open-task" data-id="${esc(t.id)}" role="button" tabindex="0">
     ${marksHtml(t)}
     <span class="main">${unread(t) ? '<span class="new-dot" title="Новое для вас"></span>' : ''}${esc(p?.name || '—')}${t.title ? ' · ' + esc(t.title) : ''}</span>
     <span class="side">${right}</span>
-    <span class="who">${ownerOf(t) ? `<span class="who-o" title="Ответственный в команде">${esc(ownerOf(t).name)}${coOwnersOf(t).length ? ' +' + coOwnersOf(t).length : ''}</span> · ` : ''}${c ? esc(c.name) + (c.phone ? ' · ' + esc(c.phone) : '') : 'подрядчик не назначен'}</span>
+    <span class="who">${ownerOf(t) ? `<span class="who-o" title="Ответственный в команде">${esc(ownerOf(t).name)}${coOwnersOf(t).length ? ' +' + coOwnersOf(t).length : ''}</span> · ` : ''}${c ? esc(c.name) + (c.phone ? ' · ' + esc(c.phone) : '') : 'исполнитель не назначен'}</span>
   </div>`;
 }
 // Cards whose responsible person has no direction for some of the marks (e.g. directions were changed later).
@@ -2228,7 +2228,7 @@ function viewGantt() {
   const groups = byProject
     ? liveProjects().map(p => ({ key: 'p' + p.id, name: p.name, sub: p.code, tasks: active.filter(t => t.projectId === p.id) }))
     : byOwner ? liveUsers().sort(byName).map(u => ({ key: 'u' + u.id, name: u.name, user: u, sub: A.ROLES[u.role]?.label, tasks: active.filter(t => hasOwner(t, u.id)) }))
-    : contractorsArr().map(c => ({ key: 'c' + c.id, name: c.name, tasks: active.filter(t => t.contractorId === c.id) }));
+    : [...execStaff().map(u => ({ key: 'x' + u.id, name: u.name, sub: 'штатный', tasks: active.filter(t => executorOf(t)?.u?.id === u.id) })), ...contractorsArr().map(c => ({ key: 'c' + c.id, name: c.name, tasks: active.filter(t => t.contractorId === c.id) }))];
   // With a filter on, rows without matching cards only add noise.
   if (gq.project || gq.mark) for (let i = groups.length - 1; i >= 0; i--) if (!groups[i].tasks.length) groups.splice(i, 1);
   if (byOwner) {
@@ -2238,7 +2238,7 @@ function viewGantt() {
     const orphans = active.filter(t => !state.projects.has(t.projectId));
     if (orphans.length) groups.push({ key: 'p-none', name: 'Без проекта', tasks: orphans });
   } else {
-    const none = active.filter(t => !contractorOf(t));
+    const none = active.filter(t => !executorOf(t));
     if (none.length) groups.push({ key: 'c-none', name: 'Не назначен', tasks: none, unassigned: true });
   }
 
@@ -2251,7 +2251,7 @@ function viewGantt() {
   const years = [...new Set([from.slice(0, 4), to.slice(0, 4)])].map(Number);
   const unofficial = years.filter(y => !L.Cal.isOfficialYear(y));
 
-  const head = `<div class="tl-row tl-head"><div class="tl-name">${byProject ? 'Проект' : byOwner ? 'Ответственный' : 'Подрядчик'}<span class="tl-resize" data-gantt-resize title="Потяните, чтобы изменить ширину"></span></div>
+  const head = `<div class="tl-row tl-head"><div class="tl-name">${byProject ? 'Проект' : byOwner ? 'Ответственный' : 'Исполнитель'}<span class="tl-resize" data-gantt-resize title="Потяните, чтобы изменить ширину"></span></div>
     <div class="tl-track" data-gantt-track>${ticks.map(t => `<span class="tl-tick ${t.major ? 'major' : ''}" style="left:${pos(t.iso)}%">${esc(t.label)}</span>`).join('')}
     ${inRange(state.today) ? `<span class="tl-today" style="left:${pos(state.today) + dayW / 2}%"><b>сегодня</b></span>` : ''}</div></div>`;
 
@@ -2283,14 +2283,14 @@ function viewGantt() {
       const tone = tm.overdue ? 'bad' : (STATUSES[t.status] || STATUSES.not_started).tone;
       const planEnd = tm.overdue && isDate(t.finish) ? t.finish : e;
       const left = clamp(pos(s)), right = clamp(pos(planEnd) + dayW); // the finish day itself is included
-      const who = byProject ? contractorOf(t)?.name || 'нет исполнителя' : projectOf(t)?.name || '';
+      const who = byProject ? executorOf(t)?.name || 'нет исполнителя' : projectOf(t)?.name || '';
       const label = `${marksText(t)} · ${who}`;
       const ext = tm.overdue && isDate(t.finish)
         ? (() => { const l = clamp(pos(t.finish) + dayW), r = clamp(pos(state.today) + dayW); return r > l ? `<span class="tl-late" style="left:${l}%;width:${r - l}%;top:${lane * 26 + 6}px" title="Просрочка ${tm.late} дн."></span>` : ''; })() : '';
       const ms = L.milestonesOf(t, state.today).list.filter(m => isDate(m.date) && inRange(m.date))
         .map(m => `<span class="tq-ms ${m.done ? 'done' : m.date < state.today ? 'bad' : ''}" style="left:${pos(m.date) + dayW / 2}%;top:${lane * 26 + 8}px" title="КТ «${esc(m.title)}» ${fmtDate(m.date)}${m.done ? ' — выполнена' : ''}"></span>`).join('');
       const blocked = L.dependencyIssues(t, state.tasks, state.today).length > 0;
-      const noexec = !contractorOf(t);
+      const noexec = !executorOf(t);
       const awayHit = absHits(t).some(h => h.onFinish);
       const bar = right > left ? `<button class="tl-bar tone-${tone} ${pos(s) < 0 ? 'cut-l' : ''} ${pos(planEnd) + dayW > 100 ? 'cut-r' : ''} ${blocked ? 'blocked' : ''} ${noexec ? 'noexec' : ''} ${awayHit ? 'away' : ''}" type="button"
         data-act="open-task" data-id="${esc(t.id)}" data-bar="${esc(t.id)}"
@@ -2319,7 +2319,7 @@ function viewGantt() {
       <select id="gq-mark" aria-label="Раздел" class="sm-sel"><option value="">Все разделы</option>${normalizeMarks(tasksArr().filter(t => t.status !== 'done').flatMap(sectionsOf)).map(m => `<option value="${esc(m)}"${gq.mark === m ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select>
       ${assignChk('gantt')}
       <button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="1" data-keys="${esc(groups.map(g => 'g:' + g.key).join(' '))}" title="Свернуть все строки">▸ все</button><button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="0" data-keys="${esc(groups.map(g => 'g:' + g.key).join(' '))}" title="Развернуть все строки">▾ все</button>
-      <div class="seg" role="group" aria-label="Группировка"><button class="btn sm ${byProject || byOwner ? '' : 'on'}" type="button" data-act="g-group" data-group="contractor">По подрядчикам</button>${isSpec() ? '' : `<button class="btn sm ${byOwner ? 'on' : ''}" type="button" data-act="g-group" data-group="owner">По ответственным</button>`}<button class="btn sm ${byProject ? 'on' : ''}" type="button" data-act="g-group" data-group="project">По проектам</button></div>
+      <div class="seg" role="group" aria-label="Группировка"><button class="btn sm ${byProject || byOwner ? '' : 'on'}" type="button" data-act="g-group" data-group="contractor">По исполнителям</button>${isSpec() ? '' : `<button class="btn sm ${byOwner ? 'on' : ''}" type="button" data-act="g-group" data-group="owner">По ответственным</button>`}<button class="btn sm ${byProject ? 'on' : ''}" type="button" data-act="g-group" data-group="project">По проектам</button></div>
       <div class="seg" role="group" aria-label="Масштаб">${preset}</div>
       <div class="seg"><button class="btn sm" type="button" data-act="g-zoom" data-dir="in" title="Крупнее (Ctrl + колесо вверх)">+</button><button class="btn sm" type="button" data-act="g-zoom" data-dir="out" title="Мельче (Ctrl + колесо вниз)">−</button></div>
       <div class="seg"><button class="btn sm" type="button" data-act="g-shift" data-dir="-1" title="Назад">←</button><button class="btn sm" type="button" data-act="g-today">Сегодня</button><button class="btn sm" type="button" data-act="g-shift" data-dir="1" title="Вперёд">→</button></div>
@@ -2561,7 +2561,7 @@ function kbViewMenu() {
     <div class="row-in"><button class="btn sm" type="button" data-act="kb-show-all" data-v="0">Кратко</button><button class="btn sm" type="button" data-act="kb-show-all" data-v="1">Подробно</button></div></div></details>`;
 }
 function kanbanCard(t) {
-  const p = projectOf(t), c = contractorOf(t), tm = timing(t), v = state.kbShow;
+  const p = projectOf(t), c = executorOf(t), tm = timing(t), v = state.kbShow;
   const due = L.paymentPlan(t, state.today).dueNow;
   const msLate = L.milestonesOf(t, state.today).overdue.length;
   const flags = v.flags && ((due > 0 && canMoney()) || msLate);
@@ -2569,7 +2569,7 @@ function kanbanCard(t) {
       title="${esc(p?.name || '')}${t.title ? ' · ' + esc(t.title) : ''}\n${c ? '' : 'Исполнитель не назначен. '}Перетащите карточку в другую колонку, чтобы сменить статус">
     <div class="kb-top">${marksHtml(t)}${tm.overdue ? '<span class="chip tone-bad">срок сорван</span>' : ''}</div>
     ${v.proj ? `<div class="kb-proj">${esc(p?.name || '—')}${t.title ? ` · ${esc(t.title)}` : ''}</div>` : ''}
-    ${v.who ? `<div class="kb-who">${c ? esc(c.name) : '<b class="kb-noexec">нет исполнителя</b>'}</div>` : ''}
+    ${v.who ? `<div class="kb-who">${c ? execLine(t) : '<b class="kb-noexec">нет исполнителя</b>'}</div>` : ''}
     ${v.due ? `<div class="kb-foot"><span class="due ${tm.cls}">${esc(tm.text)}</span><span class="num hint">${fmtDate(t.finish)}</span></div>` : ''}
     ${flags ? `<div class="kb-flags">${msLate ? `<span class="tag bad">КТ сорвана</span>` : ''}${due > 0 && canMoney() ? `<span class="tag warn">пора платить ${money(due)}</span>` : ''}</div>` : ''}
   </article>`;
@@ -2588,9 +2588,9 @@ function renderKeepMenu(sel) { renderNow(); const d = $(sel); if (d) d.open = tr
 function viewKanban() {
   if (isEmpty()) return emptyState();
   const f = state.kanban;
-  const list = tasksArr().filter(t => (state.showAssign.kanban || t.kind !== 'assign') && (!f.project || t.projectId === f.project) && (!f.contractor || (f.contractor === '__none' ? !contractorOf(t) : t.contractorId === f.contractor)));
+  const list = tasksArr().filter(t => (state.showAssign.kanban || t.kind !== 'assign') && (!f.project || t.projectId === f.project) && execMatch(t, f.contractor));
   const opt = (v, l, sel) => `<option value="${esc(v)}"${v === sel ? ' selected' : ''}>${esc(l)}</option>`;
-  const noExec = list.filter(t => !contractorOf(t) && t.status !== 'done').length;
+  const noExec = list.filter(t => !executorOf(t) && t.status !== 'done').length;
   const lanes = f.lanes === 'owner' && !isSpec();
   const colsOf = (list, lane = false) => KANBAN_COLS.map(st => {
     let items = list.filter(t => t.status === st);
@@ -2620,10 +2620,10 @@ function viewKanban() {
   }).join('');
   return `<div class="filters one-row">
       <select id="kb-project" aria-label="Проект">${opt('', 'Все проекты', f.project)}${liveProjects().map(p => opt(p.id, p.name, f.project)).join('')}</select>
-      <select id="kb-contractor" aria-label="Подрядчик">${opt('', 'Все подрядчики', f.contractor)}${opt('__none', 'Без подрядчика', f.contractor)}${contractorsArr().map(c => opt(c.id, c.name, f.contractor)).join('')}</select>
+      <select id="kb-contractor" aria-label="Исполнитель">${execFilterOpts(opt, f.contractor)}</select>
       ${isSpec() ? '' : `<span class="seg"><button class="btn sm ${lanes ? '' : 'on'}" type="button" data-act="kb-lanes" data-v="">Одной доской</button><button class="btn sm ${lanes ? 'on' : ''}" type="button" data-act="kb-lanes" data-v="owner">По ответственным</button></span>`}
       ${assignChk('kanban')}${kbViewMenu()}
-      ${noExec ? `<span class="kb-warn">Без подрядчика: <b>${noExec}</b></span>` : ''}
+      ${noExec ? `<span class="kb-warn">Без исполнителя: <b>${noExec}</b></span>` : ''}
       <span class="help-dot" tabindex="0" title="Перетаскивайте карточки между колонками, чтобы менять статус: можно только туда, куда ведут кнопки карточки (например, «В работе» → «На проверке»).">?</span>
     </div>
     ${body}`;
@@ -2932,7 +2932,7 @@ function viewTasks() {
   const attIds = f.status.startsWith('att:') ? new Set((attention()[f.status.slice(4)] || []).map(t => t.id)) : null;
   const list = tasksArr().filter(t => {
     if (f.project && t.projectId !== f.project) return false;
-    if (f.contractor === '__none' ? t.contractorId : (f.contractor && t.contractorId !== f.contractor)) return false;
+    if (!execMatch(t, f.contractor)) return false;
     if (attIds && !attIds.has(t.id)) return false;
     if (f.status.startsWith('att:') ? false : f.status === 'overdue' ? !timing(t).overdue : f.status === 'new' ? !unread(t) : f.status === 'quiet' ? !quietList([t]).length : (f.status && t.status !== f.status)) return false;
     if (f.owner && !hasOwner(t, f.owner === 'me' ? state.me?.id : f.owner)) return false;
@@ -2948,7 +2948,7 @@ function viewTasks() {
   return `<div class="filters one-row">${presetBar()}
       ${isSpec() ? '' : `<select id="f-owner" aria-label="Ответственный">${opt('', 'Все ответственные', f.owner)}${opt('me', 'Мои карточки', f.owner)}${liveUsers().sort(byName).map(u => opt(u.id, u.name, f.owner)).join('')}</select>`}
       <select id="f-project" aria-label="Проект">${opt('', 'Все проекты', f.project)}${liveProjects().map(p => opt(p.id, p.name, f.project)).join('')}</select>
-      <select id="f-contractor" aria-label="Подрядчик">${opt('', 'Все подрядчики', f.contractor)}${opt('__none', 'Без подрядчика', f.contractor)}${contractorsArr().map(c => opt(c.id, c.name, f.contractor)).join('')}</select>
+      <select id="f-contractor" aria-label="Исполнитель">${execFilterOpts(opt, f.contractor)}</select>
       <select id="f-status" aria-label="Статус">${opt('', 'Любой статус', f.status)}${opt('overdue', 'Срок сорван', f.status)}${opt('new', 'Новое для меня', f.status)}${opt('att:week', 'Сдача ≤ 7 дней', f.status)}${opt('att:milestones', 'Сорваны КТ', f.status)}${opt('att:pay', 'Пора платить', f.status)}${opt('quiet', 'Тишина', f.status)}${Object.entries(STATUSES).map(([k, s]) => opt(k, s.label, f.status)).join('')}</select>
       <select id="f-mark" aria-label="Раздел">${opt('', 'Любой раздел', f.mark)}${normalizeMarks(tasksArr().flatMap(sectionsOf)).map(m => opt(m, m, f.mark)).join('')}</select>
       <input id="f-q" type="search" placeholder="Поиск: раздел, проект, подрядчик, договор" value="${esc(f.q)}">
@@ -3459,36 +3459,100 @@ function onMarksChanged() {
   const list = selectedMarks();
   const el = $('#dform .mk-groups') && $('#marks-count');
   if (el) el.textContent = list.length ? `выбрано ${list.length}: ${list.join(', ')}` : 'ничего не выбрано';
-  const sel = $('#t-contractor');
-  if (sel) { const v = sel.value; sel.innerHTML = contractorOptions(list, v); sel.value = v; }
   const own = $('#t-owner');
   if (own && !own.disabled) { const v = own.value; own.innerHTML = ownerOptions(v, list); own.value = v; }
-  renderCoOwners();
+  execPickersRefresh();
   updateOwnerWarn();
   applyMarksFilter();
 }
 // Warns in the card when the chosen person has no direction for some of the marks.
-// Co-owners: other staff on the same job. Rebuilt when the main owner changes; keeps ticked boxes.
-function renderCoOwners() {
-  const box = $('#co-box');
-  if (!box) return;
-  const owner = $('#t-owner')?.value;
-  const ticked = new Set(box.dataset.init !== undefined ? $$('input[name="coOwner"]:checked', box).map(i => i.value) : (state.drawer?.coInit || []));
-  box.dataset.init = '1';
-  const marks = selectedMarks();
-  const can = new Set(A.assignableOwners(state.me, liveUsers()).map(u => u.id));
-  // Co-owners set by someone higher up stay listed (read-only) so saving never drops them.
-  const list = liveUsers().filter(u => u.id !== owner && u.role !== 'gip' && (can.has(u.id) || (state.drawer?.coInit || []).includes(u.id)));
-  const lockedAll = $('#t-owner')?.disabled;
-  box.innerHTML = list.length ? `<span class="lbl">Соисполнители (штатные)</span><div class="chk-row">${list.sort(byName).map(u => {
-    const misfit = A.profileGaps(u, { sections: marks }).length;
-    return `<label class="chk${misfit ? ' misfit' : ''}" title="${esc(A.profileText(u))}"><input type="checkbox" name="coOwner" value="${esc(u.id)}"${ticked.has(u.id) ? ' checked' : ''}${lockedAll || !can.has(u.id) ? ' disabled' : ''}> ${esc(u.name)}</label>`;
-  }).join('')}</div>` : '';
+/* ---------- 4.1: «Кто делает» — responsible in the team, executor (staff or outside), one optional co-executor ----------
+   Stored: ownerId; contractorId (an outside executor) or execUserId (a staff one); coExecRef 'u:<id>' | 'c:<id>'.
+   Staff executor and co-executor also go into coOwnerIds, so visibility and rights stay as before. */
+const refUser = r => (String(r || '').startsWith('u:') ? state.users.get(r.slice(2)) || null : null);
+const refContractor = r => (String(r || '').startsWith('c:') ? state.contractors.get(r.slice(2)) || null : null);
+const refName = r => refUser(r)?.name || refContractor(r)?.name || '';
+// Before 4.1 staff co-owners stood in coOwnerIds: the first becomes the executor (when there is no contractor) or the co-executor.
+function legacyCo(t) {
+  if (t.execUserId !== undefined || t.coExecRef !== undefined) return [];
+  return (t.coOwnerIds || []).filter(id => id !== t.ownerId && state.users.has(id));
 }
+const execRefOf = t => (t.contractorId ? 'c:' + t.contractorId : t.execUserId ? 'u:' + t.execUserId : !t.contractorId && legacyCo(t)[0] ? 'u:' + legacyCo(t)[0] : '');
+const coExecRefOf = t => (t.coExecRef !== undefined ? t.coExecRef : (() => { const l = legacyCo(t); const rest = t.contractorId ? l : l.slice(1); return rest[0] ? 'u:' + rest[0] : ''; })());
+// Older co-owners beyond the two new fields are kept (and listed) so saving never drops them.
+function legacyExtra(t) { const l = legacyCo(t); return t.contractorId ? l.slice(1) : l.slice(2); }
+function legacyCoHtml(t) {
+  const extra = legacyExtra(t).map(id => state.users.get(id)).filter(Boolean);
+  return extra.length ? `<div class="hint legacy-co" data-ids="${esc(extra.map(u => u.id).join(','))}">Ещё работают по карточке (из прежней версии): ${esc(extra.map(u => u.name).join(', '))}</div>` : '';
+}
+// Executor of a card for lists and the Gantt: { kind: 'staff'|'contractor', name, phone } or null.
+function executorOf(t) {
+  const c = contractorOf(t);
+  if (c) return { kind: 'contractor', name: c.name, phone: c.phone || '', c };
+  const u = t.execUserId ? state.users.get(t.execUserId) : (t.coExecRef === undefined ? state.users.get(legacyCo(t)[0] || '') : null);
+  return u ? { kind: 'staff', name: u.name, phone: u.phone || '', u } : null;
+}
+// Filters «Все исполнители / Без исполнителя / <who>»: a contractor id (as before 4.1) or 'u:<staff id>'.
+const execMatch = (t, f) => !f || (f === '__none' ? !executorOf(t) : f.startsWith('u:') ? executorOf(t)?.u?.id === f.slice(2) : t.contractorId === f);
+const execStaff = () => liveUsers().filter(u => tasksArr().some(t => executorOf(t)?.u?.id === u.id)).sort(byName);
+const execFilterOpts = (opt, sel) => `${opt('', 'Все исполнители', sel)}${opt('__none', 'Без исполнителя', sel)}${execStaff().length ? `<optgroup label="Штатные">${execStaff().map(u => opt('u:' + u.id, u.name, sel)).join('')}</optgroup><optgroup label="Внештатные">` : ''}${contractorsArr().map(c => opt(c.id, c.name, sel)).join('')}${execStaff().length ? '</optgroup>' : ''}`;
+const execLine = t => { const e = executorOf(t), co = coExecRefOf(t) ? refName(coExecRefOf(t)) : ''; return e ? `${esc(e.name)}${co ? ` <span class="hint">+ ${esc(co)}</span>` : ''}` : ''; };
+function execCandidates(marks, onlyFit) {
+  const can = new Set(A.assignableOwners(state.me, liveUsers()).map(u => u.id));
+  const load = { u: id => tasksArr().filter(t => ACTIVE.has(t.status) && (t.execUserId === id || hasOwner(t, id))).length, c: id => tasksArr().filter(t => t.contractorId === id && ACTIVE.has(t.status)).length };
+  // `own`: the section is in the person's own directions / specialty — such people come first; the GIP (not limited) after them.
+  const ownDir = u => marks.some(m => (u.directions || []).includes(A.directionOfMark(m)?.id));
+  const staff = liveUsers().filter(u => can.has(u.id)).map(u => ({ ref: 'u:' + u.id, name: u.name, sub: `штатный · ${A.ROLES[u.role]?.label || ''}${A.directionLabels(u).length ? ' · ' + A.directionLabels(u).join(', ') : ''}`, fit: !A.profileGaps(u, { sections: marks }).length, own: ownDir(u), n: load.u(u.id) }));
+  const outside = contractorsArr().map(c => { const n = marks.length ? L.matchCount(c, marks) : 0; return { ref: 'c:' + c.id, name: c.name, sub: `внештатный${c.specialty ? ' · ' + c.specialty : ''}`, fit: !marks.length || n > 0, own: n > 0, n: load.c(c.id) }; });
+  const all = [...staff, ...outside];
+  return (onlyFit && marks.length ? all.filter(x => x.fit) : all).sort((a, b) => (b.own - a.own) || (b.fit - a.fit) || a.n - b.n || a.name.localeCompare(b.name, 'ru'));
+}
+function execPickerHtml(key, label, hint, ref) {
+  return `<div class="f exec-pick" data-pick="${key}"><label for="t-${key}-q">${label} <span class="hint">${hint}</span></label>
+    <div class="ep-box"><input id="t-${key}-q" class="ep-q" autocomplete="off" placeholder="Начните вводить фамилию или название…" value="${esc(refName(ref))}" role="combobox" aria-expanded="false" aria-controls="t-${key}-list">
+      <button class="btn ghostbtn sm ep-clear" type="button" data-act="ep-clear" data-pick="${key}" title="Убрать"${ref ? '' : ' hidden'}>×</button>
+      <input type="hidden" name="${key}Ref" value="${esc(ref)}"><div class="ep-list" id="t-${key}-list" role="listbox" hidden></div></div></div>`;
+}
+function execPickersRefresh() { for (const box of $$('#dform .exec-pick')) epRender(box, false); updateOwnerWarn(); }
+function epRender(box, open = true) {
+  const q = box.querySelector('.ep-q'), list = box.querySelector('.ep-list');
+  const ref = box.querySelector('input[type="hidden"]').value;
+  const text = q.value.trim().toLowerCase(), current = refName(ref).toLowerCase();
+  const items = execCandidates(selectedMarks(), $('#exec-fit')?.checked).filter(x => !text || text === current || x.name.toLowerCase().includes(text)).slice(0, 40);
+  list.innerHTML = items.map((x, i) => `<button type="button" role="option" class="ep-opt${x.ref === ref ? ' sel' : ''}${i === 0 ? ' act' : ''}" data-act="ep-pick" data-pick="${box.dataset.pick}" data-ref="${esc(x.ref)}"><b>${esc(x.name)}</b>${x.fit ? '' : ' <span class="chip tone-warn">не по профилю</span>'}<span class="hint">${esc(x.sub)} · в работе ${x.n}</span></button>`).join('')
+    || `<div class="hint ep-none">${$('#exec-fit')?.checked ? 'Подходящих по специальности нет — снимите галку «Только подходящие».' : 'Никого не нашлось.'}</div>`;
+  list.hidden = !open; q.setAttribute('aria-expanded', String(open));
+}
+function epSet(key, ref) {
+  const box = $(`#dform .exec-pick[data-pick="${key}"]`);
+  if (!box) return;
+  box.querySelector('input[type="hidden"]').value = ref;
+  box.querySelector('.ep-q').value = refName(ref);
+  box.querySelector('.ep-clear').hidden = !ref;
+  box.querySelector('.ep-list').hidden = true;
+  updateOwnerWarn();
+}
+document.addEventListener('focusin', e => { const box = e.target.closest?.('.exec-pick'); if (box && e.target.matches('.ep-q')) { e.target.select(); epRender(box, true); } });
+document.addEventListener('input', e => { const box = e.target.closest?.('.exec-pick'); if (box && e.target.matches('.ep-q')) epRender(box, true); });
+document.addEventListener('keydown', e => {
+  const box = e.target.closest?.('.exec-pick');
+  if (!box || !e.target.matches('.ep-q')) return;
+  const opts = $$('.ep-opt', box), i = opts.findIndex(o => o.classList.contains('act'));
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (box.querySelector('.ep-list').hidden) epRender(box, true); const j = Math.max(0, Math.min(opts.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))); opts.forEach((o, k) => o.classList.toggle('act', k === j)); opts[j]?.scrollIntoView({ block: 'nearest' }); }
+  else if (e.key === 'Enter' && !box.querySelector('.ep-list').hidden) { e.preventDefault(); if (opts[i]) epSet(box.dataset.pick, opts[i].dataset.ref); }
+  else if (e.key === 'Escape' && !box.querySelector('.ep-list').hidden) { e.preventDefault(); e.stopPropagation(); epSet(box.dataset.pick, box.querySelector('input[type="hidden"]').value); }
+});
+document.addEventListener('focusout', e => {
+  const box = e.target.closest?.('.exec-pick');
+  if (!box) return;
+  setTimeout(() => { if (!box.contains(document.activeElement)) epSet(box.dataset.pick, box.querySelector('input[type="hidden"]').value); }, 150);
+});
+// Staff ids on the card besides the responsible one: executor, co-executor and the older co-owners that were kept.
 function formOwners() {
   const owner = $('#t-owner')?.value || '';
-  // Disabled boxes (outside the user's team) keep their value: checked ones are included as is.
-  return [owner, ...$$('#co-box input[name="coOwner"]').filter(i => i.checked).map(i => i.value)].filter((v, i, a) => v && a.indexOf(v) === i);
+  const exec = val('execRef'), co = val('coexecRef');
+  const legacy = ($('#dform .legacy-co')?.dataset.ids || '').split(',').filter(Boolean);
+  return [owner, refUser(exec)?.id, refUser(co)?.id, ...legacy].filter((v, i, a) => v && a.indexOf(v) === i);
 }
 function formGaps() {
   const marks = selectedMarks();
@@ -3694,9 +3758,11 @@ function taskMainPanel(t, isNew) {
       <fieldset class="f wide who-box"><legend>Кто делает</legend>
         <div class="who-grid">
           <div class="f"><label class="req" for="t-owner" title="${A.isGip(state.me) ? 'ГИП может спустить карточку любому главспецу или специалисту.' : A.isChief(state.me) ? 'Главспец спускает карточки только своим специалистам.' : 'Карточку спустил вам руководитель.'}">Ответственный в команде</label><select id="t-owner" name="ownerId">${ownerOptions(t.ownerId || state.me?.id, marks)}</select></div>
-          <div class="f"><label for="t-contractor" title="${contractorsArr().length ? 'Сверху — те, у кого этот раздел есть в специализации.' : 'Подрядчиков пока нет — добавьте их через «Создать → Подрядчик».'}">Подрядчик (внештатный)</label><select id="t-contractor" name="contractorId">${contractorOptions(marks, t.contractorId || '')}</select></div>
+          ${execPickerHtml('exec', 'Исполнитель', 'штатный или внештатный', execRefOf(t))}
+          ${execPickerHtml('coexec', 'Соисполнитель', 'необязательно', coExecRefOf(t))}
         </div>
-        <div class="co-owners" id="co-box"></div>
+        <label class="chk sm-chk exec-fit"><input type="checkbox" id="exec-fit"${loadLocal('execFit', true) ? ' checked' : ''}> Только подходящие по специальности</label>
+        ${legacyCoHtml(t)}
         <div class="warnline soft" id="abs-warn" hidden></div>
         <div class="warnline" id="owner-warn" hidden><span id="owner-warn-text"></span>
           <label class="chk"><input type="checkbox" id="t-profile-ok" name="profileOk"${t.profileOk ? ' checked' : ''}> Всё равно назначить</label></div>
@@ -3779,13 +3845,13 @@ function renderDeps() {
   const projectId = val('projectId');
   const byId = new Map(state.tasks);
   const chosen = state.draft.dependsOn.filter(id => state.tasks.has(id));
-  const label = x => `${marksText(x)} · ${contractorOf(x)?.name || 'нет подрядчика'} · до ${fmtDate(x.finish)}`;
+  const label = x => `${marksText(x)} · ${executorOf(x)?.name || 'нет исполнителя'} · до ${fmtDate(x.finish)}`;
   const options = [...state.tasks.values()]
     .filter(x => x.id !== selfId && x.projectId === projectId && !chosen.includes(x.id) && !(state.drawer.id && L.wouldCycle(state.drawer.id, x.id, byId)))
     .sort(sortByDeadline);
   box.innerHTML = `${chosen.length ? `<div class="dep-list">${chosen.map(id => {
       const x = state.tasks.get(id), tm = timing(x);
-      return `<div class="dep-row">${marksHtml(x)}<span class="dep-who">${esc(contractorOf(x)?.name || 'нет подрядчика')}</span>
+      return `<div class="dep-row">${marksHtml(x)}<span class="dep-who">${esc(executorOf(x)?.name || 'нет исполнителя')}</span>
         <span class="due ${tm.cls}">${x.status === 'done' ? 'принят' : esc(tm.text)}</span>
         <button class="btn ghostbtn sm" data-act="dep-del" data-id="${esc(id)}" type="button" aria-label="Убрать зависимость">✕</button></div>`;
     }).join('')}</div>` : '<div class="hint">Зависимостей нет.</div>'}
@@ -4033,7 +4099,7 @@ function taskStrip(t) {
       ${cell('Раздел', marksHtml(t), 'st-mark')}
       ${cell('Стадия', p ? projectStageChip(p) : '—', 'st-stage')}
       ${cell('Ответственный', o ? `${userIcons(o)}<b>${esc(o.name)}</b>${coOwnersOf(t).length ? ` +${coOwnersOf(t).length}` : ''}` : '<span class="hint">не назначен</span>', 'st-owner')}
-      ${cell('Подрядчик', c ? esc(c.name) : '<span class="hint">—</span>', 'st-contr')}
+      ${cell('Исполнитель', executorOf(t) ? execLine(t) : '<span class="hint">—</span>', 'st-contr')}
       ${cell('Финиш', `${isDate(t.finish) ? `<span class="num">${fmtDate(t.finish)}</span><br>` : ''}<span class="due ${tm.cls}">${esc(tm.text)}</span>`)}
       ${cell('Статус', `${statusChip(t)} <span class="num hint" title="Готовность">${L.readiness(t)}%</span>`, 'st-status')}
       ${cell('Изм.', rev ? `<b class="num" title="от ${fmtDate(rev.date)}${rev.note ? ': ' + esc(rev.note) : ''}">${esc(rev.no)}</b><br><span class="hint num">${fmtDate(rev.date).slice(0, 5)}</span>` : '<span class="hint">—</span>', 'st-rev')}
@@ -4216,7 +4282,7 @@ async function submitTask(quick = null, { stay = false } = {}) {
   const data = {
     // `section` keeps a readable copy for older versions of the app that read only this field.
     projectId: val('projectId'), sections, section: sections.join(', '), title: val('title'),
-    contractorId: val('contractorId'), start: val('start'), finish: val('finish'),
+    contractorId: refContractor(val('execRef'))?.id || (val('execRef').startsWith('c:') ? val('execRef').slice(2) : ''), execUserId: refUser(val('execRef'))?.id || '', coExecRef: val('coexecRef') || '', start: val('start'), finish: val('finish'),
     status: STATUSES[status] ? status : 'not_started', budget: parseMoney(val('budget')), note: val('note'),
     contractNo: val('contractNo'), contractDate: val('contractDate'),
     invoiceReceived: checked('invoiceReceived'), actSigned: checked('actSigned'), folder: val('folder'),
@@ -4324,7 +4390,7 @@ function projectDraft(p) {
 function projectDraftData() {
   const d = state.draft;
   if (!d) return { data: {} };
-  const bad = [...d.phases.flatMap(x => [x.start, x.finish, x.done]), ...d.milestones.map(x => x.date), ...d.requests.map(x => x.due), ...d.docs.map(x => x.until), d.protocol.date,
+  const bad = [...d.phases.flatMap(x => [x.start, x.finish, x.done]), ...d.milestones.map(x => x.date), ...d.requests.map(x => x.due), ...d.docs.flatMap(x => [x.until, x.issued]), d.protocol.date,
     ...d.ird.map(x => x.due), ...d.meetings.map(x => x.date), ...d.protocol.items.map(x => x.due), d.contract.date, ...d.payments.map(x => x.date), ...d.bills.flatMap(x => [x.date, x.due])].some(v => v && !isDate(v));
   if (bad) return { error: 'Проверьте даты на вкладке «Для заказчика».', tab: 'cust' };
   for (const ph of d.phases) if (isDate(ph.start) && isDate(ph.finish) && ph.finish < ph.start) return { error: `Этап «${L.phaseLabel(ph.key)}»: окончание раньше начала.`, tab: 'cust' };
@@ -4333,7 +4399,7 @@ function projectDraftData() {
     phases: d.phases, milestones: keep(d.milestones, 'title').map(m => ({ id: m.id || newId(), title: m.title.trim(), date: m.date || '', done: !!m.done })),
     // A request tied to a row of source data is closed when that row is accepted.
     requests: keep(d.requests, 'title').map(r => { const row = r.irdId && d.ird.find(x => x.id === r.irdId); return { id: r.id || newId(), title: r.title.trim(), due: r.due || '', why: (r.why || '').trim(), done: !!r.done || !!(row && ['accepted', 'done'].includes(row.status)), irdId: row ? row.id : '' }; }),
-    docs: keep(d.docs, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), until: x.until || '', remind: Math.max(0, Math.min(730, parseInt(x.remind, 10) || 60)) })),
+    docs: keep(d.docs, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), kind: x.kind || L.docKindOf(x.title), no: String(x.no || '').trim(), issued: x.issued || '', until: x.until || '', remind: Math.max(0, Math.min(730, parseInt(x.remind, 10) || 60)) })),
     protocol: { no: String(d.protocol.no || '').trim(), date: d.protocol.date || '', items: keep(d.protocol.items, 'text').map(i => ({ id: i.id || newId(), text: i.text.trim(), who: i.who === 'customer' ? 'customer' : 'us', status: PROTO_STATUS.some(s => s[0] === i.status) ? i.status : 'work', pct: Math.max(0, Math.min(100, parseInt(i.pct, 10) || 0)), due: i.due || '' })) },
     advice: { title: (d.advice.title || '').trim(), text: (d.advice.text || '').trim() }, show: d.show, contactId: d.contactId, composition: d.composition,
     ird: keep(d.ird, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), kind: IRD_KINDS.some(k => k[0] === x.kind) ? x.kind : irdKindOf(x.title), who: String(x.who || '').trim(), status: IRD_STATUS.some(s => s[0] === x.status) ? x.status : 'plan', due: x.due || '', note: String(x.note || '').trim() })),
@@ -4353,6 +4419,45 @@ function setDraftPath(path, value) {
   for (const k of keys.slice(0, -1)) o = o[/^\d+$/.test(k) ? Number(k) : k];
   o[keys.at(-1)] = value;
 }
+/* ---------- 4.1: project phases — one editor for «Сроки» and «Для заказчика», with length in days, «сразу после
+   предыдущего» and a small Gantt of the phases. `bind(i, field)` gives the input's data attribute. ---------- */
+function phaseTableHtml(phases, bind) {
+  const st = { done: ['ok', 'завершён'], late: ['bad', 'просрочен'], now: ['work', 'идёт'], next: ['idle', 'впереди'] };
+  return `<div class="tablewrap"><table class="pd-t ph-t"><thead><tr><th>Этап</th><th>Начало</th><th title="Календарных дней, включая первый и последний">Дней</th><th>Окончание</th><th title="Этап начинается на следующий день после окончания предыдущего">Сразу после предыдущего</th><th>Завершён (факт)</th><th>Состояние</th></tr></thead><tbody>
+    ${phases.map((ph, i) => { const s = L.phaseState(ph, state.today), has = isDate(ph.start) || isDate(ph.finish);
+      return `<tr${ph.key === 'contract' ? ' class="gip-only" title="Видят только ГИПы"' : ''}><td><b>${esc(L.phaseLabel(ph.key))}</b>${ph.key === 'contract' ? ' <span class="chip tone-idle">только ГИП</span>' : ''}</td>
+        <td><input type="date" ${bind(i, 'start')} value="${esc(ph.start || '')}"${ph.chain && i ? ' readonly title="Считается от предыдущего этапа"' : ''}></td>
+        <td><input class="ph-days num" type="number" min="1" max="3650" ${bind(i, 'days')} value="${esc(L.phaseDays(ph))}" placeholder="—"></td>
+        <td><input type="date" ${bind(i, 'finish')} value="${esc(ph.finish || '')}"></td>
+        <td class="c">${i ? `<input type="checkbox" ${bind(i, 'chain')}${ph.chain ? ' checked' : ''} aria-label="Сразу после предыдущего">` : ''}</td>
+        <td><input type="date" ${bind(i, 'done')} value="${esc(ph.done || '')}"></td>
+        <td>${has ? `<span class="chip tone-${st[s][0]}">${st[s][1]}</span>` : '<span class="hint">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>
+    <p class="hint">Укажите начало и длительность или начало и окончание — второе посчитается само. Галка «Сразу после предыдущего» сдвигает этап вслед за предыдущим.</p>`;
+}
+// Phases as bars on one time scale (the same picture the customer sees on the page).
+function phaseGanttHtml(phases, milestones = []) {
+  const dated = phases.filter(ph => isDate(ph.start) && isDate(ph.finish));
+  if (!dated.length) return '';
+  const all = [...dated.flatMap(ph => [ph.start, ph.finish]), state.today, ...milestones.map(m => m.date).filter(isDate)].sort();
+  const from = all[0], to = all.at(-1), span = Math.max(1, dayNum(to) - dayNum(from) + 1);
+  const x = d => ((dayNum(d) - dayNum(from)) / span) * 100;
+  const months = []; for (let d = from.slice(0, 8) + '01'; d <= to; d = addDays(d, 32).slice(0, 8) + '01') if (d >= from) months.push(d);
+  const every = Math.ceil(months.length / 10);
+  return `<div class="ph-g" aria-label="График этапов">
+    <div class="ph-gr ph-gm"><span></span><div class="ph-gt">${months.filter((_, i) => i % every === 0).map(m => `<span style="left:${x(m)}%">${fmtDate(m).slice(3)}</span>`).join('')}</div></div>
+    ${dated.map(ph => { const s = L.phaseState(ph, state.today); return `<div class="ph-gr"><span class="ph-gl">${esc(L.phaseLabel(ph.key))}</span><div class="ph-gt">
+      <i class="ph-bar ph-${s}" style="left:${x(ph.start)}%;width:${Math.max(0.8, x(addDays(ph.finish, 1)) - x(ph.start))}%" title="${esc(L.phaseLabel(ph.key))}: ${fmtDate(ph.start)} – ${fmtDate(ph.finish)} · ${L.phaseDays(ph)} дн."></i></div></div>`; }).join('')}
+    <div class="ph-now" style="left:calc(var(--ph-l) + (100% - var(--ph-l)) * ${x(state.today) / 100})" title="Сегодня"></div>
+    ${milestones.filter(m => isDate(m.date) && m.date >= from && m.date <= to).map(m => `<div class="ph-ms" style="left:calc(var(--ph-l) + (100% - var(--ph-l)) * ${x(m.date) / 100})" title="${esc(m.title)} · ${fmtDate(m.date)}"></div>`).join('')}
+  </div>`;
+}
+// The project's phases are one list (p.phases): «Сроки» and «Для заказчика» edit the same records.
+function syncPhasesDraft(pid, phases, milestones) {
+  if (state.drawer?.kind !== 'project' || state.drawer.id !== pid || !state.draft) return;
+  state.draft.phases = phases.map(x => ({ ...x }));
+  if (milestones) state.draft.milestones = milestones.map(x => ({ ...x }));
+  renderCustomer();
+}
 const pdIn = (path, value, attrs = '') => `<input data-pd="${path}" value="${esc(value ?? '')}" ${attrs}>`;
 const pdDate = (path, value) => `<input type="date" data-pd="${path}" value="${esc(value || '')}">`;
 const pdSel = (path, opts, cur) => `<select data-pd="${path}">${opts.map(([k, l]) => `<option value="${k}"${cur === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
@@ -4368,10 +4473,7 @@ function renderCustomer() {
   box.innerHTML = `<div class="cust-top"><span class="hint">${now.planned ? `Сейчас: <b>${esc(now.current?.label || '—')}</b> · ${now.behind ? `<span class="neg">отставание ${now.behind} дн.</span>` : 'по графику'}${now.next ? ` · до «${esc(now.next.title)}» ${now.daysToNext} дн.` : ''}` : 'Задайте даты этапов — по ним строится план и «N дней до…» на странице заказчика.'}</span><span class="spacer"></span>
       <button class="btn" type="button" data-act="cust-page" data-format="pdf">PDF</button><button class="btn primary" type="button" data-act="cust-page" data-format="html">Сохранить и создать страницу</button></div>
     <div class="sub"><h3>Этапы проекта</h3>${A.isGip(state.me) ? '' : '<p class="hint">Этап «Договор» ведёт ГИП.</p>'}
-      <table class="pd-t"><thead><tr><th>Этап</th><th>Начало</th><th>Окончание</th><th>Завершён (факт)</th><th>Состояние</th></tr></thead><tbody>
-      ${d.phases.map((ph, i) => { const st = L.phaseState(ph, state.today), has = isDate(ph.start) || isDate(ph.finish);
-        return `<tr${ph.key === 'contract' ? ' class="gip-only" title="Видят только ГИПы"' : ''}><td><b>${esc(L.phaseLabel(ph.key))}</b>${ph.key === 'contract' ? ' <span class="chip tone-idle">только ГИП</span>' : ''}</td><td>${pdDate(`phases.${i}.start`, ph.start)}</td><td>${pdDate(`phases.${i}.finish`, ph.finish)}</td><td>${pdDate(`phases.${i}.done`, ph.done)}</td>
-          <td>${has ? `<span class="chip tone-${{ done: 'ok', late: 'bad', now: 'work', next: 'idle' }[st]}">${{ done: 'завершён', late: 'просрочен', now: 'идёт', next: 'впереди' }[st]}</span>` : '<span class="hint">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>
+      ${phaseTableHtml(d.phases, (i, f) => `data-pd="phases.${i}.${f}"`)}${phaseGanttHtml(d.phases, d.milestones)}</div>
     <div class="sub"><h3>Вехи</h3>${list('milestones', (x, i) => `<td class="grow">${pdIn(`milestones.${i}.title`, x.title, 'placeholder="Заключение экспертизы" maxlength="120"')}</td><td>${pdDate(`milestones.${i}.date`, x.date)}</td><td>${pdChk(`milestones.${i}.done`, x.done, ' пройдена')}</td>`, ['Веха', 'Дата', ''], 'Ключевые даты для заказчика: договор, ПД на экспертизу, заключение, выдача РД.')}</div>
     <div class="sub"><h3>Нужно от заказчика</h3>${list('requests', (x, i) => `<td class="grow">${pdIn(`requests.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}
         <div class="req-files">${(x.files || []).map((f, k) => `<span class="aq-file"><button class="linkbtn" type="button" data-act="att-open" data-fid="${esc(f.id)}" title="Открыть">${icon('file')}${esc(f.name)}</button><button class="linkbtn" type="button" data-act="req-unattach" data-i="${i}" data-k="${k}" aria-label="Убрать файл">✕</button></span>`).join('')}<button class="linkbtn" type="button" data-act="req-attach" data-i="${i}">+ файл для согласования</button></div></td><td>${pdDate(`requests.${i}.due`, x.due)}</td><td class="grow">${pdIn(`requests.${i}.why`, x.why, 'placeholder="Зачем: без них экспертиза не примет ИОС1" maxlength="200"')}</td><td>${pdChk(`requests.${i}.done`, x.done, ' получено')}</td>`, ['Что', 'Срок', 'Зачем', ''], 'Исходные данные, решения и ответы, которые ждём от заказчика. «Получено» убирает строку со страницы.')}</div>
@@ -4393,7 +4495,11 @@ function renderCustomer() {
       <button class="btn sm" type="button" data-act="pd-add" data-list="protocol.items">+ Пункт</button></div>
     <div class="sub"><h3>Встречи</h3><p class="hint">Ближайшая встреча — на главной и во «Встречах» у заказчика, с кнопками «В календарь» и «Перенести»; прошедшие — с номером протокола.</p>${list('meetings', (x, i) => `<td>${pdDate(`meetings.${i}.date`, x.date)}</td><td>${pdIn(`meetings.${i}.from`, x.from, 'class="sm-in" placeholder="11:00" maxlength="5"')}–${pdIn(`meetings.${i}.to`, x.to, 'class="sm-in" placeholder="12:00" maxlength="5"')}</td>
         <td class="grow">${pdIn(`meetings.${i}.title`, x.title, 'placeholder="Совещание по замечаниям экспертизы" maxlength="160"')}</td><td class="grow">${pdIn(`meetings.${i}.place`, x.place, 'placeholder="онлайн или адрес" maxlength="160"')}</td><td>${pdIn(`meetings.${i}.protocolNo`, x.protocolNo, 'class="sm-in" placeholder="№" maxlength="20"')}</td>`, ['Дата', 'Время', 'Тема', 'Где', 'Протокол'], 'Встречи с заказчиком: прошедшие и ближайшая.')}</div>
-    <div class="sub"><h3>Сроки документов</h3>${list('docs', (x, i) => `<td class="grow">${pdIn(`docs.${i}.title`, x.title, 'placeholder="ТУ на водоснабжение и водоотведение" maxlength="160"')}</td><td>${pdDate(`docs.${i}.until`, x.until)}</td><td>за ${pdIn(`docs.${i}.remind`, x.remind ?? 60, 'class="sm-in" inputmode="numeric"')} дн.</td>`, ['Документ', 'Действует до', 'Напомнить в сводке'], 'ТУ, ГПЗУ, изыскания — когда истекают. Напоминание появится в сводке.')}</div>
+    <div class="sub"><h3>Сроки документов</h3>${list('docs', (x, i) => { const kind = x.kind || L.docKindOf(x.title), rule = L.docRule(kind), auto = L.docUntil(kind, x.issued), left = isDate(x.until) ? dayNum(x.until) - dayNum(state.today) : null;
+        return `<td>${pdSel(`docs.${i}.kind`, L.DOC_KINDS.map(([k, l]) => [k, l]), kind)}</td><td class="grow">${pdIn(`docs.${i}.title`, x.title, 'placeholder="ТУ на водоснабжение и водоотведение" maxlength="160"')}</td>
+          <td>${pdIn(`docs.${i}.no`, x.no, 'class="sm-in" placeholder="№" maxlength="40"')}</td><td>${pdDate(`docs.${i}.issued`, x.issued)}</td>
+          <td>${pdDate(`docs.${i}.until`, x.until)}<div class="hint doc-rule">${rule ? (x.until && x.until !== auto && auto ? `вручную · по правилу: ${fmtDate(auto)}` : esc(rule.basis)) : 'по тексту документа'}${left !== null ? ` · ${left < 0 ? `<span class="neg">истёк</span>` : left <= (x.remind ?? 60) ? `<span class="warnv">истекает через ${left} дн.</span>` : `ещё ${left} дн.`}` : ''}</div></td>
+          <td>за ${pdIn(`docs.${i}.remind`, x.remind ?? 60, 'class="sm-in" inputmode="numeric"')} дн.</td>`; }, ['Тип', 'Документ', '№', 'Дата выпуска', 'Действует до', 'Напомнить в сводке'], 'ГПЗУ, изыскания, ТУ — когда истекают. Для ГПЗУ и топосъёмки срок считается от даты выпуска сам; ТУ, СТУ и прочее — по тексту документа. Напоминание появится в сводке.')}</div>
     ${A.isGip(state.me) ? `<div class="sub"><h3>Договор и финансы <span class="chip tone-idle">только ГИП</span></h3><p class="hint">Договор заказчика с «Тандемом» — не путать с бюджетами подрядчиков. Пока номер договора пуст, вкладки «Договор и финансы» у заказчика нет.</p>
       <div class="fgrid"><div class="f"><label>Номер договора</label>${pdIn('contract.no', d.contract.no, 'placeholder="26/07-12" maxlength="40"')}</div><div class="f"><label>Дата</label>${pdDate('contract.date', d.contract.date)}</div>
         <div class="f wide"><label>Предмет</label>${pdIn('contract.subject', d.contract.subject, 'placeholder="Инженерные изыскания и проектная документация, стадия П" maxlength="200"')}</div>
@@ -4430,7 +4536,7 @@ function irdLetterText() {
     + `\n\nДокументы можно передать через личный кабинет заказчика или направить в наш адрес.\n\n${me?.name || ''}${me ? ', главный инженер проекта' : ''}${me?.phone ? '\n' + me.phone : ''}${me?.email ? '\n' + me.email : ''}`;
 }
 const PD_NEW = { milestones: () => ({ id: newId(), title: '', date: '', done: false }), requests: () => ({ id: newId(), title: '', due: '', why: '', done: false }),
-  docs: () => ({ id: newId(), title: '', until: '', remind: 60 }), 'protocol.items': () => ({ id: newId(), text: '', who: 'us', status: 'work', pct: '', due: '' }),
+  docs: () => ({ id: newId(), kind: 'other', title: '', no: '', issued: '', until: '', remind: 60 }), 'protocol.items': () => ({ id: newId(), text: '', who: 'us', status: 'work', pct: '', due: '' }),
   ird: () => ({ id: newId(), title: '', kind: 'doc', who: 'Заказчик', status: 'plan', due: '', note: '' }), meetings: () => ({ id: newId(), date: '', from: '', to: '', title: '', place: '', protocolNo: '' }),
   payments: () => ({ id: newId(), title: '', sum: '', cond: '', status: 'upcoming', date: '' }), bills: () => ({ id: newId(), title: '', date: '', status: 'to_pay', due: '' }) };
 const draftList = key => key.split('.').reduce((o, k) => o[k], state.draft);
@@ -4752,17 +4858,19 @@ async function compExport(format) {
 // Timeline questionnaire («анкета сроков»): stages П, экспертиза, Р (after or parallel to expertise), надзор and
 // other contract dates. Shown when a project is created and from the project page («Сроки»). Resolves true when saved.
 function askTimeline(p) {
-  const ph = k => (p.phases || []).find(x => x.key === k) || {};
   const ms = (p.milestones || []).map(m => ({ ...m }));
-  const rows = [['p', 'Стадия П', true], ['expertise', 'Экспертиза', false], ['r', 'Стадия Р', true], ['an', 'Авторский надзор', false]];
+  // All phases, as on «Для заказчика» (one list); «Договор» only for GIPs.
+  const gip = A.isGip(state.me);
+  // A new plan: expertise follows П and Р follows expertise (as before 4.1) until the user unticks it.
+  let phases = L.defaultPhases().map(d => { const was = (p.phases || []).find(x => x.key === d.key); return { ...d, ...(was || {}), ...(!was?.start && was?.chain === undefined && ['expertise', 'r'].includes(d.key) ? { chain: true } : {}) }; });
+  const shown = () => phases.map((ph, i) => ({ ph, i })).filter(x => gip || x.ph.key !== 'contract');
   return new Promise(resolve => {
     const root = document.createElement('div');
     root.className = 'modal-back';
     const msRow = (m, i) => `<div class="tq-ms" data-i="${i}"><input class="tq-ms-t" value="${esc(m.title || '')}" placeholder="Например: выдача ТУ, оплата аванса, сдача сметы" maxlength="120"><input class="tq-ms-d" type="date" value="${esc(m.date || '')}"><button class="btn ghostbtn sm" type="button" data-m="ms-del" aria-label="Убрать">✕</button></div>`;
     root.innerHTML = `<form class="modal tq-modal" role="dialog" aria-modal="true" aria-labelledby="tltitle" novalidate><h2 id="tltitle">Сроки по договору · ${esc(p.name || '')}</h2>
       <p class="hint">По этим срокам программа расставит предварительные даты разделов по волнам техкарты и сроки заданий смежникам. Можно заполнить потом: кнопка «Сроки» на странице проекта.</p>
-      <div class="tq-grid"><span></span><b>Начало</b><b>Окончание</b>
-        ${rows.map(([k, l, main]) => `<span class="${main ? 'req' : ''}">${l}</span><input type="date" id="tq-${k}-s" value="${esc(ph(k).start || '')}"><input type="date" id="tq-${k}-f" value="${esc(ph(k).finish || '')}">`).join('')}</div>
+      <div id="tq-phases"></div>
       <div class="tq-mode"><span class="lbl">Рабочая документация</span>
         <label class="chk"><input type="radio" name="tq-mode" value="after"${p.rdMode !== 'parallel' ? ' checked' : ''}> после экспертизы</label>
         <label class="chk"><input type="radio" name="tq-mode" value="parallel"${p.rdMode === 'parallel' ? ' checked' : ''}> параллельно с экспертизой</label>
@@ -4771,18 +4879,29 @@ function askTimeline(p) {
       <div class="err" id="tq-err" hidden></div>
       <div class="modal-f"><button class="btn primary" type="submit">Сохранить сроки</button><button class="btn" type="button" data-m="cancel">Заполню потом</button></div></form>`;
     document.body.append(root);
-    const q = sel => root.querySelector(sel), v = id => q('#' + id).value;
-    const next = d => (isDate(d) ? addDays(d, 1) : '');
-    // Р starts the day after expertise (or after П when parallel) unless already set by hand.
-    const suggest = () => {
-      const mode = q('input[name="tq-mode"]:checked').value, rs = q('#tq-r-s');
-      const from = mode === 'parallel' ? v('tq-p-f') : v('tq-expertise-f') || v('tq-p-f');
-      if (!rs.value || rs.dataset.auto) { rs.value = next(from); rs.dataset.auto = rs.value ? '1' : ''; }
-      if (!q('#tq-expertise-s').value && v('tq-p-f')) q('#tq-expertise-s').value = next(v('tq-p-f'));
-      q('#tq-hint').textContent = mode === 'parallel' ? 'Р стартует сразу после П; замечания экспертизы правятся в обоих.' : 'Р стартует после положительного заключения.';
+    const q = sel => root.querySelector(sel);
+    const draw = () => {
+      const list = shown();
+      q('#tq-phases').innerHTML = phaseTableHtml(list.map(x => x.ph), (k, f) => `data-ph="${list[k].i}.${f}"`) + phaseGanttHtml(phases.filter(x => gip || x.key !== 'contract'), ms);
+    };
+    // «Р после экспертизы / параллельно»: sets the chain of Р and, for «параллельно», puts Р right after П.
+    const mode = () => {
+      const m = q('input[name="tq-mode"]:checked').value, r = phases.find(x => x.key === 'r'), pp = phases.find(x => x.key === 'p');
+      if (m === 'parallel' && r) {
+        const was = r.chain; r.chain = false;
+        if (isDate(pp?.finish) && (was || !isDate(r.start) || r.auto)) { const d = L.phaseDays(r); r.start = addDays(pp.finish, 1); if (d > 0) r.finish = addDays(r.start, d - 1); r.auto = true; }
+      }
+      if (m === 'after' && r) { r.chain = true; delete r.auto; }
+      phases = L.planPhases(phases);
+      q('#tq-hint').textContent = m === 'parallel' ? 'Р стартует сразу после П; замечания экспертизы правятся в обоих.' : 'Р стартует после положительного заключения.';
     };
     const close = r => { root.remove(); resolve(r); };
-    root.addEventListener('change', e => { if (e.target.id === 'tq-r-s') e.target.dataset.auto = ''; suggest(); });
+    root.addEventListener('input', e => { const k = e.target.dataset.ph?.split('.'); if (k) { const x = phases[Number(k[0])]; x[k[1]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; } });
+    root.addEventListener('change', e => {
+      const k = e.target.dataset.ph?.split('.');
+      if (k) { const x = phases[Number(k[0])]; x[k[1]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; phases = L.planPhases(phases, Number(k[0]), k[1]); draw(); q(`[data-ph="${k[0]}.${k[1]}"]`)?.focus(); return; }
+      if (e.target.name === 'tq-mode') { mode(); draw(); }
+    });
     root.addEventListener('click', e => {
       const m = e.target.dataset.m;
       if (e.target === root || m === 'cancel') close(false);
@@ -4790,25 +4909,21 @@ function askTimeline(p) {
       if (m === 'ms-del') e.target.closest('.tq-ms').remove();
     });
     root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } });
-    suggest();
-    q('#tq-p-s').focus();
+    mode(); draw();
+    q('[data-ph$=".start"]')?.focus();
     q('form').addEventListener('submit', async e => {
       e.preventDefault(); e.stopPropagation();
       const err = t => { q('#tq-err').textContent = t; q('#tq-err').hidden = !t; };
-      const phases = (p.phases?.length ? p.phases : L.defaultPhases()).map(x => ({ ...x }));
-      for (const [k, l] of rows) {
-        const st = v(`tq-${k}-s`), fi = v(`tq-${k}-f`);
-        if (st && fi && fi < st) return err(`${l}: окончание раньше начала.`);
-        let x = phases.find(y => y.key === k);
-        if (!x) phases.push(x = { key: k, start: '', finish: '', done: '' });
-        x.start = st; x.finish = fi;
-      }
+      for (const x of phases) delete x.auto;
+      for (const x of phases) if (isDate(x.start) && isDate(x.finish) && x.finish < x.start) return err(`${L.phaseLabel(x.key)}: окончание раньше начала.`);
+      // A non-GIP never sees «Договор»: it is kept as stored.
+      if (!gip) { const c = (p.phases || []).find(x => x.key === 'contract'); const i = phases.findIndex(x => x.key === 'contract'); if (i >= 0) phases[i] = c ? { ...c } : phases[i]; }
       const old = new Map(ms.map(m => [m.id, m]));
       const milestones = [...root.querySelectorAll('.tq-ms')].map(r => ({ title: r.querySelector('.tq-ms-t').value.trim(), date: r.querySelector('.tq-ms-d').value }))
         .filter(m => m.title).map((m, i) => { const was = ms[i] && old.get(ms[i].id); return { id: was?.title === m.title ? was.id : newId(), title: m.title, date: m.date, done: !!(was?.title === m.title && was.done) }; });
       const rdMode = q('input[name="tq-mode"]:checked').value;
       const ok = await write(op.update('projects', p.id, { phases, milestones, rdMode }), 'Сроки проекта сохранены');
-      if (ok) close(true);
+      if (ok) { syncPhasesDraft(p.id, phases, milestones); close(true); }
     });
   });
 }
@@ -5439,7 +5554,7 @@ function searchAll(query) {
   for (const t of state.tasks.values()) {
     const p = projectOf(t), c = contractorOf(t);
     const hay = norm([sectionsOf(t).join(' '), t.title, p?.name, p?.code, c?.name, t.contractNo, t.note].join(' '));
-    if (match(hay)) out.push({ kind: 'task', id: t.id, rank: 0, title: marksText(t), sub: `${p?.name || '—'} · ${c?.name || 'нет подрядчика'} · ${timing(t).text}`, archived: !!p?.archived });
+    if (match(hay)) out.push({ kind: 'task', id: t.id, rank: 0, title: marksText(t), sub: `${p?.name || '—'} · ${executorOf(t)?.name || 'нет исполнителя'} · ${timing(t).text}`, archived: !!p?.archived });
   }
   for (const p of state.projects.values()) {
     if (match(norm([p.name, p.code, p.client].join(' ')))) out.push({ kind: 'project', id: p.id, rank: 1, title: p.name, sub: `проект${p.code ? ' · ' + p.code : ''}${p.archived ? ' · в архиве' : ''}` });
@@ -5884,6 +5999,8 @@ document.addEventListener('click', e => {
     case 'set-dense': dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); break;
     case 'set-anim': anim = el.dataset.v === '1'; saveLocal('anim', anim); applyAnim(); renderViewMenu(); break;
     case 'cm-quick': case 'cm-plus1': case 'cm-assign': case 'cm-chat': case 'cm-copy': case 'cm-window': { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); break; }
+    case 'ep-pick': epSet(el.dataset.pick, el.dataset.ref); break;
+    case 'ep-clear': epSet(el.dataset.pick, ''); $(`#t-${el.dataset.pick}-q`)?.focus(); break;
     case 'focus-start': closeCardMenu(); focusStart(el.dataset.id).then(refreshFocusSlot); break;
     case 'focus-stop': closeCardMenu(); focusStop().then(refreshFocusSlot); break;
     case 'kb-lanes': state.kanban.lanes = el.dataset.v; saveLocal('kbLanes', el.dataset.v); renderNow(); break;
@@ -6113,7 +6230,15 @@ document.addEventListener('change', e => {
     if (['mark', 'on', 'tom', 'code', 'pdId'].includes(k)) { const y = $('#dform .drawer-b')?.scrollTop; renderComposition(); if (y != null) $('#dform .drawer-b').scrollTop = y; }
     return;
   }
-  if (t.dataset.pd && /^phases\.|^milestones\./.test(t.dataset.pd)) { const y = $('#dform .drawer-b')?.scrollTop; renderCustomer(); if (y != null) $('#dform .drawer-b').scrollTop = y; return; }
+  if (t.dataset.pd && /^docs\.\d+\.(kind|issued)$/.test(t.dataset.pd)) {
+    // A fixed-term kind fills «действует до» from the date of issue, unless it was typed by hand (differs from the rule).
+    const x = state.draft.docs[Number(t.dataset.pd.split('.')[1])], kind = x.kind || L.docKindOf(x.title), auto = L.docUntil(kind, x.issued);
+    if (auto && (!x.until || x.until === x.autoUntil)) x.until = auto;
+    x.autoUntil = auto;
+    const y = $('#dform .drawer-b')?.scrollTop; renderCustomer(); if (y != null) $('#dform .drawer-b').scrollTop = y; return;
+  }
+  if (t.dataset.pd && /^docs\.\d+\.until$/.test(t.dataset.pd)) { const y = $('#dform .drawer-b')?.scrollTop; renderCustomer(); if (y != null) $('#dform .drawer-b').scrollTop = y; return; }
+  if (t.dataset.pd && /^phases\.|^milestones\./.test(t.dataset.pd)) { const m = t.dataset.pd.match(/^phases\.(\d+)\.(\w+)$/); if (m) state.draft.phases = L.planPhases(state.draft.phases, Number(m[1]), m[2]); const y = $('#dform .drawer-b')?.scrollTop; renderCustomer(); if (y != null) $('#dform .drawer-b').scrollTop = y; return; }
   if (t.dataset.act === 'toggle-budget') { toggleBudget(t.dataset.id, t.checked); return; }
   if (t.dataset.act === 'show-assign') { state.showAssign[t.dataset.v] = t.checked; saveLocal('showAssign', state.showAssign); renderNow(); return; }
   if (t.dataset.act === 'kb-show') { state.kbShow[t.dataset.v] = t.checked; saveLocal('kbShow', state.kbShow); renderKeepMenu('.kb-view'); return; }
@@ -6164,7 +6289,8 @@ document.addEventListener('input', e => {
   if (t.id === 'msg-text') { msg.drafts[msg.chatId] = t.value; msgAutocomplete(t); return; }
   if (t.id === 'mc-title') { msg.newTitle = t.value; return; }
   if (t.name === 'mark' || t.id === 't-marks-extra') { onMarksChanged(); return; }
-  if (t.id === 't-owner') { renderCoOwners(); updateOwnerWarn(); applyMarksFilter(); return; }
+  if (t.id === 't-owner') { execPickersRefresh(); applyMarksFilter(); return; }
+  if (t.id === 'exec-fit') { saveLocal('execFit', t.checked); for (const box of $$('#dform .exec-pick')) if (!box.querySelector('.ep-list').hidden) epRender(box, true); return; }
   if (t.id === 'mk-search') { applyMarksFilter(); return; }
   if (t.id === 't-ready-r') { $('#t-ready').value = t.value; return; }
   if (t.id === 't-ready') { $('#t-ready-r').value = t.value; return; }
