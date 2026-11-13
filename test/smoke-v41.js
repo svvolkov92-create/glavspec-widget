@@ -110,6 +110,43 @@ app.on('browser-window-created', (_e, win) => {
         await shot('41-05-transparency');
         await click('#btn-view'); await wait(150); await setVal('#alpha', '82'); await wait(150); await click('#btn-view'); await wait(150);
       });
+
+      await step('40: right-click menu on a card', async () => {
+        await click('[data-act="tab"][data-id="kanban"]'); await wait(400);
+        const ctx = sel => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 })); })()`);
+        await ctx('[data-kb-id="demo-t9"]'); await wait(200);
+        const items = await js(`[...document.querySelectorAll('#card-menu button')].map(b => b.dataset.act + (b.dataset.q ? ':' + b.dataset.q : '')).join()`);
+        check('menu with open, start, +1 day, executor, chat, copy', ['open-task', 'cm-quick:start', 'cm-plus1', 'cm-assign', 'cm-copy'].every(a => items.includes(a)), items);
+        await shot('41-06-card-menu');
+        await click('#card-menu [data-act="cm-quick"][data-q="start"]'); await wait(600);
+        check('«Начать работу» from the menu: in progress', data().tasks['demo-t9'].status === 'in_progress', data().tasks['demo-t9'].status);
+        check('… and the focus timer runs', await js(`!!document.querySelector('#focus-bar') && /demo-t9/.test(localStorage.getItem('glavspec.focus') || '')`));
+        await shot('41-07-focus');
+        await js(`location.reload()`); await wait(2500);
+        check('focus survives a restart', await js(`!!document.querySelector('#focus-bar')`));
+        await wait(59000); // a stretch shorter than a minute is not written
+        await click('#focus-bar [data-act="focus-stop"]'); await wait(600);
+        const tl = data().tasks['demo-t9'].timeLog || [];
+        const min = tl.length ? Math.round((Date.parse(tl[0].to) - Date.parse(tl[0].from)) / 60000) : 0;
+        check('the minute is written to the card', tl.length === 1 && min >= 1 && min <= 2 && tl[0].userId === 'u-gip', JSON.stringify(tl));
+        check('bar gone', !(await js(`!!document.querySelector('#focus-bar')`)));
+        await ctx('[data-kb-id="demo-t9"]'); await wait(200);
+        await js(`document.addEventListener('keydown', () => {}, { once: true })`);
+        await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`); await wait(100);
+        check('Esc closes the menu', !(await js(`!!document.querySelector('#card-menu')`)));
+      });
+
+      await step('43: density «Компактно»', async () => {
+        const before = await js(`parseFloat(getComputedStyle(document.querySelector('#shell')).fontSize)`);
+        await click('#btn-view'); await wait(150); await click('[data-act="set-dense"][data-v="1"]'); await wait(200);
+        const after = await js(`parseFloat(getComputedStyle(document.querySelector('#shell')).fontSize)`);
+        const label = await js(`[...document.querySelectorAll('[data-act="set-dense"]')].map(b => b.textContent).join('/')`);
+        check('«Удобно / Компактно», smaller type', label === 'Удобно/Компактно' && after < before, `${label} ${before}→${after}`);
+        await js(`if (!document.querySelector('#view-menu').hidden) document.querySelector('#btn-view').click()`); await wait(150);
+        await shot('41-08-compact');
+        await click('#btn-view'); await wait(150); await click('[data-act="set-dense"][data-v="0"]'); await wait(150);
+        await js(`if (!document.querySelector('#view-menu').hidden) document.querySelector('#btn-view').click()`);
+      });
     } catch (e) { log.push('[smoke error] ' + (e.stack || e)); }
     fs.writeFileSync(path.join(outDir, 'log.txt'), log.join('\n'));
     app.exit(0);

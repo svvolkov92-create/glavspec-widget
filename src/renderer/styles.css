@@ -1602,3 +1602,9 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .hint, .meta, .tab, .kb-col-h .cnt { color: color-mix(in srgb, var(--muted) calc(var(--alpha) * 100%), var(--ink)) }
 .tab[aria-selected="true"] { color: var(--ink) }
 :root[data-theme="tandem"] .tab[aria-selected="true"] { color: var(--accent-text) }
+/* Right-click menu of a card */
+.menu.card-menu { position: fixed; right: auto; top: 0; left: 0; width: 290px; z-index: 95; background: var(--surface); box-shadow: 0 10px 30px rgba(20, 24, 33, .22) }
+.card-menu .cm-h { display: grid; padding: 6px 8px 8px; border-bottom: 1px solid var(--line); margin-bottom: 2px }
+.card-menu .cm-h .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.card-menu button { padding: 6px 8px; justify-content: space-between }
+.card-menu button:hover, .card-menu button:focus-visible { background: var(--accent-soft) }
