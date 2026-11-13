@@ -1531,3 +1531,22 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .solo #app-title { overflow: hidden; text-overflow: ellipsis }
 .solo .drag-fill { flex: 0 0 12px }
 @media (max-width: 640px) { .solo #btn-view .lbl { display: none } }
+
+/* =================== 4.1 =================== */
+/* Gantt: no executor — a red person with «?» instead of the hazard tape */
+#gantt .tl-bar.noexec { border: 1px solid currentColor; background: var(--idle-soft) }
+.noexec-ic { width: 13px; height: 13px; color: var(--bad); vertical-align: -2px; margin-right: 3px; flex: none }
+.tl-bar .noexec-ic { background: #fff; border-radius: 3px; padding: 1px; width: 14px; height: 14px; box-sizing: border-box }
+.sm-chk { font-size: 12.5px; white-space: nowrap; gap: 6px }
+/* Kanban: board scrolls inside itself — sticky column heads, full-height columns */
+.kb.kb-fit { overflow: auto; align-items: stretch; padding-bottom: 0 }
+.kb.kb-fit .kb-col { min-height: 100%; grid-template-rows: auto 1fr; align-self: stretch }
+.kb.kb-fit .kb-col-h { position: sticky; top: 0; z-index: 2; background: var(--surface); border-radius: 8px 8px 0 0 }
+:root[data-theme="tandem"] .kb.kb-fit .kb-col-h { border-radius: 0 }
+.kb-col.over .kb-list { background: color-mix(in srgb, var(--accent) 6%, transparent) }
+.kb-view { position: relative }
+.kb-view > summary { list-style: none; cursor: pointer }
+.kb-view > summary::-webkit-details-marker { display: none }
+.kb-view-m { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 240px; display: grid; gap: 8px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(20, 24, 33, .16) }
+.sm-chk { flex: none; display: inline-flex }
+.filters .sm-chk input, .gantt-bar .sm-chk input { width: 15px; min-width: 0; flex: none; padding: 0 }

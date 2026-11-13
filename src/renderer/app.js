@@ -151,6 +151,9 @@ const state = {
   sort: loadLocal('sort', { key: '', dir: '' }),
   gantt: { from: addDays(todayStr(), -7), days: 63, nameW: 190, group: 'contractor', ...loadLocal('gantt', {}) },
   kanban: { project: '', contractor: '', lanes: '' },
+  // 4.1: inter-section assignments are hidden in the Gantt and the Kanban until the checkbox is on.
+  showAssign: { gantt: false, kanban: false },
+  kbShow: { proj: true, who: true, due: true, flags: true },
   reportScope: 'all',
   win: { compact: false, clickThrough: false, alwaysOnTop: true, opacity: 0.82 },
   today: todayStr(),
@@ -2152,6 +2155,10 @@ function ganttTicks(from, span) {
 }
 
 const ganttModeSeg = () => `<span class="seg g-mode"><button class="btn sm ${state.gantt.mode === 'vac' ? '' : 'on'}" type="button" data-act="g-mode" data-v="work">Работы</button><button class="btn sm ${state.gantt.mode === 'vac' ? 'on' : ''}" type="button" data-act="g-mode" data-v="vac">График отпусков</button></span>`;
+// 4.1: a card without an executor — a red person with a question mark (Gantt bars and the legend).
+const NOEXEC_ICON = '<svg class="noexec-ic" viewBox="0 0 16 16" aria-label="нет исполнителя" role="img"><circle cx="6" cy="4.6" r="2.6" fill="currentColor"/><path d="M1.2 14.5c.3-3.3 2.2-5.2 4.8-5.2s4.5 1.9 4.8 5.2z" fill="currentColor"/><text x="12.6" y="8.6" font-size="8.5" font-weight="800" text-anchor="middle" fill="currentColor" font-family="Arial,sans-serif">?</text></svg>';
+// «Межраздельные задания» — shown or hidden in one view; remembered per view.
+const assignChk = view => `<label class="chk sm-chk" title="Задания смежным разделам (кто кому что выдаёт)"><input type="checkbox" data-act="show-assign" data-v="${view}"${state.showAssign[view] ? ' checked' : ''}> Межраздельные задания</label>`;
 function viewGantt() {
   if (isEmpty()) return emptyState();
   if (state.gantt.mode === 'vac') return viewVacations();
@@ -2162,7 +2169,7 @@ function viewGantt() {
   const inRange = d => d >= from && d <= to;
   const dayW = 100 / span;
   const gq = state.ganttFilter || (state.ganttFilter = { project: '', mark: '' });
-  const active = tasksArr().filter(t => t.status !== 'done' && (!gq.project || t.projectId === gq.project) && (!gq.mark || sectionsOf(t).includes(gq.mark)));
+  const active = tasksArr().filter(t => t.status !== 'done' && (state.showAssign.gantt || t.kind !== 'assign') && (!gq.project || t.projectId === gq.project) && (!gq.mark || sectionsOf(t).includes(gq.mark)));
   const byProject = g.group === 'project', byOwner = g.group === 'owner' && !isSpec();
   const groups = byProject
     ? liveProjects().map(p => ({ key: 'p' + p.id, name: p.name, sub: p.code, tasks: active.filter(t => t.projectId === p.id) }))
@@ -2222,7 +2229,7 @@ function viewGantt() {
       const tone = tm.overdue ? 'bad' : (STATUSES[t.status] || STATUSES.not_started).tone;
       const planEnd = tm.overdue && isDate(t.finish) ? t.finish : e;
       const left = clamp(pos(s)), right = clamp(pos(planEnd) + dayW); // the finish day itself is included
-      const who = byProject ? contractorOf(t)?.name || 'нет подрядчика' : projectOf(t)?.name || '';
+      const who = byProject ? contractorOf(t)?.name || 'нет исполнителя' : projectOf(t)?.name || '';
       const label = `${marksText(t)} · ${who}`;
       const ext = tm.overdue && isDate(t.finish)
         ? (() => { const l = clamp(pos(t.finish) + dayW), r = clamp(pos(state.today) + dayW); return r > l ? `<span class="tl-late" style="left:${l}%;width:${r - l}%;top:${lane * 26 + 6}px" title="Просрочка ${tm.late} дн."></span>` : ''; })() : '';
@@ -2234,7 +2241,7 @@ function viewGantt() {
       const bar = right > left ? `<button class="tl-bar tone-${tone} ${pos(s) < 0 ? 'cut-l' : ''} ${pos(planEnd) + dayW > 100 ? 'cut-r' : ''} ${blocked ? 'blocked' : ''} ${noexec ? 'noexec' : ''} ${awayHit ? 'away' : ''}" type="button"
         data-act="open-task" data-id="${esc(t.id)}" data-bar="${esc(t.id)}"
         style="left:${left}%;width:${Math.max(0.5, right - left)}%;top:${lane * 26 + 3}px"
-        title="${esc(label)}\n${fmtDate(t.start)} → ${fmtDate(t.finish)} · ${esc(tm.text)}${awayHit ? '\nФиниш приходится на отсутствие: ' + esc(absHits(t).filter(h => h.onFinish).map(A.absenceText).join('; ')) : ''}\nТяните — сдвинуть работу, края — изменить старт или финиш">${esc(label)}</button>` : '';
+        title="${esc(label)}\n${fmtDate(t.start)} → ${fmtDate(t.finish)} · ${esc(tm.text)}${awayHit ? '\nФиниш приходится на отсутствие: ' + esc(absHits(t).filter(h => h.onFinish).map(A.absenceText).join('; ')) : ''}\nТяните — сдвинуть работу, края — изменить старт или финиш">${noexec ? NOEXEC_ICON : ''}${esc(label)}</button>` : '';
       return bar + ext + ms;
     }).join('');
     // Staff rows: vacation / sick leave as a hatched band over the row.
@@ -2256,6 +2263,7 @@ function viewGantt() {
     <div class="gantt-bar one-row">
       <select id="gq-project" aria-label="Проект" class="sm-sel"><option value="">Все проекты</option>${liveProjects().map(p => `<option value="${esc(p.id)}"${gq.project === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
       <select id="gq-mark" aria-label="Раздел" class="sm-sel"><option value="">Все разделы</option>${normalizeMarks(tasksArr().filter(t => t.status !== 'done').flatMap(sectionsOf)).map(m => `<option value="${esc(m)}"${gq.mark === m ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select>
+      ${assignChk('gantt')}
       <button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="1" data-keys="${esc(groups.map(g => 'g:' + g.key).join(' '))}" title="Свернуть все строки">▸ все</button><button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="0" data-keys="${esc(groups.map(g => 'g:' + g.key).join(' '))}" title="Развернуть все строки">▾ все</button>
       <div class="seg" role="group" aria-label="Группировка"><button class="btn sm ${byProject || byOwner ? '' : 'on'}" type="button" data-act="g-group" data-group="contractor">По подрядчикам</button>${isSpec() ? '' : `<button class="btn sm ${byOwner ? 'on' : ''}" type="button" data-act="g-group" data-group="owner">По ответственным</button>`}<button class="btn sm ${byProject ? 'on' : ''}" type="button" data-act="g-group" data-group="project">По проектам</button></div>
       <div class="seg" role="group" aria-label="Масштаб">${preset}</div>
@@ -2266,7 +2274,7 @@ function viewGantt() {
     <div class="tablewrap"><div class="tl" id="gantt" style="--tl-name:${g.nameW}px">${head}${rows || `<div class="none">${gq.project || gq.mark ? 'Под выбранный проект и раздел незавершённых карточек нет — сбросьте фильтр над диаграммой.' : 'Нет незавершённых карточек. Когда у карточек появятся старт и финиш, здесь будет видно, кто чем занят и где пересекаются сроки.'}</div>`}</div></div>
     <div class="tl-legend hint"><span class="tl-key tone-work"></span>в работе <span class="tl-key tone-idle"></span>не начат <span class="tl-key tone-review"></span>на проверке
       <span class="tl-key tone-warn"></span>на доработке <span class="tl-key tone-bad"></span>срок сорван <span class="tq-ms"></span>контрольная точка
-      <span class="tl-arrow"></span>зависимость <span class="tl-key tl-key-hol"></span>выходные и праздники
+      <span class="tl-arrow"></span>зависимость <span class="tl-key tl-key-hol"></span>выходные и праздники ${NOEXEC_ICON}нет исполнителя
       ${unofficial.length ? `<span class="cal-note">Календарь на ${unofficial.join(', ')} г. — по общему правилу (постановления о переносах нет в программе).</span>` : ''}</div>
   </section>`;
 }
@@ -2490,23 +2498,43 @@ document.addEventListener('wheel', e => {
 /* ---------- Kanban ---------- */
 const KANBAN_COLS = ['not_started', 'in_progress', 'revision', 'review', 'paused', 'done'];
 const KANBAN_DONE_LIMIT = 15;
+// What a Kanban card shows (4.1): project, executor, deadline, flags — each can be switched off for a compact board.
+const KB_SHOW = [['proj', 'Проект и название'], ['who', 'Исполнитель'], ['due', 'Сроки'], ['flags', 'Оплаты и контрольные точки']];
+function kbViewMenu() {
+  const on = KB_SHOW.filter(([k]) => state.kbShow[k]).length;
+  return `<details class="kb-view"><summary class="btn sm" title="Что показывать на карточках">Вид карточек${on < KB_SHOW.length ? ` · ${on}/${KB_SHOW.length}` : ''}</summary>
+    <div class="kb-view-m">${KB_SHOW.map(([k, l]) => `<label class="chk"><input type="checkbox" data-act="kb-show" data-v="${k}"${state.kbShow[k] ? ' checked' : ''}> ${l}</label>`).join('')}
+    <div class="row-in"><button class="btn sm" type="button" data-act="kb-show-all" data-v="0">Кратко</button><button class="btn sm" type="button" data-act="kb-show-all" data-v="1">Подробно</button></div></div></details>`;
+}
 function kanbanCard(t) {
-  const p = projectOf(t), c = contractorOf(t), tm = timing(t);
+  const p = projectOf(t), c = contractorOf(t), tm = timing(t), v = state.kbShow;
   const due = L.paymentPlan(t, state.today).dueNow;
   const msLate = L.milestonesOf(t, state.today).overdue.length;
+  const flags = v.flags && ((due > 0 && canMoney()) || msLate);
   return `<article class="kb-card ${c ? '' : 'noexec'} ${tm.overdue ? 'late' : ''}" draggable="true" data-kb-id="${esc(t.id)}" data-act="open-task" data-id="${esc(t.id)}" role="button" tabindex="0"
-      title="${c ? '' : 'Исполнитель не назначен. '}Перетащите карточку в другую колонку, чтобы сменить статус">
+      title="${esc(p?.name || '')}${t.title ? ' · ' + esc(t.title) : ''}\n${c ? '' : 'Исполнитель не назначен. '}Перетащите карточку в другую колонку, чтобы сменить статус">
     <div class="kb-top">${marksHtml(t)}${tm.overdue ? '<span class="chip tone-bad">срок сорван</span>' : ''}</div>
-    <div class="kb-proj">${esc(p?.name || '—')}${t.title ? ` · ${esc(t.title)}` : ''}</div>
-    <div class="kb-who">${c ? esc(c.name) : '<b class="kb-noexec">нет подрядчика</b>'}</div>
-    <div class="kb-foot"><span class="due ${tm.cls}">${esc(tm.text)}</span><span class="num hint">${fmtDate(t.finish)}</span></div>
-    ${(due > 0 && canMoney()) || msLate ? `<div class="kb-flags">${msLate ? `<span class="tag bad">КТ сорвана</span>` : ''}${due > 0 && canMoney() ? `<span class="tag warn">пора платить ${money(due)}</span>` : ''}</div>` : ''}
+    ${v.proj ? `<div class="kb-proj">${esc(p?.name || '—')}${t.title ? ` · ${esc(t.title)}` : ''}</div>` : ''}
+    ${v.who ? `<div class="kb-who">${c ? esc(c.name) : '<b class="kb-noexec">нет исполнителя</b>'}</div>` : ''}
+    ${v.due ? `<div class="kb-foot"><span class="due ${tm.cls}">${esc(tm.text)}</span><span class="num hint">${fmtDate(t.finish)}</span></div>` : ''}
+    ${flags ? `<div class="kb-flags">${msLate ? `<span class="tag bad">КТ сорвана</span>` : ''}${due > 0 && canMoney() ? `<span class="tag warn">пора платить ${money(due)}</span>` : ''}</div>` : ''}
   </article>`;
 }
+// 4.1: the single board scrolls inside itself, so the column heads stay on top and every column is full height
+// (a card can be dropped anywhere in it, also below the last card).
+function fitKanban() {
+  const kb = $('#kb-board');
+  if (!kb) return;
+  const top = kb.getBoundingClientRect().top, room = window.innerHeight - top - 30;
+  kb.style.height = `${Math.max(320, room)}px`;
+}
+window.addEventListener('resize', () => { if (state.tab === 'kanban') fitKanban(); });
+// Re-render but keep an open <details> menu open.
+function renderKeepMenu(sel) { renderNow(); const d = $(sel); if (d) d.open = true; }
 function viewKanban() {
   if (isEmpty()) return emptyState();
   const f = state.kanban;
-  const list = tasksArr().filter(t => (!f.project || t.projectId === f.project) && (!f.contractor || (f.contractor === '__none' ? !contractorOf(t) : t.contractorId === f.contractor)));
+  const list = tasksArr().filter(t => (state.showAssign.kanban || t.kind !== 'assign') && (!f.project || t.projectId === f.project) && (!f.contractor || (f.contractor === '__none' ? !contractorOf(t) : t.contractorId === f.contractor)));
   const opt = (v, l, sel) => `<option value="${esc(v)}"${v === sel ? ' selected' : ''}>${esc(l)}</option>`;
   const noExec = list.filter(t => !contractorOf(t) && t.status !== 'done').length;
   const lanes = f.lanes === 'owner' && !isSpec();
@@ -2527,7 +2555,7 @@ function viewKanban() {
     </section>`;
   }).join('');
   // Swimlanes: one row of columns per responsible person (by the main owner, so a card appears once).
-  const body = !lanes ? `<div class="kb">${colsOf(list)}</div>` : [...liveUsers().sort(byName), null].map(u => {
+  const body = !lanes ? `<div class="kb kb-fit" id="kb-board">${colsOf(list)}</div>` : [...liveUsers().sort(byName), null].map(u => {
     const own = list.filter(t => (u ? t.ownerId === u.id : !ownerOf(t)));
     if (!own.length) return '';
     const key = 'k:' + (u ? u.id : 'none'), fold = isFolded(key), active = own.filter(t => t.status !== 'done').length;
@@ -2540,6 +2568,7 @@ function viewKanban() {
       <select id="kb-project" aria-label="Проект">${opt('', 'Все проекты', f.project)}${liveProjects().map(p => opt(p.id, p.name, f.project)).join('')}</select>
       <select id="kb-contractor" aria-label="Подрядчик">${opt('', 'Все подрядчики', f.contractor)}${opt('__none', 'Без подрядчика', f.contractor)}${contractorsArr().map(c => opt(c.id, c.name, f.contractor)).join('')}</select>
       ${isSpec() ? '' : `<span class="seg"><button class="btn sm ${lanes ? '' : 'on'}" type="button" data-act="kb-lanes" data-v="">Одной доской</button><button class="btn sm ${lanes ? 'on' : ''}" type="button" data-act="kb-lanes" data-v="owner">По ответственным</button></span>`}
+      ${assignChk('kanban')}${kbViewMenu()}
       ${noExec ? `<span class="kb-warn">Без подрядчика: <b>${noExec}</b></span>` : ''}
       <span class="help-dot" tabindex="0" title="Перетаскивайте карточки между колонками, чтобы менять статус: можно только туда, куда ведут кнопки карточки (например, «В работе» → «На проверке»).">?</span>
     </div>
@@ -2962,6 +2991,7 @@ function renderNow() {
   renderMsg(); msgNotify();
   if (active === 'f-q') { const el = $('#f-q'); el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* not a text input any more */ } }
   if (state.tab === 'gantt') drawGanttLinks();
+  if (state.tab === 'kanban') fitKanban();
   if (state.drawer?.kind === 'task' && state.drawer.id) { renderPayments(); renderPlanPreview(); renderTalk(); if (state.drawer.tab === 'log') loadTaskLog(state.drawer.id); }
 }
 
@@ -5751,6 +5781,7 @@ document.addEventListener('click', e => {
     case 'set-dense': dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); break;
     case 'set-anim': anim = el.dataset.v === '1'; saveLocal('anim', anim); applyAnim(); renderViewMenu(); break;
     case 'kb-lanes': state.kanban.lanes = el.dataset.v; saveLocal('kbLanes', el.dataset.v); renderNow(); break;
+    case 'kb-show-all': for (const [k] of KB_SHOW) state.kbShow[k] = el.dataset.v === '1'; saveLocal('kbShow', state.kbShow); renderKeepMenu('.kb-view'); break;
     case 'nav-pos': setNav({ pos: el.dataset.v }); break;
     case 'nav-mini': setNav({ mini: !nav.mini }); break;
     case 'nav-mini-chk': setNav({ mini: el.checked }); break;
@@ -5978,6 +6009,8 @@ document.addEventListener('change', e => {
   }
   if (t.dataset.pd && /^phases\.|^milestones\./.test(t.dataset.pd)) { const y = $('#dform .drawer-b')?.scrollTop; renderCustomer(); if (y != null) $('#dform .drawer-b').scrollTop = y; return; }
   if (t.dataset.act === 'toggle-budget') { toggleBudget(t.dataset.id, t.checked); return; }
+  if (t.dataset.act === 'show-assign') { state.showAssign[t.dataset.v] = t.checked; saveLocal('showAssign', state.showAssign); renderNow(); return; }
+  if (t.dataset.act === 'kb-show') { state.kbShow[t.dataset.v] = t.checked; saveLocal('kbShow', state.kbShow); renderKeepMenu('.kb-view'); return; }
   if (t.id === 'kb-project') { state.kanban.project = t.value; render(); return; }
   if (t.id === 'kb-contractor') { state.kanban.contractor = t.value; render(); return; }
   if (t.id === 'rep-scope') { state.reportScope = t.value; updateScopeLabels(); return; }
@@ -6068,6 +6101,8 @@ applyNav();
 applyDense();
 applyAnim();
 state.kanban.lanes = loadLocal('kbLanes', '') || '';
+state.showAssign = { ...state.showAssign, ...loadLocal('showAssign', {}) };
+state.kbShow = { ...state.kbShow, ...loadLocal('kbShow', {}) };
 $('#app').addEventListener('scroll', rememberScroll, { passive: true });
 if (SOLO) {
   document.body.classList.add('solo', 'solo-' + SOLO.kind);
