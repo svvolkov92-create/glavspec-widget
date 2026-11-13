@@ -1588,3 +1588,17 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
   :focus-visible { outline: 2px solid Highlight !important }
   .shell { text-shadow: none !important }
 }
+/* Transparency (4.1, user's list 08.11): controls stay solid whatever the window transparency —
+   the user chip and «Требует внимания», the active tab / left-menu item and its counter, active segments,
+   buttons (+ Сотрудник, + Подрядчик, Отчёты и данные, Создать, Свернуть), checkboxes, «Сообщения». */
+.user-chip, .att-btn, .msg-fab, .nav-mini-btn { background: var(--surface) }
+.btn:not(.ghostbtn):not(.primary):not(.on):not(.danger.solid) { background: var(--surface) }
+:root[data-theme="tandem"] .btn:not(.ghostbtn):not(.primary):not(.on):not(.danger.solid) { background: var(--surface) }
+.tab[aria-selected="true"], .tab .cnt { background-color: var(--surface) }
+:root[data-theme="tandem"] .tab[aria-selected="true"] { background-color: var(--accent-soft) }
+.seg > .btn.on, :root[data-theme="tandem"] .seg > .btn.on, :root[data-theme="tandem"] .btn.on { background: color-mix(in srgb, var(--accent) 14%, var(--surface)) }
+.chk input[type="checkbox"] { background: var(--surface) }
+/* Grey hints get darker as the window gets more transparent, so they stay readable */
+.hint, .meta, .tab, .kb-col-h .cnt { color: color-mix(in srgb, var(--muted) calc(var(--alpha) * 100%), var(--ink)) }
+.tab[aria-selected="true"] { color: var(--ink) }
+:root[data-theme="tandem"] .tab[aria-selected="true"] { color: var(--accent-text) }

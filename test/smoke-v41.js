@@ -98,6 +98,18 @@ app.on('browser-window-created', (_e, win) => {
         check('27: full again', await js(`!!document.querySelector('#kb-board .kb-proj')`));
         await shot('41-04-kanban');
       });
+
+      await step('18: solid controls at 45 % transparency', async () => {
+        await js(`window.api.setTheme('tandem')`); await wait(200);
+        await click('#btn-view'); await wait(150); await setVal('#alpha', '45'); await wait(200); await click('#btn-view'); await wait(150);
+        await click('[data-act="tab"][data-id="people"]'); await wait(400);
+        const a = {};
+        for (const [k, sel] of [['user', '#btn-user'], ['att', '.att-btn'], ['create', '#btn-create'], ['fab', '.msg-fab'], ['btn', 'main .btn:not(.ghostbtn):not(.primary):not(.on)']]) a[k] = await alphaOf(sel);
+        check('user chip, «Требует внимания», buttons, «Сообщения» solid', Object.values(a).every(v => v > 0.95), JSON.stringify(a));
+        check('active tab solid', (await alphaOf('.tab[aria-selected="true"]')) > 0.95);
+        await shot('41-05-transparency');
+        await click('#btn-view'); await wait(150); await setVal('#alpha', '82'); await wait(150); await click('#btn-view'); await wait(150);
+      });
     } catch (e) { log.push('[smoke error] ' + (e.stack || e)); }
     fs.writeFileSync(path.join(outDir, 'log.txt'), log.join('\n'));
     app.exit(0);
