@@ -57,11 +57,12 @@
   function customerTeam(p) {
     const dirs = u => (u.directions || []).map(id => A.DIRECTIONS.find(d => d.id === id)?.label.toLowerCase()).filter(Boolean).join(', ');
     const role = u => (u.role === 'gip' ? 'ГИП' : `${u.role === 'chief' ? 'главный специалист' : 'инженер'}${dirs(u) ? ', ' + dirs(u) : ''}`);
-    return (Array.isArray(p.members) ? p.members : []).filter(id => id !== p.contactId).map(id => store.data.users[id]).filter(u => u && !u.deletedAt).map(u => ({ name: u.name, role: role(u) }));
+    return (Array.isArray(p.members) ? p.members : []).filter(id => id !== (p.contactId || p.gipId)).map(id => store.data.users[id]).filter(u => u && !u.deletedAt).map(u => ({ name: u.name, role: role(u) }));
   }
   // The GIP contact shown to the customer: the project's «контакт для заказчика».
   function customerContact(p) {
-    const u = p.contactId ? store.data.users[p.contactId] : null;
+    const id = p.contactId || p.gipId; // no contact picked → the project's GIP (4.1)
+    const u = id ? store.data.users[id] : null;
     return u && !u.deletedAt ? { name: u.name, role: A.ROLES[u.role]?.label || '', phone: u.phone || '', email: u.email || '' } : null;
   }
 

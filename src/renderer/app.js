@@ -1667,7 +1667,7 @@ function viewProjectPage(p) {
       ${inTasks.length ? `<span class="hint">Работают в задачах, но не в участниках: ${inTasks.map(id => esc(state.users.get(id).name)).join(', ')}</span><button class="btn ghostbtn sm" type="button" data-act="member-add-tasks">Добавить их</button>` : ''}</div>` : ''}</section>`;
 
   const head = `<div class="pt-top">${SOLO ? '' : '<button class="btn ghostbtn sm" type="button" data-act="project-back">← Все проекты</button>'}
-    <h2>${esc(p.name)}</h2>${p.archived ? '<span class="chip tone-idle">в архиве</span>' : projectStageChip(p)}${code ? `<span class="pcode mono">${esc(code)}</span>` : ''}${p.client ? `<span class="meta">${esc(p.client)}</span>` : ''}
+    <h2>${esc(p.name)}</h2>${p.archived ? '<span class="chip tone-idle">в архиве</span>' : projectStageChip(p)}${code ? `<span class="pcode mono">${esc(code)}</span>` : ''}${p.client ? `<span class="meta">${esc(p.client)}</span>` : ''}${projectGip(p) ? `<span class="meta">ГИП: ${esc(projectGip(p).name)}</span>` : ''}
     <span class="spacer"></span>${winBtn('project', p.id)}
     ${p.folder ? `<button class="btn ghostbtn sm" data-act="open-folder" data-id="${esc(p.id)}" type="button" title="${esc(p.folder)}">Папка проекта</button>` : ''}
     <button class="btn ghostbtn sm" type="button" data-act="techcard" title="Этапы, волны, задания смежникам">Техкарта</button>
@@ -4783,6 +4783,12 @@ async function askDocNames(format) {
 }
 
 /* ---------- project & contractor ---------- */
+// The project's GIP: any GIP of the team; a project made before 4.1 may name someone else — kept in the list.
+function gipOptions(sel) {
+  const list = liveUsers().filter(u => u.role === 'gip' || u.id === sel).sort(byName);
+  return `<option value="">— не назначен —</option>${list.map(u => `<option value="${esc(u.id)}"${u.id === sel ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}`;
+}
+const projectGip = p => (p?.gipId && state.users.get(p.gipId)) || null;
 function openProject(id, tab = 'main') {
   const p = id ? state.projects.get(id) : {};
   if (!p) return toast('Проект не найден.', true);
@@ -4798,7 +4804,8 @@ function openProject(id, tab = 'main') {
     <div class="dpanel" data-panel="main"${ptab === 'main' ? '' : ' hidden'}><div class="fgrid">
       <div class="f wide"><label class="req" for="pr-name">Название объекта</label><input id="pr-name" name="name" value="${esc(p.name || '')}" placeholder="ЖК «Северный», корпус 2" maxlength="160"></div>
       <div class="f"><label for="pr-code">Шифр</label><input id="pr-code" name="code" value="${esc(p.code || '')}" placeholder="0425-24" maxlength="40"></div>
-      <div class="f"><label for="pr-client">Заказчик / ГИП</label><input id="pr-client" name="client" value="${esc(p.client || '')}" maxlength="160"></div>
+      <div class="f"><label for="pr-client">Заказчик</label><input id="pr-client" name="client" value="${esc(p.client || '')}" placeholder="ООО «…»" maxlength="160"></div>
+      <div class="f"><label for="pr-gip">ГИП</label><select id="pr-gip" name="gipId">${gipOptions(id ? p.gipId : (A.isGip(state.me) ? state.me.id : ''))}</select></div>
       <div class="f"><label for="pr-status">Стадия проекта</label><select id="pr-status" name="status"><option value="">— не задана —</option>${Object.entries(L.PROJECT_STATUSES).map(([k, s]) => `<option value="${k}"${p.status === k ? ' selected' : ''}>${esc(s.label)}</option>`).join('')}</select></div>
       ${id ? '' : '<label class="chk f wide gen-chk"><input type="checkbox" id="pr-gen" data-transient checked> Сразу открыть генератор состава: проектная документация по ПП РФ № 87 и рабочая документация</label>'}
       <details class="f wide more"${more ? ' open' : ''}><summary>Дополнительно: папка проекта, примечание</summary><div class="fgrid">
@@ -4867,7 +4874,7 @@ async function submitSimple(keepOpen = false) {
   const created = { createdAt: new Date().toISOString() };
   let ok = false;
   if (kind === 'project') {
-    const data = { name: val('name'), code: val('code'), client: val('client'), status: L.PROJECT_STATUSES[val('status')] ? val('status') : '', folder: val('folder'), note: val('note') };
+    const data = { name: val('name'), code: val('code'), client: val('client'), gipId: state.users.has(val('gipId')) ? val('gipId') : '', status: L.PROJECT_STATUSES[val('status')] ? val('status') : '', folder: val('folder'), note: val('note') };
     if (!data.name) return formError('Укажите название объекта.');
     if (id) {
       if (projectDraftData().error) { const e = projectDraftData(); return formError(e.error, e.tab); }

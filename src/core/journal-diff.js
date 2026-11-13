@@ -47,6 +47,7 @@ const FIELDS = {
   },
   projects: {
     name: ['Название', v => v || '—'], code: ['Шифр', v => v || '—'], client: ['Заказчик', v => v || '—'],
+    gipId: ['ГИП', (v, ctx) => ctx.users?.[v]?.name || '—'],
     folder: ['Папка', v => v || '—'], archived: ['В архиве', yesNo], note: ['Примечание', () => 'изменено'],
   },
   users: {

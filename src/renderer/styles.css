@@ -1148,6 +1148,8 @@ details.more[open] { padding-bottom: 10px }
 :root[data-theme="tandem"] .btn.ghostbtn { background: none; border-color: transparent; color: var(--muted); min-height: 28px; padding: 0 8px }
 :root[data-theme="tandem"] .btn.ghostbtn:hover { color: var(--accent-text); background: var(--accent-soft) }
 :root[data-theme="tandem"] .btn.danger { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)) }
+:root[data-theme="tandem"] .btn.danger.solid { background: var(--bad); border-color: var(--bad); color: #fff }
+:root[data-theme="tandem"] .btn.danger.solid:hover { background: color-mix(in srgb, var(--bad) 88%, #000) }
 :root[data-theme="tandem"] .btn.on, :root[data-theme="tandem"] .office-panel .btn.on, :root[data-theme="tandem"] .stage-bar .btn.on, :root[data-theme="tandem"] .g-mode .btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); box-shadow: inset 0 -2px 0 var(--accent) }
 :root[data-theme="tandem"] .btn.burn, :root[data-theme="tandem"] #btn-create.primary { }
 :root[data-theme="tandem"] .seg { display: inline-flex; gap: 0 !important; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent) }
