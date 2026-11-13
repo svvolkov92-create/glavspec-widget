@@ -56,7 +56,7 @@ test('mark kinds: water supply and sewerage are told apart', () => {
   assert.equal(k('НК'), 'sewer');
   assert.equal(k('К2'), 'sewer');
   assert.equal(k('ОВ'), 'ov');
-  assert.equal(k('АР'), '');
+  assert.equal(k('АР'), 'ar'); assert.equal(k('ООС'), ''); assert.equal(k('ПОД'), 'pos'); assert.equal(k('АСКУЭ'), 'ss');
   assert.deepEqual(A.contractorKinds({ specialty: 'ВК, НК, ЭОМ' }), ['water', 'sewer', 'el']);
   assert.equal(A.userKind({ directions: ['vk', 'el'] }), 'water');
 });

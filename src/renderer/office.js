@@ -9,7 +9,7 @@
     blue: '#1D4E9E', red: '#B42318', redSoft: '#F7E3E0', amber: '#7A5000', amberSoft: '#F5EBD3',
     green: '#1F6B45', greenSoft: '#DDEFE3', violet: '#5A3FA0', violetSoft: '#EDE8F7',
   };
-  const KIND_COLOR = { el: '#E8820C', ss: '#2E8B57', water: '#1D6FD1', sewer: '#8B5A2B', ov: '#D23C2C', '': '#5A6468' };
+  const KIND_COLOR = { ar: '#7A4FB0', kr: '#4A5A68', pos: '#B07A00', el: '#E8820C', ss: '#2E8B57', water: '#1D6FD1', sewer: '#8B5A2B', ov: '#D23C2C', '': '#5A6468' };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const f1 = v => (Math.round(v * 10) / 10).toString();
 

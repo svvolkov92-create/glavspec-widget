@@ -193,7 +193,7 @@ app.on('browser-window-created', (_e, win) => {
       await step('people', async () => {
         await click('[data-act="tab"][data-id="people"]'); await wait(300);
         check('staff direction icons', await js(`document.querySelectorAll('.card.staff .kicons .kico').length`) >= 3);
-        check('contractors grouped by direction', /Электрика/.test(await text('.co-groups')) && /Слаботочка/.test(await text('.co-groups')));
+        check('contractors grouped by direction', /Электрики/.test(await text('.co-groups')) && /Слаботочники/.test(await text('.co-groups')));
         await click('[data-act="cg-all"][data-on="1"]'); await wait(200);
         await js(`document.querySelector('[data-act="co-toggle"]').click()`); await wait(200);
         check('contractor opens to a card', await js(`!!document.querySelector('.co-row.open .card')`));

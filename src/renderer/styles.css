@@ -898,6 +898,9 @@ section.panel[id^="p-"], .cards > .card, .kb-lane, #gantt > .tl-row:not(.tl-head
 .code.k-water { border-left-color: #1D6FD1 }
 .code.k-sewer { border-left-color: #8B5A2B }
 .code.k-ov { border-left-color: #D23C2C }
+.code.k-ar { border-left-color: #7A4FB0 }
+.code.k-kr { border-left-color: #4A5A68 }
+.code.k-pos { border-left-color: #B07A00 }
 .code .kico { width: 11px; height: 11px }
 
 /* header: attention button, «Окно» menu, create menu */

@@ -26,10 +26,13 @@ const ICON = {
 // Direction icons (filled, own colours): электрика — молния, слаботочка — чип, водоснабжение — кран с каплей,
 // водоотведение — капли, отопление и вентиляция — ветерок.
 const KIND = {
-  el: { label: 'Электрика', color: '#E8820C', svg: '<path d="M9.2 1.5 3.6 9h3.6l-1 5.5L12.4 7H8.7z" fill="currentColor"/>' },
-  ss: { label: 'Слаботочка', color: '#2E8B57', svg: '<rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor"/><rect x="6.2" y="6.2" width="3.6" height="3.6" rx=".5" fill="#fff" opacity=".85"/><path d="M6 1.8v2M10 1.8v2M6 12.2v2M10 12.2v2M1.8 6h2M1.8 10h2M12.2 6h2M12.2 10h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' },
+  ar: { label: 'Архитекторы', color: '#7A4FB0', svg: '<path d="M8 1.6 1.6 6.4v1.4h12.8V6.4z" fill="currentColor"/><rect x="2.8" y="8.6" width="2.2" height="4.6" fill="currentColor"/><rect x="6.9" y="8.6" width="2.2" height="4.6" fill="currentColor"/><rect x="11" y="8.6" width="2.2" height="4.6" fill="currentColor"/><rect x="1.6" y="13.4" width="12.8" height="1.4" fill="currentColor"/>' },
+  kr: { label: 'Конструкторы', color: '#4A5A68', svg: '<path d="M1.8 3h12.4v2.4H9.3v5.2h4.9V13H1.8v-2.4h4.9V5.4H1.8z" fill="currentColor"/>' },
+  el: { label: 'Электрики', color: '#E8820C', svg: '<path d="M9.2 1.5 3.6 9h3.6l-1 5.5L12.4 7H8.7z" fill="currentColor"/>' },
+  ss: { label: 'Слаботочники', color: '#2E8B57', svg: '<rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor"/><rect x="6.2" y="6.2" width="3.6" height="3.6" rx=".5" fill="#fff" opacity=".85"/><path d="M6 1.8v2M10 1.8v2M6 12.2v2M10 12.2v2M1.8 6h2M1.8 10h2M12.2 6h2M12.2 10h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' },
   water: { label: 'Водоснабжение', color: '#1D6FD1', svg: '<path d="M2 5h6.5a2.5 2.5 0 0 1 2.5 2.5V9H9.2V7.6a.9.9 0 0 0-.9-.9H2z" fill="currentColor"/><rect x="4.2" y="2.4" width="1.6" height="2.8" rx=".5" fill="currentColor"/><path d="M3 2.4h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M10.1 10.6c.9 1.2 1.4 2 1.4 2.6a1.4 1.4 0 0 1-2.8 0c0-.6.5-1.4 1.4-2.6z" fill="currentColor"/>' },
   sewer: { label: 'Водоотведение', color: '#8B5A2B', svg: '<path d="M5.2 2.2c1.5 2 2.3 3.3 2.3 4.3a2.3 2.3 0 0 1-4.6 0c0-1 .8-2.3 2.3-4.3zM11 6.4c1.2 1.6 1.9 2.7 1.9 3.5a1.9 1.9 0 0 1-3.8 0c0-.8.7-1.9 1.9-3.5zM6.4 10.2c.9 1.2 1.4 2 1.4 2.6a1.4 1.4 0 0 1-2.8 0c0-.6.5-1.4 1.4-2.6z" fill="currentColor"/>' },
+  pos: { label: 'ПОС', color: '#B07A00', svg: '<path d="M3 14.4V2.2h1.8v12.2zM4.8 2.2h9.4v1.6H4.8zM12.2 3.8v3.6" stroke="currentColor" stroke-width="1" fill="currentColor"/><rect x="10.8" y="7.4" width="2.8" height="2.2" fill="currentColor"/><path d="M1.4 14.4h5.4" stroke="currentColor" stroke-width="1.6"/>' },
   ov: { label: 'Отопление и вентиляция', color: '#D23C2C', svg: '<path d="M1.8 5.6h7.4a1.9 1.9 0 1 0-1.9-1.9M1.8 8.4h10.3a1.9 1.9 0 1 1-1.9 1.9M1.8 11.2h5.2a1.6 1.6 0 1 1-1.6 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
 };
 const kindIcon = (k, cls = '') => (KIND[k] ? `<svg class="kico ${cls}" viewBox="0 0 16 16" style="color:${KIND[k].color}" aria-label="${KIND[k].label}" role="img"><title>${KIND[k].label}</title>${KIND[k].svg}</svg>` : '');
@@ -832,7 +835,7 @@ function progressDashboard(list) {
   const all = P(list);
   const projects = liveProjects().map(pr => ({ pr, p: P(list.filter(t => t.projectId === pr.id)) })).filter(x => x.p.count).sort((a, b) => b.p.lag - a.p.lag);
   const dirOf = t => A.directionOfMark(sectionsOf(t)[0])?.id || '';
-  const dirs = [...A.DIRECTIONS.map(d => ({ id: d.id, label: d.label })), { id: '', label: 'Прочие разделы' }]
+  const dirs = [...A.DIRECTIONS.map(d => ({ id: d.id, label: d.label })), { id: '', label: 'Прочие' }]
     .map(d => ({ d, p: P(list.filter(t => dirOf(t) === d.id)) })).filter(x => x.p.count);
   const chiefOf = t => { const o = ownerOf(t); return !o ? '' : o.role === 'specialist' ? o.chiefId || '' : o.role === 'chief' ? o.id : ''; };
   const groups = [...usersByRole('chief').map(c => ({ id: c.id, label: `Группа: ${c.name}` })), { id: '', label: 'ГИП / без группы' }]
@@ -1943,7 +1946,7 @@ let peopleMode = loadLocal('peopleMode', 'cards');
 const cgOpen = new Set(loadLocal('cgOpen', []));
 const coOpen = new Set(loadLocal('coOpen', []));
 function toggleSet(set, key, store) { if (set.has(key)) set.delete(key); else set.add(key); saveLocal(store, [...set]); renderNow(); }
-const CONTRACTOR_GROUPS = [['el', 'Электрика'], ['ss', 'Слаботочка'], ['water', 'Водоснабжение'], ['sewer', 'Водоотведение'], ['ov', 'Отопление и вентиляция'], ['', 'Прочие и без специализации']];
+const CONTRACTOR_GROUPS = [['ar', 'Архитекторы'], ['kr', 'Конструкторы'], ['el', 'Электрики'], ['ss', 'Слаботочники'], ['water', 'Водоснабжение'], ['sewer', 'Водоотведение'], ['ov', 'Отопление и вентиляция'], ['pos', 'ПОС'], ['', 'Прочие и без специализации']];
 function contractorRow(c, list) {
   const ct = list.filter(t => t.contractorId === c.id), x = totals(ct);
   const dueNow = ct.reduce((a, t) => a + L.cents(L.paymentPlan(t, state.today).dueNow), 0) / 100;
@@ -3408,7 +3411,7 @@ function taskAssignsBlock(t) {
 function marksPicker(selected) {
   const known = new Set(MARK_GROUPS.flatMap(g => g.marks.map(m => m[0])));
   const custom = selected.filter(m => !known.has(m));
-  const groups = MARK_GROUPS.map((g, i) => `<fieldset class="mk-group" data-dir="${esc(A.DIRECTIONS[i]?.id || '')}"><legend>${esc(g.title)}</legend><div class="mk-grid">${g.marks.map(([code, name]) =>
+  const groups = MARK_GROUPS.map(g => `<fieldset class="mk-group" data-dir="${esc(g.dir || '')}"><legend>${esc(g.title)}</legend><div class="mk-grid">${g.marks.map(([code, name]) =>
     `<label class="mk" title="${esc(name)}"><input type="checkbox" name="mark" value="${esc(code)}"${selected.includes(code) ? ' checked' : ''}><span class="code">${esc(code)}</span><small>${esc(name)}</small></label>`).join('')}</div></fieldset>`).join('');
   return `<div class="f wide marks-f">
     <div class="mk-head"><span class="lbl req" id="marks-lbl">Разделы</span><span class="hint" id="marks-count"></span></div>

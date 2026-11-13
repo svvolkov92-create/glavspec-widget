@@ -79,7 +79,7 @@ test('titles', () => {
   assert.equal(A.titleFor(U('g')), 'Пульт ГИПа');
   assert.equal(A.titleFor(U('c1')), 'Пульт главспеца');
   assert.equal(A.titleFor(U('s1')), 'Пульт специалиста');
-  assert.deepEqual(A.directionLabels(U('c1')), ['Электрика', 'Слаботочка']);
+  assert.deepEqual(A.directionLabels(U('c1')), ['Электрики', 'Слаботочники']);
 });
 
 test('cards go only to people with the needed direction', () => {
@@ -89,7 +89,7 @@ test('cards go only to people with the needed direction', () => {
     { id: 's', role: 'specialist', name: 'Зайцев', directions: ['vk'], chiefId: 'c' },
   ];
   const A2 = require('../src/renderer/access.js');
-  assert.deepEqual(A2.profileGaps(users[2], { sections: ['ВК', 'АР'] }), []);
+  assert.deepEqual(A2.profileGaps(users[2], { sections: ['ВК', 'ООС'] }), []); // ООС — «Прочие», no direction
   assert.equal(A2.profileGaps(users[2], { sections: ['ОВ2'] })[0].direction.id, 'ov');
   assert.equal(A2.profileGaps(users[0], { sections: ['ОВ'] }).length, 0);
   const t = { ownerId: 'c', sections: ['ОВ'] };
@@ -109,7 +109,7 @@ test('co-owners see the card; confirmed misfits pass', () => {
   assert.equal(A.canSeeTask(users[2], t, users), true);
   assert.equal(A.canSeeTask(users[1], t, users), false);
   const moved = { ...t, coOwnerIds: ['s'] };
-  assert.match(A.checkWrite(users[0], 'tasks', t, moved, users), /не подходит по специальности.*Орлов делает: Электрика/);
+  assert.match(A.checkWrite(users[0], 'tasks', t, moved, users), /не подходит по специальности.*Орлов делает: Электрики/);
   assert.equal(A.checkWrite(users[0], 'tasks', t, { ...moved, profileOk: true }, users), null);
   assert.deepEqual(A.contractorGaps({ specialty: 'ЭОМ, ЭС' }, { sections: ['ЭОМ1', 'СКС'] }), ['СКС']);
   assert.deepEqual(A.contractorGaps({ specialty: '' }, { sections: ['СКС'] }), []);

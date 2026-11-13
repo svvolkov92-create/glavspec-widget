@@ -93,8 +93,8 @@
   }
 
   // Direction of a ПП 87 code, for icons and checks: ИОС1 → электрика and so on.
-  const KIND_BY_CODE = { 'ИОС1': 'el', 'ИОС2': 'water', 'ИОС3': 'sewer', 'ИОС4': 'ov', 'ИОС5': 'ss' };
-  const kindOfCode = code => { const m = String(code || '').toUpperCase().match(/^ИОС\d/); return m ? KIND_BY_CODE[m[0]] || '' : ''; };
+  const KIND_BY_CODE = { 'ИОС1': 'el', 'ИОС2': 'water', 'ИОС3': 'sewer', 'ИОС4': 'ov', 'ИОС5': 'ss', 'АР': 'ar', 'ПЗУ': 'ar', 'ПБ': 'ar', 'ОДИ': 'ar', 'КР': 'kr', 'ПОС': 'pos' };
+  const kindOfCode = code => { const m = String(code || '').toUpperCase().match(/^(ИОС\d|АР|ПЗУ|ПБ|ОДИ|КР|ПОС)/); return m ? KIND_BY_CODE[m[0]] || '' : ''; };
 
   // Validates and cleans a composition coming from the page.
   function clean(comp) {

@@ -14,11 +14,16 @@
   };
 
   // Directions a chief can lead (any combination). Marks link a direction to the card's sections.
+  // 4.1 (the user's list, 11.11): ПОС separate (ПОД is part of it), ПБ and ОДИ with the architects, АСКУЭ with low current,
+  // ООС and the rest — «Прочие» (no direction). ЭЭ is not a section.
   const DIRECTIONS = [
-    { id: 'el', label: 'Электрика', marks: ['ЭОМ', 'ЭС', 'ЭМ', 'ЭО', 'ЭН', 'КЭ', 'АСКУЭ'] },
-    { id: 'ss', label: 'Слаботочка', marks: ['СС', 'СКС', 'АПС', 'СОУЭ', 'СОТ', 'СКУД', 'ОС', 'ДС'] },
-    { id: 'vk', label: 'Водоснабжение и канализация', marks: ['ВК', 'НВК', 'АУПТ'] },
+    { id: 'ar', label: 'Архитекторы', marks: ['АР', 'АС', 'ГП', 'ПЗУ', 'ПБ', 'ОДИ', 'АИ'] },
+    { id: 'kr', label: 'Конструкторы', marks: ['КР', 'КЖ', 'КМ', 'КЖО', 'КМД', 'КД'] },
+    { id: 'el', label: 'Электрики', marks: ['ЭОМ', 'ЭС', 'ЭМ', 'ЭО', 'ЭН', 'КЭ'] },
+    { id: 'ss', label: 'Слаботочники', marks: ['СС', 'СКС', 'АПС', 'СОУЭ', 'СОТ', 'СКУД', 'ОС', 'ДС', 'АСКУЭ'] },
+    { id: 'vk', label: 'Водоснабжение и канализация', marks: ['ВК', 'НВК', 'НВ', 'НК', 'АУПТ'] },
     { id: 'ov', label: 'Отопление и вентиляция', marks: ['ОВ', 'ТС', 'ИТП', 'ТМ'] },
+    { id: 'pos', label: 'ПОС', marks: ['ПОС', 'ПОД'] },
   ];
 
   // Icon and colour of a mark: the direction, with water split into supply (tap) and sewerage (drops).
