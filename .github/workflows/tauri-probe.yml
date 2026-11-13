@@ -48,9 +48,9 @@ jobs:
           (Get-Content -Raw -Encoding utf8 README-win.txt) -replace "`r?`n", "`r`n" | Set-Content -NoNewline -Encoding utf8 "release/ПРОЧТИ.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: PultGlavspeca-4.0-setup
+          name: PultGlavspeca-4.1-setup
           path: release/*
       - uses: actions/upload-artifact@v4
         with:
-          name: PultGlavspeca-4.0-portable
+          name: PultGlavspeca-4.1-portable
           path: src-tauri/target/release/pult-glavspeca.exe

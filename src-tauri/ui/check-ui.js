@@ -322,6 +322,18 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await p.reload(); await wait(1200);
   const kl = await js(() => window.api.cabinetGet());
   check('3.x cabinet key: asked again, address kept', kl.keyLost === true && kl.hasKey === false && kl.url === 'http://192.168.1.10:8080', JSON.stringify(kl).slice(0, 200));
+  // 4.1 in the Tauri window: org structure (new «depts» collection through the Rust store), Kanban card view, density.
+  await js(() => document.querySelector('[data-act="tab"][data-id="people"]').click()); await wait(300);
+  await js(() => document.querySelector('[data-act="people-mode"][data-v="org"]').click()); await wait(300);
+  check('4.1: org structure renders', await js(() => document.querySelectorAll('.org-card').length > 0));
+  const orgBtn = await js(() => !!document.querySelector('[data-act="org-from-groups"]'));
+  if (orgBtn) {
+    await js(() => document.querySelector('[data-act="org-from-groups"]').click()); await wait(600);
+    const saved = disk.data || {};
+    check('4.1: departments saved to data.json', Object.keys(saved.depts || {}).length > 0, Object.keys(saved));
+  }
+  await js(() => document.querySelector('[data-act="tab"][data-id="kanban"]').click()); await wait(300);
+  check('4.1: Kanban card view menu and assignments switch', await js(() => !!document.querySelector('.kb-view') && !!document.querySelector('[data-act="show-assign"][data-v="kanban"]')));
   await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-check.png' });
   check('no page errors', errs.length === 0, errs.join(' | '));
   console.log(log.join('\n')); process.exitCode = log.some(l => l.startsWith('FAIL')) ? 1 : 0;

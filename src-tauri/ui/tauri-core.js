@@ -96,7 +96,7 @@
     const dirs = await invoke('known_dirs');
     const files = window.createFiles({
       store, journal, settings, A: window.Access, L, Composition: window.Composition, StoreError: SC.StoreError, Buffer: window.Buffer,
-      io: tauriIo(dirs), appVersion: '4.0.0', R: reportCode(),
+      io: tauriIo(dirs), appVersion: '4.1.0', R: reportCode(),
       currentUser: () => core.currentUser(), userView: () => core.userView(), changed: () => onChanged(),
     });
     const cabinetRules = await cabinetOf({ store, settings, files, core, dirs, onCabinet: () => onCabinet?.() });

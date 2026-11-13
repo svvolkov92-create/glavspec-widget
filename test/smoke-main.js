@@ -483,7 +483,7 @@ app.on('browser-window-created', (_e, win) => {
         await switchTo('u-chief');
         await click('[data-act="tab"][data-id="people"]'); await wait(300);
         const staff = await js(`[...document.querySelectorAll('.card.staff h3')].map(h => h.textContent).join(',')`);
-        check('chief sees own staff', /Главспец/.test(staff) && /Орлов/.test(staff) && /Новиков/.test(staff) && !/Белова|Зайцев/.test(staff), staff);
+        check('chief sees all staff (4.1, item 17)', /Главспец/.test(staff) && /Орлов/.test(staff) && /Новиков/.test(staff) && /Белова/.test(staff) && /Зайцев/.test(staff), staff);
         await click('.adds [data-act="new-contractor"]'); await wait(400);
         check('chief adds outside only', !(await js(`!!document.querySelector('.kind-seg')`)));
         await js(`document.querySelector('#c-name').value = 'Пример: ООО Свет'`);
