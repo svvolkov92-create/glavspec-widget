@@ -66,6 +66,40 @@ app.on('browser-window-created', (_e, win) => {
         await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(200);
       });
 
+
+      await step('4.1.1: «Начать» in the card, «Вид карточек» visible, endless columns', async () => {
+        // 4.1-3: the start button in an opened card (readiness 0 % of a not-started card used to stop the save)
+        const ns = Object.entries(data().tasks).find(([, t]) => t.status === 'not_started' && !t.deletedAt)?.[0];
+        await openTask(ns); await wait(300);
+        await click('[data-act="quick"][data-q="start"]'); await wait(700);
+        check('4.1-3: «Начать работу» in the card → in progress, readiness 1 %', data().tasks[ns].status === 'in_progress' && data().tasks[ns].readiness === 1, JSON.stringify({ s: data().tasks[ns].status, r: data().tasks[ns].readiness }));
+        await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(200);
+        // 45: a stopped save speaks — toast, field highlighted
+        await openTask(ns); await wait(300);
+        await js(`(() => { const a = document.querySelector('#dform [name="start"]'), b = document.querySelector('#dform [name="finish"]'); a.value = '2027-01-10'; b.value = '2027-01-01'; })()`);
+        await js(`document.querySelector('#dform button[type="submit"]').click()`); await wait(400);
+        const said = await js(`({ toast: document.querySelector('#toast')?.textContent || '', bad: !!document.querySelector('#dform .field-bad') })`);
+        check('45: stopped save — toast and the field highlighted', /Финиш не может быть раньше/.test(said.toast) && said.bad, JSON.stringify(said));
+        await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(200);
+        // 4.1-1: the menu is really on screen, not clipped by the filter row
+        await click('[data-act="tab"][data-id="kanban"]'); await wait(400);
+        await click('.kb-view > summary'); await wait(250);
+        const seen = await js(`(() => { const m = document.querySelector('.kb-view-m'); const r = m.getBoundingClientRect(); const e = document.elementFromPoint(r.left + 20, r.top + 15); return r.height > 60 && m.contains(e); })()`);
+        check('4.1-1: «Вид карточек» list is visible on screen', seen);
+        await shot('41-14-view-menu');
+        await js(`document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`); await wait(100);
+        check('4.1-1: a click outside closes it', !(await js(`document.querySelector('.kb-view').open`)));
+        // 4.1-2: many cards — the board does not scroll by itself, the page does, heads stay on top
+        const ops = Array.from({ length: 30 }, (_, i) => ({ type: 'set', col: 'tasks', id: 'v411-' + i, data: { projectId: 'demo-p1', sections: ['ОВ'], status: 'not_started', start: '2026-12-01', finish: '2026-12-20', ownerId: 'u-gip', createdAt: new Date().toISOString() } }));
+        await js(`window.api.write(${JSON.stringify(ops)}, { action: 'test' })`); await wait(700);
+        const geo = await js(`(() => { const kb = document.querySelector('#kb-board'), m = document.querySelector('main'); m.scrollTop = 900; const h = kb.querySelector('[data-kb-col="not_started"] .kb-col-h').getBoundingClientRect(); return { own: kb.scrollHeight - kb.clientHeight, page: m.scrollTop, headTop: Math.round(h.top), mainTop: Math.round(m.getBoundingClientRect().top) }; })()`);
+        check('4.1-2: the board has no own scroll, the page scrolls', geo.own <= 2 && geo.page > 300, JSON.stringify(geo));
+        check('4.1-2: column heads stay at the top of the window', Math.abs(geo.headTop - geo.mainTop) <= 4, JSON.stringify(geo));
+        await shot('41-15-kanban-scrolled');
+        await js(`window.api.write(${JSON.stringify(ops.map(o => ({ type: 'delete', col: 'tasks', id: o.id })))}, { action: 'test' })`); await wait(400);
+        await js(`document.querySelector('main').scrollTop = 0`);
+      });
+
       await step('7, 8: Gantt — assignments hidden by default, no-executor icon', async () => {
         await click('[data-act="tab"][data-id="gantt"]'); await wait(400);
         check('assignment hidden', !(await js(`!!document.querySelector('[data-bar="v41-as"]')`)));
@@ -87,9 +121,9 @@ app.on('browser-window-created', (_e, win) => {
         const full = await js(`(() => { const b = document.querySelector('#kb-board'); return [...b.querySelectorAll('.kb-col')].every(c => Math.abs(c.offsetHeight - b.clientHeight) < 4 || c.offsetHeight > b.clientHeight); })()`);
         check('26: every column is full height', full);
         // drop on the empty bottom part of «На проверке»
-        const moved = await js(`(() => { const col = document.querySelector('#kb-board [data-kb-col="review"]'); const r = col.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.bottom - 12); return !!el && el.closest('[data-kb-col]') === col; })()`);
+        const moved = await js(`(() => { const col = document.querySelector('#kb-board [data-kb-col="review"]'); const r = col.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, Math.min(r.bottom, innerHeight - 140) - 12); return !!el && el.closest('[data-kb-col]') === col; })()`);
         check('26: the empty bottom of a column is a drop target', moved);
-        await js(`document.querySelector('.kb-view').open = true`); await wait(100);
+        await click('.kb-view > summary'); await wait(150);
         await click('[data-act="kb-show-all"][data-v="0"]'); await wait(300);
         check('27: compact — no project, executor, dates', !(await js(`!!document.querySelector('#kb-board .kb-proj, #kb-board .kb-who, #kb-board .kb-foot')`)));
         check('27: menu stays open', await js(`document.querySelector('.kb-view').open`));

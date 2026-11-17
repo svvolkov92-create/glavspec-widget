@@ -1542,15 +1542,17 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .tl-bar .noexec-ic { background: #fff; border-radius: 3px; padding: 1px; width: 14px; height: 14px; box-sizing: border-box }
 .sm-chk { font-size: 12.5px; white-space: nowrap; gap: 6px }
 /* Kanban: board scrolls inside itself — sticky column heads, full-height columns */
-.kb.kb-fit { overflow: auto; align-items: stretch; padding-bottom: 0 }
-.kb.kb-fit .kb-col { min-height: 100%; grid-template-rows: auto 1fr; align-self: stretch }
-.kb.kb-fit .kb-col-h { position: sticky; top: 0; z-index: 2; background: var(--surface); border-radius: 8px 8px 0 0 }
+/* 4.1.1 (4.1-2): columns grow with their cards — the page scrolls, not the board; the heads stick to the top of the
+   window; every column is as tall as the tallest one and at least to the bottom of the window (drop anywhere). */
+.kb.kb-fit { overflow: visible; align-items: stretch; padding-bottom: 0 }
+.kb.kb-fit .kb-col { grid-template-rows: auto 1fr; align-self: stretch }
+.kb.kb-fit .kb-col-h { position: sticky; top: -14px; z-index: 3; background: var(--surface); border-radius: 8px 8px 0 0; box-shadow: 0 1px 0 var(--line) }
 :root[data-theme="tandem"] .kb.kb-fit .kb-col-h { border-radius: 0 }
 .kb-col.over .kb-list { background: color-mix(in srgb, var(--accent) 6%, transparent) }
 .kb-view { position: relative }
 .kb-view > summary { list-style: none; cursor: pointer }
 .kb-view > summary::-webkit-details-marker { display: none }
-.kb-view-m { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 240px; display: grid; gap: 8px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(20, 24, 33, .16) }
+.kb-view-m { position: fixed; z-index: 60; min-width: 240px; display: grid; gap: 8px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(20, 24, 33, .16) }
 .sm-chk { flex: none; display: inline-flex }
 .filters .sm-chk input, .gantt-bar .sm-chk input { width: 15px; min-width: 0; flex: none; padding: 0 }
 /* Focus on a task: a small bar at the bottom left with the running time */
@@ -1678,3 +1680,10 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .org-people .pt-member.me b, .org-people .pt-member.me { color: var(--accent-text, var(--accent)) }
 .org-modal { width: min(560px, 94vw) }
 .org-mem .chk-row { max-height: 200px; overflow: auto }
+/* 4.1.1 (item 45): the field a stopped save is about */
+.field-bad { outline: 2px solid var(--bad) !important; outline-offset: 1px; background: color-mix(in srgb, var(--bad) 6%, var(--surface)) !important }
+@media (prefers-reduced-motion: no-preference) { .field-bad { animation: field-bad 0.5s ease 2 } }
+@keyframes field-bad { 50% { outline-offset: 4px } }
+.kb-view-m .chk { display: flex; justify-content: flex-start; align-items: center; gap: 8px; text-align: left; white-space: nowrap }
+.kb-view-m .chk input { width: 15px; min-width: 0; flex: none; margin: 0 }
+.kb-view-m .row-in { display: flex; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line) }

@@ -2703,11 +2703,23 @@ function fitKanban() {
   const kb = $('#kb-board');
   if (!kb) return;
   const top = kb.getBoundingClientRect().top, room = window.innerHeight - top - 30;
-  kb.style.height = `${Math.max(320, room)}px`;
+  kb.style.height = ''; kb.style.minHeight = `${Math.max(320, room)}px`; // a floor, not a cap: long columns make the page scroll
 }
 window.addEventListener('resize', () => { if (state.tab === 'kanban') fitKanban(); });
+// «Вид карточек» sits in a horizontally scrolling filter row, which clips anything dropping out of it (4.1-1):
+// the open list is placed over the window (position: fixed) under its button; a click outside closes it.
+function placeKbView(d) {
+  const m = d?.querySelector('.kb-view-m'), r = d?.querySelector('summary')?.getBoundingClientRect();
+  if (!m || !r) return;
+  m.style.top = `${Math.round(r.bottom + 4)}px`;
+  m.style.left = `${Math.round(Math.min(r.left, innerWidth - m.offsetWidth - 8))}px`;
+}
+document.addEventListener('toggle', e => { if (e.target.matches?.('.kb-view') && e.target.open) placeKbView(e.target); }, true);
+document.addEventListener('pointerdown', e => { const d = $('.kb-view[open]'); if (d && !d.contains(e.target)) d.open = false; }, true);
+window.addEventListener('resize', () => placeKbView($('.kb-view[open]')));
+document.addEventListener('scroll', () => placeKbView($('.kb-view[open]')), true);
 // Re-render but keep an open <details> menu open.
-function renderKeepMenu(sel) { renderNow(); const d = $(sel); if (d) d.open = true; }
+function renderKeepMenu(sel) { renderNow(); const d = $(sel); if (d) { d.open = true; placeKbView(d); } }
 function viewKanban() {
   if (isEmpty()) return emptyState();
   const f = state.kanban;
@@ -4361,10 +4373,23 @@ function updateShiftBox() {
   }
 }
 
-function formError(msg, tab) {
+// 4.1 (backlog item 45): a save that stops is never silent — the message is also a toast, the card switches to the
+// tab, scrolls to the message and to the field it is about (if given), and the field is highlighted.
+function formError(msg, tab, field = '') {
   const el = $('#form-err');
   if (el) { el.textContent = msg; el.hidden = !msg; }
-  if (msg && tab) setDrawerTab(tab);
+  if (!msg) { $$('#dform .field-bad').forEach(x => x.classList.remove('field-bad')); return false; }
+  if (tab) setDrawerTab(tab);
+  toast(msg, true);
+  requestAnimationFrame(() => {
+    const err = $('#form-err');
+    const f = field && ($(`#dform [name="${field}"]`) || $(`#dform #${field}`));
+    const target = (f && f.closest('.f, .exec-pick, fieldset, label')) || f || err;
+    if (f) { f.classList.add('field-bad'); f.addEventListener('input', () => f.classList.remove('field-bad'), { once: true }); }
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (f && f.focus) f.focus({ preventScroll: true });
+    else if (err) err.scrollIntoView({ block: 'nearest' });
+  });
   return false;
 }
 const val = name => ($(`#dform [name="${name}"]`)?.value ?? '').trim();
@@ -4410,11 +4435,11 @@ async function submitTask(quick = null, { stay = false } = {}) {
     contractNo: val('contractNo'), contractDate: val('contractDate'),
     invoiceReceived: checked('invoiceReceived'), actSigned: checked('actSigned'), folder: val('folder'),
   };
-  if (!data.projectId) return formError('Выберите проект.', 'main');
+  if (!data.projectId) return formError('Выберите проект.', 'main', 'projectId');
   if (!sections.length && !data.title) return formError('Выберите раздел или, для задачи без раздела, напишите уточнение в «Дополнительно».', 'main');
   if (old?.kind === 'assign' || $('#dform input[name="official"]')) Object.assign(data, { official: checked('official'), officialNo: val('officialNo'), officialBy: val('officialBy') });
   if (Number.isNaN(data.budget)) return formError('Бюджет — неотрицательное число, например 150000 или 150 000,50.', 'main');
-  if (data.start && data.finish && data.finish < data.start) return formError('Финиш не может быть раньше старта.', 'main');
+  if (data.start && data.finish && data.finish < data.start) return formError('Финиш не может быть раньше старта.', 'main', 'finish');
   const ms = cleanMilestones(); if (ms.error) return formError(ms.error, 'time');
   const plan = cleanPlan(); if (plan.error) return formError(plan.error, 'money');
   const revs = cleanRevisions(); if (revs.error) return formError(revs.error, 'time');
@@ -4445,16 +4470,20 @@ async function submitTask(quick = null, { stay = false } = {}) {
     for (const k of Object.keys(data)) if (!A.SPECIALIST_FIELDS.includes(k)) delete data[k];
   } else {
     data.ownerId = val('ownerId') || (old ? old.ownerId : state.me?.id) || '';
-    if (!data.ownerId) return formError('Выберите ответственного в команде.', 'main');
+    if (!data.ownerId) return formError('Выберите ответственного в команде.', 'main', 'ownerId');
     data.coOwnerIds = formOwners().filter(x => x !== data.ownerId);
     if (L.readinessManual(data.status)) {
-      const r = Math.round(Number(val('readiness') || L.READY_MIN));
-      if (!Number.isFinite(r) || r < L.READY_MIN || r > L.READY_MAX) return formError(`Готовность в работе — от ${L.READY_MIN} до ${L.READY_MAX} %: 90 % ставится сдачей на проверку, 100 % — приёмкой.`, 'main');
+      // Entering «в работе» from a status without manual readiness (not started: 0 %) — start at the minimum,
+      // the user did not type anything (4.1-3: «Начать работу» silently stopped here).
+      const typed = Number(val('readiness'));
+      const entering = !old || !L.readinessManual(old.status);
+      const r = entering && !(typed >= L.READY_MIN) ? L.READY_MIN : Math.round(Number(val('readiness') || L.READY_MIN));
+      if (!Number.isFinite(r) || r < L.READY_MIN || r > L.READY_MAX) return formError(`Готовность в работе — от ${L.READY_MIN} до ${L.READY_MAX} %: 90 % ставится сдачей на проверку, 100 % — приёмкой.`, 'main', 'readiness');
       data.readiness = r;
     }
     const misfit = formGaps();
     data.profileOk = misfit.length ? checked('profileOk') : false;
-    if (misfit.length && !data.profileOk) return formError(`${misfit.join(' ')} Отметьте «Всё равно назначить», если это осознанно.`, 'main');
+    if (misfit.length && !data.profileOk) return formError(`${misfit.join(' ')} Отметьте «Всё равно назначить», если это осознанно.`, 'main', 't-profile-ok');
     if (!canMoney()) for (const k of A.MONEY_FIELDS) delete data[k];
   }
 
