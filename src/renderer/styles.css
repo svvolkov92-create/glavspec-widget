@@ -1687,3 +1687,34 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .kb-view-m .chk { display: flex; justify-content: flex-start; align-items: center; gap: 8px; text-align: left; white-space: nowrap }
 .kb-view-m .chk input { width: 15px; min-width: 0; flex: none; margin: 0 }
 .kb-view-m .row-in { display: flex; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line) }
+/* «Мой день» (4.1.1, item 48) */
+.day { display: grid; gap: 14px }
+.day-h { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap }
+.day-h h2 { margin: 0; font-size: 20px }
+.day-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px }
+.day-kpi { appearance: none; text-align: left; font: inherit; color: inherit; cursor: pointer; display: grid; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px }
+:root[data-theme="tandem"] .day-kpi { border-radius: 0 }
+.day-kpi:hover { border-color: var(--accent) }
+.day-kpi b { font-size: 26px; line-height: 1.1 }
+.day-kpi .kv-bad { color: var(--bad) } .day-kpi .kv-review { color: var(--review) } .day-kpi .kv-warn { color: #9a5a00 } .day-kpi .kv-work { color: var(--accent-text, var(--accent)) } .day-kpi .kv-idle { color: var(--muted) }
+.day-row .chip { flex: none; white-space: nowrap }
+.day-cols { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start }
+@media (max-width: 900px) { .day-cols { grid-template-columns: 1fr } }
+.day-list { display: grid }
+.day-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); min-width: 0 }
+.day-row:last-child { border-bottom: 0 }
+.day-row .tag { flex: none; white-space: nowrap }
+.day-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: inherit }
+.day-empty { padding: 14px 12px }
+/* Review queue (item 49) */
+.modal.rq { width: min(960px, 96vw) }
+.rq-h { display: flex; align-items: center; gap: 10px }
+.rq-h h2 { margin: 0 }
+.rq-bar { height: 5px; background: var(--sunk); margin: 8px 0 12px }
+.rq-bar i { display: block; height: 100%; background: var(--accent) }
+.rq-body { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px }
+.rq-body textarea { width: 100%; box-sizing: border-box }
+.rq-title { font-size: 15px; margin-bottom: 2px }
+.rq-note { white-space: pre-wrap; padding: 8px 10px; background: var(--sunk); border-radius: 6px; min-height: 60px }
+.rq-body .lbl { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--muted) }
+.kbd { font: 600 11px/1 var(--f-mono); padding: 2px 5px; border: 1px solid currentColor; border-radius: 3px; opacity: .7; margin-left: 4px }

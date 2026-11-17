@@ -12,6 +12,7 @@ const ICON = {
   file: '<path d="M4 1.8h5.4L12.6 5v9.2H4z" stroke-linejoin="round"/><path d="M9.2 1.8V5.2h3.4" stroke-linejoin="round"/>',
   pin: '<path d="M6 2h4l-.6 4 2.4 2.2v1.2H4.2V8.2L6.6 6z" stroke-linejoin="round"/><path d="M8 9.4V14" stroke-linecap="round"/>',
   chat: '<path d="M2 3.2h12v7.6H7.2L4.4 13.2v-2.4H2z" stroke-linejoin="round"/><path d="M4.8 6.2h6.4M4.8 8.2h4" stroke-linecap="round"/>',
+  day: '<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/>',
   overview: '<rect x="2" y="2" width="5" height="6" rx="1"/><rect x="9" y="2" width="5" height="3.5" rx="1"/><rect x="2" y="10" width="5" height="4" rx="1"/><rect x="9" y="7.5" width="5" height="6.5" rx="1"/>',
   projects: '<path d="M1.8 4.2v8.6h12.4V5.6H7.6L6.2 3.6H2.4z" stroke-linejoin="round"/>',
   people: '<circle cx="6" cy="5.4" r="2.4"/><path d="M1.6 13.6c.5-2.6 2.3-3.9 4.4-3.9s3.9 1.3 4.4 3.9" stroke-linecap="round"/><path d="M10.6 3.3a2.3 2.3 0 0 1 0 4.3M12.2 9.9c1.2.5 2 1.7 2.3 3.6" stroke-linecap="round"/>',
@@ -41,6 +42,7 @@ const userIcons = u => userKinds(u).map(k => kindIcon(k)).join('');
 const icon = id => `<svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">${ICON[id] || ''}</svg>`;
 const fileSize = n => (n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`);
 const TABS = [
+  { id: 'day', label: 'Мой день' }, // 4.1.1 (item 48)
   { id: 'overview', label: 'Сводка' },
   { id: 'projects', label: 'Проекты' },
   { id: 'people', label: 'Люди' },
@@ -780,6 +782,112 @@ const attention = () => {
   attCache = { tasks: state.tasks, projects: state.projects, today: state.today, v: L.attention(tasksArr(), state.today) };
   return attCache.v;
 };
+
+/* ---------- 4.1.1: «Мой день» (item 48) — what is mine today, per role; every row is a button ---------- */
+const inScope = t => A.isGip(state.me) || hasOwner(t, state.me?.id) || executorOf(t)?.u?.id === state.me?.id || A.isChief(state.me);
+function myCards() { const me = state.me?.id; return tasksArr().filter(t => ACTIVE.has(t.status) && (t.ownerId === me || executorOf(t)?.u?.id === me || hasOwner(t, me))); }
+function dayDocs() {
+  const out = [];
+  for (const p of liveProjects()) for (const d of p.docs || []) {
+    if (!isDate(d.until)) continue;
+    const left = dayNum(d.until) - dayNum(state.today);
+    if (left <= (d.remind ?? 60)) out.push({ p, d, left });
+  }
+  return out.sort((a, b) => a.left - b.left);
+}
+function idlePeople() {
+  if (isSpec()) return [];
+  const busy = new Set(tasksArr().filter(t => ACTIVE.has(t.status)).flatMap(t => [t.ownerId, ...(t.coOwnerIds || []), executorOf(t)?.u?.id]).filter(Boolean));
+  const scope = A.isGip(state.me) ? liveUsers().filter(u => u.role !== 'gip') : liveUsers().filter(u => u.chiefId === state.me?.id);
+  return scope.filter(u => !busy.has(u.id) && !A.absencesOf(u).some(x => x.from <= state.today && x.to >= state.today)).sort(byName);
+}
+function viewDay() {
+  if (isEmpty()) return emptyState();
+  const a = attention(), me = state.me, spec = isSpec();
+  const hour = new Date().getHours(), hello = hour < 12 ? 'Доброе утро' : hour < 18 ? 'Добрый день' : 'Добрый вечер';
+  const mine = myCards(), notStarted = mine.filter(t => t.status === 'not_started'), working = mine.filter(t => ['in_progress', 'revision'].includes(t.status));
+  const review = spec ? [] : a.review, overdue = spec ? mine.filter(t => timing(t).overdue) : a.overdue;
+  const week = (spec ? mine : a.week).filter(t => !timing(t).overdue && isDate(t.finish) && dayNum(t.finish) - dayNum(state.today) <= 7);
+  const unread = [...state.chats.values()].reduce((n, c) => n + msgUnread(c).length, 0);
+  const idle = idlePeople(), docs = spec ? [] : dayDocs();
+  const kpi = (label, n, tone, act, extra = '') => `<button class="kpi day-kpi" type="button"${act}><span class="hint">${label}</span><b class="num kv-${n ? tone : 'idle'}">${n}</b>${extra}</button>`;
+  const kpis = spec
+    ? kpi('Мои карточки', mine.length, 'work', ' data-act="tab" data-id="kanban"') + kpi('Срок на неделе', week.length, 'warn', ' data-act="att-go" data-v="att:week"') + kpi('Срок сорван', overdue.length, 'bad', ' data-act="att-go" data-v="overdue"') + kpi('Новые сообщения', unread, 'work', ' data-act="msg-open-any"')
+    : kpi('Ждёт моей проверки', review.length, 'review', review.length ? ' data-act="review-queue"' : '') + kpi('Срок сорван', overdue.length, 'bad', ' data-act="att-go" data-v="overdue"') + kpi('Новые сообщения', unread, 'work', ' data-act="msg-open-any"') + kpi('Без работы', idle.length, 'warn', ' data-act="tab" data-id="people"', idle.length ? `<span class="hint">${esc(idle.slice(0, 2).map(u => u.name).join(', '))}${idle.length > 2 ? '…' : ''}</span>` : '');
+  const row = (tag, tone, t, btn = '') => `<div class="day-row"><span class="chip tone-${tone}">${tag}</span><button class="linkbtn day-t" type="button" data-act="open-task" data-id="${esc(t.id)}">${marksHtml(t)} ${esc(projectOf(t)?.name || '')}<span class="hint"> — ${esc(executorOf(t)?.name || 'нет исполнителя')}</span></button><span class="spacer"></span>${btn}</div>`;
+  const first = [
+    ...overdue.slice(0, 6).map(t => row(isDate(t.finish) ? `сорван ${dayNum(state.today) - dayNum(t.finish)} дн.` : 'срок сорван', 'bad', t)),
+    ...(review.length ? [`<div class="day-row"><span class="chip tone-review">на проверке</span><span>${review.length} ${plural(review.length, 'карточка ждёт', 'карточки ждут', 'карточек ждут')} вашего решения</span><span class="spacer"></span><button class="btn primary sm" type="button" data-act="review-queue">Проверить ${review.length > 1 ? 'все ' + review.length : ''}</button></div>`] : []),
+    ...week.slice(0, 6).map(t => row(`срок ${fmtDate(t.finish).slice(0, 5)}`, 'warn', t)),
+    ...docs.slice(0, 4).map(({ p, d, left }) => `<div class="day-row"><span class="chip tone-${left < 0 ? 'bad' : 'warn'}">${left < 0 ? 'документ истёк' : `истекает через ${left} дн.`}</span><button class="linkbtn day-t" type="button" data-act="goto-project" data-id="${esc(p.id)}">${esc(d.title)}<span class="hint"> — ${esc(p.name)}</span></button></div>`),
+  ];
+  const todo = [
+    ...working.map(t => row(STATUSES[t.status].label.toLowerCase(), 'work', t, `<button class="btn sm${focus?.taskId === t.id ? ' on' : ''}" type="button" data-act="${focus?.taskId === t.id ? 'focus-stop' : 'focus-start'}" data-id="${esc(t.id)}">${focus?.taskId === t.id ? 'Пауза' : '▶ Фокус'}</button>`)),
+    ...notStarted.map(t => row('не начат', 'idle', t, `<button class="btn primary sm" type="button" data-act="cm-quick" data-q="start" data-id="${esc(t.id)}">▶ Начать</button>`)),
+  ];
+  return `<section class="day"><div class="day-h"><h2>${hello}${me?.name ? ', ' + esc(me.name.split(' ').slice(1).join(' ') || me.name) : ''}</h2><span class="hint">${esc(new Date(state.today + 'T12:00').toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }))}</span></div>
+    <div class="day-kpis">${kpis}</div>
+    <div class="day-cols"><section class="panel"><div class="panel-h"><h3>Сначала это</h3></div><div class="day-list">${first.join('') || '<p class="hint day-empty">Ничего срочного — всё по плану.</p>'}</div></section>
+      <section class="panel"><div class="panel-h"><h3>Мои карточки</h3><span class="meta">${mine.length}</span></div><div class="day-list">${todo.join('') || `<p class="hint day-empty">${spec ? 'Карточек пока нет — их выдаёт главспец или ГИП.' : 'Лично на вас карточек нет.'}</p>`}</div></section></div></section>`;
+}
+
+/* ---------- 4.1.1: review queue (item 49) — the cards waiting for my decision, one after another ---------- */
+let rq = null; // { ids, i }
+function openReviewQueue() {
+  const ids = attention().review.map(t => t.id);
+  if (!ids.length) return toast('На проверке ничего нет.');
+  rq = { ids, i: 0 };
+  renderReviewQueue();
+}
+function closeReviewQueue() { rq = null; $('#rq-root')?.remove(); renderNow(); }
+function renderReviewQueue() {
+  let root = $('#rq-root');
+  rq.ids = rq.ids.filter(id => state.tasks.get(id)?.status === 'review');
+  if (!rq.ids.length) { root?.remove(); rq = null; toast('Очередь проверки пуста — всё разобрано.'); renderNow(); return; }
+  rq.i = Math.max(0, Math.min(rq.i, rq.ids.length - 1));
+  const t = state.tasks.get(rq.ids[rq.i]), p = projectOf(t);
+  const sub = [...(t.history || [])].reverse().find(h => h.type === 'status' && h.to === 'review');
+  const files = [...(t.history || [])].reverse().flatMap(h => h.files || []).slice(0, 6);
+  if (!root) { root = document.createElement('div'); root.id = 'rq-root'; root.className = 'modal-back'; document.body.append(root); }
+  root.innerHTML = `<div class="modal rq" role="dialog" aria-modal="true" aria-labelledby="rq-t">
+    <div class="rq-h"><h2 id="rq-t">Проверка <b class="num">${rq.i + 1} из ${rq.ids.length}</b></h2><span class="spacer"></span><span class="hint">← → листать · A принять · R вернуть · Esc закрыть</span><button class="btn ghostbtn sm" type="button" data-rq="close" aria-label="Закрыть">✕</button></div>
+    <div class="rq-bar"><i style="width:${Math.round(((rq.i + 1) / rq.ids.length) * 100)}%"></i></div>
+    <div class="rq-body"><div><div class="rq-title">${marksHtml(t)} <b>${esc(p?.name || '')}</b>${t.title ? ` · ${esc(t.title)}` : ''}</div>
+      <div class="hint">${esc(executorOf(t)?.name || 'нет исполнителя')} · сдано ${sub ? fmtDate(sub.date || sub.ts.slice(0, 10)) : '—'} · срок ${fmtDate(t.finish)}${timing(t).overdue ? ' · <span class="neg">срок сорван</span>' : ''}</div>
+      <div class="lbl">Что сделано</div><div class="rq-note">${sub?.note ? esc(sub.note) : '<span class="hint">Без описания.</span>'}</div>
+      ${files.length ? `<div class="lbl">Файлы</div><div class="hint">${files.map(f => esc(f.name || f)).join(' · ')}</div>` : ''}
+      <button class="linkbtn" type="button" data-rq="open">Открыть карточку целиком</button></div>
+      <div><label class="lbl" for="rq-note">Замечания (обязательно, если вернуть)</label><textarea id="rq-note" rows="7" maxlength="1500" placeholder="Что исправить…"></textarea></div></div>
+    <div class="modal-f"><button class="btn primary rq-ok" type="button" data-rq="accept">✓ Принять <span class="kbd">A</span></button><button class="btn" type="button" data-rq="remarks">↩ Вернуть с замечаниями <span class="kbd">R</span></button><span class="spacer"></span>
+      <button class="btn ghostbtn" type="button" data-rq="prev"${rq.i ? '' : ' disabled'}>←</button><button class="btn" type="button" data-rq="next">${rq.i < rq.ids.length - 1 ? 'Пропустить →' : 'Готово'}</button></div></div>`;
+  root.querySelector('[data-rq="accept"]').focus();
+}
+async function rqAct(a) {
+  if (!rq) return;
+  const t = state.tasks.get(rq.ids[rq.i]);
+  if (a === 'close') return closeReviewQueue();
+  if (a === 'open') { const id = t.id; closeReviewQueue(); return openTask(id); }
+  if (a === 'prev') { rq.i--; return renderReviewQueue(); }
+  if (a === 'next') { if (rq.i >= rq.ids.length - 1) return closeReviewQueue(); rq.i++; return renderReviewQueue(); }
+  if (a === 'accept') { await changeStatus(t.id, QUICK.accept.to, 'принято в очереди проверки'); return renderReviewQueue(); }
+  if (a === 'remarks') {
+    const note = $('#rq-note').value.trim();
+    if (!note) { const n = $('#rq-note'); n.classList.add('field-bad'); n.focus(); toast('Напишите, что исправить, — без замечаний вернуть нельзя.', true); return; }
+    await changeStatus(t.id, QUICK.remarks.to, note);
+    return renderReviewQueue();
+  }
+}
+document.addEventListener('click', e => { const b = e.target.closest?.('#rq-root [data-rq]'); if (b && !b.disabled) rqAct(b.dataset.rq); else if (e.target.id === 'rq-root') closeReviewQueue(); });
+document.addEventListener('keydown', e => {
+  if (!rq || !$('#rq-root')) return;
+  const typing = e.target.matches?.('textarea, input');
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeReviewQueue(); }
+  else if (typing) return;
+  else if (e.key === 'ArrowRight') { e.preventDefault(); rqAct('next'); }
+  else if (e.key === 'ArrowLeft' && rq.i) { e.preventDefault(); rqAct('prev'); }
+  else if (e.key === 'a' || e.key === 'ф' || e.key === 'A' || e.key === 'Ф') { e.preventDefault(); rqAct('accept'); }
+  else if (e.key === 'r' || e.key === 'к' || e.key === 'R' || e.key === 'К') { e.preventDefault(); $('#rq-note')?.focus(); }
+}, true);
 
 /* ---------- views ---------- */
 function emptyState() {
@@ -3175,7 +3283,7 @@ function renderNow() {
   const active = document.activeElement?.id, caret = document.activeElement?.selectionStart;
   if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
   if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
-  const view = { overview: viewOverview, projects: viewProjects, people: viewPeople, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
+  const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
   app.innerHTML = view() + footer();
   renderMsg(); msgNotify(); renderFocus();
   if (active === 'f-q') { const el = $('#f-q'); el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* not a text input any more */ } }
@@ -6156,6 +6264,9 @@ document.addEventListener('click', e => {
     case 'set-dense': dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); break;
     case 'set-anim': anim = el.dataset.v === '1'; saveLocal('anim', anim); applyAnim(); renderViewMenu(); break;
     case 'cm-quick': case 'cm-plus1': case 'cm-assign': case 'cm-chat': case 'cm-copy': case 'cm-window': { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); break; }
+    case 'review-queue': openReviewQueue(); break;
+    case 'msg-open-any': msgOpen(); break;
+    case 'att-go': state.tab = 'tasks'; state.filters.status = el.dataset.v; renderNow(); break;
     case 'ep-pick': epSet(el.dataset.pick, el.dataset.ref); break;
     case 'ep-clear': epSet(el.dataset.pick, ''); $(`#t-${el.dataset.pick}-q`)?.focus(); break;
     case 'focus-start': closeCardMenu(); focusStart(el.dataset.id).then(refreshFocusSlot); break;

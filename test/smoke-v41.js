@@ -100,6 +100,29 @@ app.on('browser-window-created', (_e, win) => {
         await js(`document.querySelector('main').scrollTop = 0`);
       });
 
+
+      await step('48, 49: «Мой день» and the review queue', async () => {
+        await click('[data-act="tab"][data-id="day"]'); await wait(400);
+        check('48: «Мой день» first tab, KPIs and lists', (await js(`document.querySelector('.tabs [data-act="tab"]')?.dataset.id`)) === 'day' && await js(`document.querySelectorAll('.day-kpi').length === 4 && !!document.querySelector('.day-list')`));
+        await shot('41-16-my-day');
+        const before = await js(`(() => { const a = []; for (const t of window.AppBridge.state.tasks.values()) if (t.status === 'review') a.push(t); return a.map(t => t.id); })()`);
+        if (!before.length) { log.push('info: no review cards in demo'); return; }
+        await click('.day [data-act="review-queue"]'); await wait(300);
+        check('49: queue opens with «1 из N»', /1 из/.test(await text('#rq-root')));
+        await shot('41-17-review-queue');
+        const st = () => before.map(id => data().tasks[id]?.status);
+        await click('#rq-root [data-rq="remarks"]'); await wait(200);
+        check('49: return without remarks is refused with a message', st().every(x => x === 'review') && /без замечаний/.test(await text('#toast')), st().join());
+        await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))`); await wait(700);
+        check('49: A accepts one and moves on', st().filter(x => x === 'done').length === 1, st().join());
+        if (before.length > 1) {
+          await setVal('#rq-note', 'Нет розеток в кабинете 214'); await click('#rq-root [data-rq="remarks"]'); await wait(700);
+          const back = before.map(id => data().tasks[id]).find(t => t.status === 'revision');
+          check('49: the next one returned with the remark', !!back && (back.history || []).some(h => h.note === 'Нет розеток в кабинете 214'), st().join());
+        }
+        await js(`document.querySelector('#rq-root [data-rq="close"]')?.click()`); await wait(200);
+      });
+
       await step('7, 8: Gantt — assignments hidden by default, no-executor icon', async () => {
         await click('[data-act="tab"][data-id="gantt"]'); await wait(400);
         check('assignment hidden', !(await js(`!!document.querySelector('[data-bar="v41-as"]')`)));
