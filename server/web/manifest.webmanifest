@@ -1,0 +1,11 @@
+{
+  "name": "Пульт главспеца",
+  "short_name": "Пульт",
+  "start_url": "/app/",
+  "scope": "/app/",
+  "display": "standalone",
+  "background_color": "#F2F4F7",
+  "theme_color": "#F26A1F",
+  "lang": "ru",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

@@ -1,0 +1,28 @@
+/* The web version: no window buttons of a desktop app; the sign-in screen; a phone. */
+html.web [data-act="minimize"], html.web [data-act="hide"], html.web #btn-max, html.web #btn-compact, html.web #btn-pin, html.web .vm-tg, html.web #unlock,
+html.web .alpha, html.web #btn-fb, html.web [data-act="open-data-folder"], html.web [data-act="autobackup"] { display: none !important }
+html.web .shell { border-radius: 0 }
+#web-login { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px; background: #F2F4F7; font-family: Montserrat, system-ui, sans-serif }
+#web-login[hidden] { display: none }
+.wl-card { width: min(380px, 100%); background: #fff; border: 1px solid #DFE4EA; border-top: 3px solid #F26A1F; padding: 24px; display: flex; flex-direction: column; gap: 12px; color: #1D1E21 }
+.wl-logo { height: 28px; align-self: flex-start }
+.wl-card h1 { font-size: 20px; font-weight: 600; margin: 4px 0 0 }
+.wl-sub, .wl-hint { color: #5E6673; font-size: 13px; margin: 0 }
+.wl-note { background: #FFF4EC; color: #B04E0D; padding: 8px 10px; font-size: 13px; margin: 0 }
+.wl-card label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: #5E6673 }
+.wl-card input { height: 42px; border: 1px solid #DFE4EA; background: #F2F4F7; padding: 0 12px; font: 500 15px Montserrat, system-ui, sans-serif; color: #1D1E21 }
+.wl-card input:focus { outline: 2px solid #F26A1F; outline-offset: -1px }
+.wl-card button { height: 44px; border: 0; background: #F26A1F; color: #fff; font: 600 14px Montserrat, system-ui, sans-serif; cursor: pointer }
+.wl-card button:disabled { opacity: .6 }
+.wl-err { color: #B3261E; font-size: 13px; margin: 0 }
+@media (max-width: 700px) {
+  html.web body { font-size: 14px }
+  html.web .bar-row { flex-wrap: wrap; height: auto; row-gap: 4px }
+  html.web #tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none }
+  html.web #tabs .tab { flex: none }
+  html.web .drawer { width: 100vw !important; max-width: 100vw }
+  html.web .modal, html.web .modal.wide { width: calc(100vw - 16px) !important; max-height: calc(100vh - 16px); overflow: auto }
+  html.web .tbl-wrap, html.web table { overflow-x: auto }
+  html.web .msg-panel.side { width: 100vw }
+  html.web .doc-tabs { overflow-x: auto }
+}
