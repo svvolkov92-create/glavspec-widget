@@ -155,6 +155,17 @@ app.on('browser-window-created', (_e, win) => {
         await js(`(() => { const s = document.querySelector('#gq-project'); s.value = ''; s.dispatchEvent(new Event('input', { bubbles: true })); })()`); await wait(200);
       });
 
+
+      await step('59: portfolio chart', async () => {
+        await click('[data-act="tab"][data-id="projects"]'); await wait(300);
+        await js(`document.querySelector('[data-act="project-back"]')?.click()`); await wait(150);
+        await click('[data-act="proj-mode"][data-v="portfolio"]'); await wait(400);
+        const n = await js(`({ rows: document.querySelectorAll('.pf-row:not(.pf-head):not(.pf-loadrow)').length, bars: document.querySelectorAll('.pf-bar').length, load: document.querySelectorAll('.pf-load').length })`);
+        check('59: projects with phases on one scale, load below', n.rows >= 2 && n.bars >= 4 && n.load > 4, JSON.stringify(n));
+        await shot('41-20-portfolio');
+        await click('[data-act="proj-mode"][data-v="list"]'); await wait(200);
+      });
+
       await step('7, 8: Gantt — assignments hidden by default, no-executor icon', async () => {
         await click('[data-act="tab"][data-id="gantt"]'); await wait(400);
         check('assignment hidden', !(await js(`!!document.querySelector('[data-bar="v41-as"]')`)));
