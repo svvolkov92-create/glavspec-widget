@@ -149,8 +149,9 @@
       contractors = contractors.filter(c => cids.has(c.id)).map(c => { const { requisites, ...rest } = c; return rest; });
     }
     const chats = (snapshot.chats || []).filter(c => canSeeChat(user, c, snapshot.projects || []));
-    // «Договор» in the project plan and the customer's contract, payments and bills are for GIPs only.
-    if (!isGip(user)) projects = projects.map(p => { const { contract, payments, bills, ...rest } = p; return Array.isArray(p.phases) ? { ...rest, phases: p.phases.filter(ph => ph.key !== 'contract') } : rest; });
+    // «Договор» in the project plan and the customer's contract, payments and bills: the GIP, and a chief the GIP
+    // gave the money to («видит бюджет»).
+    if (!money) projects = projects.map(p => { const { contract, payments, bills, ...rest } = p; return Array.isArray(p.phases) ? { ...rest, phases: p.phases.filter(ph => ph.key !== 'contract') } : rest; });
     // The org structure is seen by every staff member (4.1).
     const depts = (snapshot.depts || []).filter(d => !d.deletedAt);
     return { projects, contractors, tasks, users, chats, depts };
