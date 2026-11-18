@@ -136,8 +136,8 @@ app.on('browser-window-created', (_e, win) => {
 
       await step('tech card window', async () => {
         await click('[data-act="techcard"]'); await wait(300);
-        check('opens with sections', (await js(`document.querySelectorAll('.tc-nav button').length`)) === 6);
-        for (const sec of ['source', 'waves', 'assign', 'rd', 'summary']) {
+        check('opens with sections', (await js(`document.querySelectorAll('.tc-nav button').length`)) === 7); // 4.6: + «Кто кому что»
+        for (const sec of ['source', 'waves', 'bysec', 'assign', 'rd', 'summary']) {
           await click(`.tc-nav [data-sec="${sec}"]`); await wait(100);
           check('tech card: ' + sec, (await js(`document.querySelector('.tc-body').textContent.length`)) > 100);
           if (sec === 'waves') await shot('35-06-techcard-waves');
