@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# «Сервер Пульта» — установка и обновление на VPS (Ubuntu 22.04/24.04, Debian 12).
+#   bash install-pult-server.sh                 — адрес по IP сервера: pult.<IP>.sslip.io и kabinet.<IP>.sslip.io
+#   bash install-pult-server.sh --domain tandem.ru  — свой домен: pult.tandem.ru и kabinet.tandem.ru (DNS: обе на IP сервера)
+# Повторный запуск — обновление: данные (/var/lib/pult) и настройки остаются.
+set -euo pipefail
+VERSION="@VERSION@"
+DOMAIN=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --domain) DOMAIN="${2:-}"; shift 2 ;;
+    *) echo "Неизвестный параметр: $1"; exit 1 ;;
+  esac
+done
+say() { printf '\n\033[1;33m== %s\033[0m\n' "$*"; }
+die() { printf '\n\033[1;31mОшибка: %s\033[0m\n' "$*"; exit 1; }
+[ "$(id -u)" = 0 ] || die "запустите от root (sudo bash $0)"
+command -v apt-get >/dev/null || die "нужна Ubuntu или Debian"
+
+APP=/opt/pult-server
+DATA=/var/lib/pult
+export DEBIAN_FRONTEND=noninteractive
+
+say "Пакеты системы"
+apt-get update -qq
+apt-get install -y -qq ca-certificates curl gnupg debian-keyring debian-archive-keyring apt-transport-https tar >/dev/null
+
+say "Node.js 22"
+NODE_MAJOR=$(node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/' || echo 0)
+if [ "${NODE_MAJOR:-0}" -lt 20 ]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
+  apt-get install -y -qq nodejs >/dev/null
+fi
+node -v
+
+say "Caddy (шифрование HTTPS — сертификат Let's Encrypt получится сам)"
+if ! command -v caddy >/dev/null; then
+  if ! apt-get install -y -qq caddy >/dev/null 2>&1; then
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -qq && apt-get install -y -qq caddy >/dev/null
+  fi
+fi
+caddy version
+
+say "Адрес сервера"
+IP=$(curl -fsS4 --max-time 8 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+[ -n "$IP" ] || die "не удалось узнать внешний IP сервера"
+if [ -n "$DOMAIN" ]; then PULT_HOST="pult.$DOMAIN"; CAB_HOST="kabinet.$DOMAIN"
+else DASH=$(echo "$IP" | tr . -); PULT_HOST="pult.$DASH.sslip.io"; CAB_HOST="kabinet.$DASH.sslip.io"; fi
+echo "IP: $IP   Пульт: https://$PULT_HOST   Кабинет заказчика: https://$CAB_HOST"
+
+say "Файлы сервера → $APP"
+id pult >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin pult
+mkdir -p "$APP" "$DATA"
+TMP=$(mktemp -d)
+sed -n '/^__PAYLOAD_BELOW__$/,$p' "$0" | tail -n +2 | base64 -d | tar -xz -C "$TMP"
+rm -rf "$APP.new" && mv "$TMP/pult-server" "$APP.new"
+[ -f "$APP/config.json" ] && cp "$APP/config.json" "$APP.new/config.json"
+rm -rf "$APP.old" && { [ -d "$APP" ] && mv "$APP" "$APP.old" || true; } && mv "$APP.new" "$APP"
+rm -rf "$TMP"
+if [ ! -f "$APP/config.json" ] || [ -n "$DOMAIN" ]; then
+  cat > "$APP/config.json" <<JSON
+{
+  "name": "Сервер Пульта · ПМ «Тандем»",
+  "port": 8090,
+  "host": "127.0.0.1",
+  "dataDir": "$DATA",
+  "publicUrl": "https://$PULT_HOST",
+  "cabinetUrl": "https://$CAB_HOST",
+  "cabinetPort": 8091,
+  "cabinetTitle": "Мой Тандем",
+  "trustProxy": true,
+  "backupDays": 30
+}
+JSON
+fi
+chown -R pult:pult "$DATA"
+chown -R root:root "$APP" && chmod -R a+rX "$APP"
+
+say "Служба pult-server"
+cat > /etc/systemd/system/pult-server.service <<UNIT
+[Unit]
+Description=Сервер Пульта (общая база ПМ «Тандем»)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pult
+Group=pult
+WorkingDirectory=$APP
+ExecStart=$(command -v node) $APP/pult-server.js
+Environment=NODE_ENV=production
+Environment=PULT_CONFIG=$APP/config.json
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=$DATA
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable pult-server >/dev/null 2>&1
+systemctl restart pult-server
+
+say "Caddy: https://$PULT_HOST и https://$CAB_HOST"
+cat > /etc/caddy/Caddyfile <<CADDY
+$PULT_HOST {
+	encode gzip
+	reverse_proxy 127.0.0.1:8090
+}
+$CAB_HOST {
+	encode gzip
+	reverse_proxy 127.0.0.1:8091
+}
+CADDY
+systemctl enable caddy >/dev/null 2>&1
+systemctl restart caddy
+
+if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
+  say "Брандмауэр: открываю 80 и 443"
+  ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
+fi
+
+say "Проверка"
+for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8090/healthz >/dev/null 2>&1 && break; sleep 1; done
+curl -fsS http://127.0.0.1:8090/healthz >/dev/null || { journalctl -u pult-server -n 40 --no-pager; die "сервер не запустился (журнал выше)"; }
+OK_HTTPS="нет (сертификат ещё получается — проверьте через минуту)"
+for i in $(seq 1 40); do curl -fsS --max-time 5 "https://$PULT_HOST/healthz" >/dev/null 2>&1 && { OK_HTTPS="да"; break; }; sleep 3; done
+CODE=$(node -e "try{const a=require('$DATA/accounts.json');process.stdout.write(a.setupCode||'')}catch{}")
+
+INFO=/root/pult-server.txt
+{
+  echo "Сервер Пульта $VERSION — $(date '+%d.%m.%Y %H:%M')"
+  echo "Адрес для Пульта:          https://$PULT_HOST"
+  echo "Веб-версия (телефон):      https://$PULT_HOST/app/"
+  echo "Кабинет заказчика:         https://$CAB_HOST"
+  echo "HTTPS работает:            $OK_HTTPS"
+  if [ -n "$CODE" ]; then echo "Код установки:             $CODE"; else echo "База уже перенесена (код установки использован)."; fi
+  echo "Данные и ночные копии:     $DATA (копии — $DATA/backups, 30 дней)"
+  echo "Журнал сервера:            journalctl -u pult-server -f"
+} | tee "$INFO"
+echo
+if [ -n "$CODE" ]; then
+  echo "Дальше: в Пульте ГИПа → меню (Файл) → «Сервер Пульта…» → «Перенести мою базу на сервер»:"
+  echo "  адрес  $PULT_HOST   код  $CODE   и придумайте логин и пароль."
+fi
+echo "Эти сведения сохранены в $INFO"
+exit 0
+__PAYLOAD_BELOW__

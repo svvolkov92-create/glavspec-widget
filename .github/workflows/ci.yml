@@ -50,3 +50,26 @@ jobs:
         with:
           name: KabinetZakazchika-server
           path: dist/KabinetZakazchika-server.zip
+
+  pult-server:
+    name: Pult server (shared base) — tests and installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Server tests
+        run: node --test test/pult-server.test.js
+      - name: Web version on a phone (Playwright)
+        run: |
+          npm install --no-save --no-package-lock playwright@1.48.2
+          npx playwright install --with-deps chromium
+          node test/web-check.js
+      - name: Build the installer
+        run: bash server/build-installer.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PultServer
+          path: dist/PultServer/
+
