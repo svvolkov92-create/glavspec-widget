@@ -1718,3 +1718,13 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .rq-note { white-space: pre-wrap; padding: 8px 10px; background: var(--sunk); border-radius: 6px; min-height: 60px }
 .rq-body .lbl { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--muted) }
 .kbd { font: 600 11px/1 var(--f-mono); padding: 2px 5px; border: 1px solid currentColor; border-radius: 3px; opacity: .7; margin-left: 4px }
+/* Critical path (4.1.1, item 58) and the effect of a move (57) */
+#gantt .tl-bar.crit { box-shadow: 0 0 0 2px var(--bad); }
+#gantt .tl-bar .tl-float { margin-left: 6px; font-size: 10.5px; opacity: .75; font-weight: 600 }
+.cp-sum { display: inline-block; font-size: 11.5px; font-weight: 600; color: var(--ok, #2E8B57); background: color-mix(in srgb, var(--ok, #2E8B57) 10%, var(--surface)); padding: 1px 7px; border-radius: 10px; white-space: nowrap; margin-left: 6px }
+.cp-sum.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)) }
+.tl-ghost { position: absolute; height: 20px; border: 1px dashed var(--accent); background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--accent) 14%, transparent) 0 4px, transparent 4px 8px); pointer-events: none; z-index: 2; border-radius: 4px }
+#gantt .tl-bar.will-move { opacity: .45 }
+#drag-hint .dh-more { margin-top: 4px; font-weight: 500; line-height: 1.35 }
+.shift-follow { margin: 8px 0 }
+#gantt .tl-bar .tl-cp { display: inline-block; font-size: 9.5px; font-weight: 800; color: #fff; background: var(--bad); padding: 0 4px; border-radius: 3px; margin-right: 4px; line-height: 14px }

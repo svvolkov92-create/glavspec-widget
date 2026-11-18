@@ -421,6 +421,53 @@
     return false;
   }
 
+  /* ---------- 4.1.1: critical path (item 58) and what a move drags along (item 57) ----------
+     Cards are finish-to-start: a card starts after all its predecessors finish. Dates are calendar days. */
+  // Of the given active cards with dates: the end (latest finish), each card's float (days it can slip without
+  // moving the end) and the critical ones (float ≤ 0).
+  function criticalPath(tasks) {
+    const list = tasks.filter(t => t.status !== 'done' && isDate(t.start) && isDate(t.finish));
+    const byId = new Map(list.map(t => [t.id, t]));
+    const succ = new Map(list.map(t => [t.id, []]));
+    for (const t of list) for (const id of depsOf(t)) if (byId.has(id)) succ.get(id).push(t.id);
+    if (!list.length) return { end: '', float: new Map(), critical: new Set() };
+    const end = list.reduce((m, t) => (t.finish > m ? t.finish : m), list[0].finish), endN = dayNum(end);
+    const lf = new Map(); // latest finish (day number), memoised
+    const latest = (id, seen = new Set()) => {
+      if (lf.has(id)) return lf.get(id);
+      if (seen.has(id)) return endN; // a loop (should not exist) — treat as free
+      seen.add(id);
+      let v = endN;
+      for (const sId of succ.get(id)) { const st = byId.get(sId); const dur = dayNum(st.finish) - dayNum(st.start); v = Math.min(v, latest(sId, seen) - dur - 1); }
+      lf.set(id, v);
+      return v;
+    };
+    const float = new Map(), critical = new Set();
+    for (const t of list) { const f = latest(t.id) - dayNum(t.finish); float.set(t.id, f); if (f <= 0) critical.add(t.id); }
+    return { end, float, critical };
+  }
+  // Moving card `id` to `next` {start, finish}: successors that would start before a predecessor ends are pushed
+  // forward keeping their length, and so on down the chain. Returns Map id → {start, finish} (the moved card included).
+  function shiftFollowers(tasks, id, next) {
+    const byId = new Map(tasks.filter(t => t.status !== 'done').map(t => [t.id, t]));
+    const out = new Map([[id, { start: next.start, finish: next.finish }]]);
+    const dates = x => out.get(x.id) || { start: x.start, finish: x.finish };
+    const queue = [id];
+    for (let guard = 0; queue.length && guard < 2000; guard++) {
+      const cur = queue.shift(), cf = dates(byId.get(cur) || { id: cur, ...out.get(cur) }).finish;
+      if (!isDate(cf)) continue;
+      for (const t of byId.values()) {
+        if (!depsOf(t).includes(cur) || !isDate(t.start)) continue;
+        const d = dates(t), need = addDays(cf, 1);
+        if (d.start >= need) continue;
+        const len = isDate(d.finish) ? dayNum(d.finish) - dayNum(d.start) : 0;
+        out.set(t.id, { start: need, finish: isDate(d.finish) ? addDays(need, len) : d.finish });
+        queue.push(t.id);
+      }
+    }
+    return out;
+  }
+
   /* ---------- what needs attention (UI lists, compact mode, notifications) ---------- */
   function attention(tasks, today = todayStr()) {
     const out = { overdue: [], week: [], soon: [], dueIn3: [], review: [], milestones: [], pay: [], noAct: [], blocked: [] };
@@ -534,7 +581,7 @@
   const shiftsOf = memo(t => shiftsOfRaw(t));
 
   return {
-    STATUSES, ACTIVE, PROJECT_STATUSES, PHASES, phaseLabel, defaultPhases, phaseState, projectNow, phaseDays, planPhases, DOC_KINDS, docRule, docUntil, docKindOf, TRANSITIONS, firstTime, projectGoal, thanksFor, MARK_GROUPS, SHIFT_REASONS, PAY_TRIGGERS, progress, readiness, readinessManual, READY_MIN, READY_MAX,
+    STATUSES, ACTIVE, PROJECT_STATUSES, PHASES, phaseLabel, defaultPhases, phaseState, projectNow, phaseDays, planPhases, criticalPath, shiftFollowers, DOC_KINDS, docRule, docUntil, docKindOf, TRANSITIONS, firstTime, projectGoal, thanksFor, MARK_GROUPS, SHIFT_REASONS, PAY_TRIGGERS, progress, readiness, readinessManual, READY_MIN, READY_MAX,
     normalizeMarks, splitMarks, sectionsOf, todayStr, isDate, dayNum, addDays, fmtDate, parseMoney, cents,
     budgetOf, paidOf, restOf, timing, totals, sortByDeadline,
     visible, historyOf, shiftsOf, depsOf, dependencyIssues, wouldCycle, Cal, reviewStats, lateness, reliability, paymentPlan, milestonesOf, matchCount, attention, digestText,

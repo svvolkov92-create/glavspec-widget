@@ -421,7 +421,7 @@ const EDIT_HINT = 'Двойной щелчок — изменить прямо �
 
 /* ---------- editing a card's dates and fields outside the card form ---------- */
 // Asks why the deadline moves; resolves to {reason, note} or null when cancelled.
-function askShiftReason(t, from, to) {
+function askShiftReason(t, from, to, followers = null) {
   return new Promise(resolve => {
     const root = document.createElement('div');
     root.className = 'modal-back';
@@ -430,6 +430,7 @@ function askShiftReason(t, from, to) {
       <h2 id="mtitle">Перенос срока</h2>
       <p><b>${esc(marksText(t))}</b> · ${esc(projectOf(t)?.name || '')}</p>
       <p class="shift-h">${fmtDate(from)} → ${fmtDate(to)} <b>(${d >= 0 ? '+' : ''}${d} дн.)</b></p>
+      ${followers?.size ? `<div class="hint2 shift-follow"><label class="chk"><input type="checkbox" id="m-follow" checked> Сдвинуть и зависимые карточки (${followers.size}): ${[...followers.keys()].map(fid => esc(marksText(state.tasks.get(fid) || {}))).join(', ')}</label></div>` : ''}
       <div class="f"><label class="req" for="m-reason">Причина переноса</label>
         <select id="m-reason"><option value="">— выберите —</option>${Object.entries(SHIFT_REASONS).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
       <div class="f"><label for="m-note">Комментарий</label><input id="m-note" maxlength="200" placeholder="Например: заказчик сменил ТУ"></div>
@@ -446,13 +447,13 @@ function askShiftReason(t, from, to) {
       e.stopPropagation();
       const reason = root.querySelector('#m-reason').value;
       if (!reason) { root.querySelector('#m-err').hidden = false; return; }
-      close({ reason, note: root.querySelector('#m-note').value.trim() });
+      close({ reason, note: root.querySelector('#m-note').value.trim(), follow: !!root.querySelector('#m-follow')?.checked });
     });
   });
 }
 
 // Saves new start/finish; a moved finish is logged with its reason like in the card form.
-async function commitDates(id, patch) {
+async function commitDates(id, patch, followers = null) {
   const t = state.tasks.get(id);
   if (!t) return false;
   const next = { start: patch.start !== undefined ? patch.start : t.start || '', finish: patch.finish !== undefined ? patch.finish : t.finish || '' };
@@ -460,10 +461,20 @@ async function commitDates(id, patch) {
   if (isDate(next.start) && isDate(next.finish) && next.finish < next.start) { toast('Финиш не может быть раньше старта.', true); renderNow(); return false; }
   const history = Array.isArray(t.history) ? [...t.history] : [];
   if (isDate(t.finish) && isDate(next.finish) && t.finish !== next.finish) {
-    const r = await askShiftReason(t, t.finish, next.finish);
+    const r = await askShiftReason(t, t.finish, next.finish, followers);
     if (!r) { renderNow(); return false; }
     const now = new Date();
     history.push({ ts: now.toISOString(), date: todayStr(now), type: 'finish', from: t.finish, to: next.finish, reason: r.reason, note: r.note });
+    // 4.1.1 (57): the cards waiting for this one move with it, each with the same reason in its history.
+    if (followers?.size && r.follow) {
+      const ops = [op.update('tasks', id, { ...next, history })];
+      for (const [fid, x] of followers) {
+        const f = state.tasks.get(fid);
+        if (!f) continue;
+        ops.push(op.update('tasks', fid, { start: x.start, finish: x.finish, history: [...(f.history || []), { ts: now.toISOString(), date: todayStr(now), type: 'finish', from: f.finish, to: x.finish, reason: r.reason, note: `вслед за «${marksText(t)}»${r.note ? ' · ' + r.note : ''}` }] }));
+      }
+      return write(ops, `${marksText(t)} и ещё ${followers.size}: сроки перенесены`);
+    }
   }
   return write(op.update('tasks', id, { ...next, history }), `${marksText(t)}: ${fmtDate(next.start)} → ${fmtDate(next.finish)}`);
 }
@@ -2444,6 +2455,20 @@ const ganttModeSeg = () => `<span class="seg g-mode"><button class="btn sm ${sta
 const NOEXEC_ICON = '<svg class="noexec-ic" viewBox="0 0 16 16" aria-label="нет исполнителя" role="img"><circle cx="6" cy="4.6" r="2.6" fill="currentColor"/><path d="M1.2 14.5c.3-3.3 2.2-5.2 4.8-5.2s4.5 1.9 4.8 5.2z" fill="currentColor"/><text x="12.6" y="8.6" font-size="8.5" font-weight="800" text-anchor="middle" fill="currentColor" font-family="Arial,sans-serif">?</text></svg>';
 // «Межраздельные задания» — shown or hidden in one view; remembered per view.
 const assignChk = view => `<label class="chk sm-chk" title="Задания смежным разделам (кто кому что выдаёт)"><input type="checkbox" data-act="show-assign" data-v="${view}"${state.showAssign[view] ? ' checked' : ''}> Межраздельные задания</label>`;
+/* ---------- 4.1.1: critical path (58) and the effect of a move (57) ---------- */
+let cpCache = null;
+function cpOf(pid) {
+  if (!cpCache || cpCache.tasks !== state.tasks) cpCache = { tasks: state.tasks, m: new Map() };
+  if (!cpCache.m.has(pid)) cpCache.m.set(pid, L.criticalPath(tasksArr().filter(t => t.projectId === pid)));
+  return cpCache.m.get(pid);
+}
+// The contract date the project must meet: the end of «Стадия Р», else of «Стадия П».
+const projDeadline = p => { const ph = k => (p?.phases || []).find(x => x.key === k); return (isDate(ph('r')?.finish) && ph('r').finish) || (isDate(ph('p')?.finish) && ph('p').finish) || ''; };
+function cpSummary(p, end = cpOf(p.id).end) {
+  if (!end) return '';
+  const dl = projDeadline(p), diff = dl ? dayNum(dl) - dayNum(end) : null;
+  return `<span class="cp-sum ${diff !== null && diff < 0 ? 'bad' : ''}" title="Расчётная сдача — окончание последней работы с учётом зависимостей">сдача ${fmtDate(end)}${dl ? ` · договор ${fmtDate(dl)} · ${diff >= 0 ? `запас ${diff} дн.` : `опоздание ${-diff} дн.`}` : ''}</span>`;
+}
 function viewGantt() {
   if (isEmpty()) return emptyState();
   if (state.gantt.mode === 'vac') return viewVacations();
@@ -2456,6 +2481,7 @@ function viewGantt() {
   const gq = state.ganttFilter || (state.ganttFilter = { project: '', mark: '' });
   const active = tasksArr().filter(t => t.status !== 'done' && (state.showAssign.gantt || t.kind !== 'assign') && (!gq.project || t.projectId === gq.project) && (!gq.mark || sectionsOf(t).includes(gq.mark)));
   const byProject = g.group === 'project', byOwner = g.group === 'owner' && !isSpec();
+  const crit = !!g.crit;
   const groups = byProject
     ? liveProjects().map(p => ({ key: 'p' + p.id, name: p.name, sub: p.code, tasks: active.filter(t => t.projectId === p.id) }))
     : byOwner ? liveUsers().sort(byName).map(u => ({ key: 'u' + u.id, name: u.name, user: u, sub: A.ROLES[u.role]?.label, tasks: active.filter(t => hasOwner(t, u.id)) }))
@@ -2523,10 +2549,11 @@ function viewGantt() {
       const blocked = L.dependencyIssues(t, state.tasks, state.today).length > 0;
       const noexec = !executorOf(t);
       const awayHit = absHits(t).some(h => h.onFinish);
-      const bar = right > left ? `<button class="tl-bar tone-${tone} ${pos(s) < 0 ? 'cut-l' : ''} ${pos(planEnd) + dayW > 100 ? 'cut-r' : ''} ${blocked ? 'blocked' : ''} ${noexec ? 'noexec' : ''} ${awayHit ? 'away' : ''}" type="button"
+      const cp = crit ? cpOf(t.projectId) : null, isCrit = cp?.critical.has(t.id), fl = cp?.float.get(t.id);
+      const bar = right > left ? `<button class="tl-bar tone-${tone} ${isCrit ? 'crit' : ''} ${pos(s) < 0 ? 'cut-l' : ''} ${pos(planEnd) + dayW > 100 ? 'cut-r' : ''} ${blocked ? 'blocked' : ''} ${noexec ? 'noexec' : ''} ${awayHit ? 'away' : ''}" type="button"
         data-act="open-task" data-id="${esc(t.id)}" data-bar="${esc(t.id)}"
         style="left:${left}%;width:${Math.max(0.5, right - left)}%;top:${lane * 26 + 3}px"
-        title="${esc(label)}\n${fmtDate(t.start)} → ${fmtDate(t.finish)} · ${esc(tm.text)}${awayHit ? '\nФиниш приходится на отсутствие: ' + esc(absHits(t).filter(h => h.onFinish).map(A.absenceText).join('; ')) : ''}\nТяните — сдвинуть работу, края — изменить старт или финиш">${noexec ? NOEXEC_ICON : ''}${esc(label)}</button>` : '';
+        title="${esc(label)}\n${fmtDate(t.start)} → ${fmtDate(t.finish)} · ${esc(tm.text)}${awayHit ? '\nФиниш приходится на отсутствие: ' + esc(absHits(t).filter(h => h.onFinish).map(A.absenceText).join('; ')) : ''}\nТяните — сдвинуть работу, края — изменить старт или финиш">${isCrit ? '<span class="tl-cp" title="Критический путь: задержка сдвинет сдачу проекта">КП</span>' : ''}${noexec ? NOEXEC_ICON : ''}${esc(label)}${crit && !isCrit && fl > 0 ? `<span class="tl-float">запас ${fl} дн.</span>` : ''}</button>` : '';
       return bar + ext + ms;
     }).join('');
     // Staff rows: vacation / sick leave as a hatched band over the row.
@@ -2537,7 +2564,7 @@ function viewGantt() {
     const busy = lanes.length;
     const outside = [before ? `${before} раньше` : '', after ? `${after} позже` : ''].filter(Boolean).join(', ');
     return `<div class="tl-row ${grp.unassigned ? 'tl-unassigned' : ''}">
-      <div class="tl-name">${foldBtn(gkey, false)}<b title="${esc(grp.name)}">${esc(grp.name)}</b><span class="hint">${grp.sub ? `${esc(grp.sub)} · ` : ''}${grp.tasks.length ? `в работе ${grp.tasks.length}` : byProject ? 'нет незавершённых' : 'свободен'}${!byProject && busy > 1 ? ` · одновременно до <span class="${busy >= 3 ? 'neg' : ''}">${busy}</span>` : ''}${outside ? ` · вне экрана: ${outside}` : ''}</span></div>
+      <div class="tl-name">${foldBtn(gkey, false)}<b title="${esc(grp.name)}">${esc(grp.name)}</b>${crit && byProject && state.projects.get(grp.key.slice(1)) ? cpSummary(state.projects.get(grp.key.slice(1))) : ''}<span class="hint">${grp.sub ? `${esc(grp.sub)} · ` : ''}${grp.tasks.length ? `в работе ${grp.tasks.length}` : byProject ? 'нет незавершённых' : 'свободен'}${!byProject && busy > 1 ? ` · одновременно до <span class="${busy >= 3 ? 'neg' : ''}">${busy}</span>` : ''}${outside ? ` · вне экрана: ${outside}` : ''}</span></div>
       <div class="tl-track" data-gantt-track style="height:${Math.max(1, lanes.length) * 26 + 6}px">${shade}${away}${grid}${today}${bars}</div>
     </div>`;
   }).join('');
@@ -2549,6 +2576,7 @@ function viewGantt() {
       <select id="gq-project" aria-label="Проект" class="sm-sel"><option value="">Все проекты</option>${liveProjects().map(p => `<option value="${esc(p.id)}"${gq.project === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
       <select id="gq-mark" aria-label="Раздел" class="sm-sel"><option value="">Все разделы</option>${normalizeMarks(tasksArr().filter(t => t.status !== 'done').flatMap(sectionsOf)).map(m => `<option value="${esc(m)}"${gq.mark === m ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select>
       ${assignChk('gantt')}
+      <button class="btn sm ${crit ? 'on' : ''}" type="button" data-act="g-crit" title="Подсветить работы, от которых зависит дата сдачи; у остальных — запас дней">Критический путь</button>${crit && gq.project && state.projects.get(gq.project) ? cpSummary(state.projects.get(gq.project)) : ''}
       <button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="1" data-keys="${esc(groups.map(g => 'g:' + g.key).join(' '))}" title="Свернуть все строки">▸ все</button><button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="0" data-keys="${esc(groups.map(g => 'g:' + g.key).join(' '))}" title="Развернуть все строки">▾ все</button>
       <div class="seg" role="group" aria-label="Группировка"><button class="btn sm ${byProject || byOwner ? '' : 'on'}" type="button" data-act="g-group" data-group="contractor">По исполнителям</button>${isSpec() ? '' : `<button class="btn sm ${byOwner ? 'on' : ''}" type="button" data-act="g-group" data-group="owner">По ответственным</button>`}<button class="btn sm ${byProject ? 'on' : ''}" type="button" data-act="g-group" data-group="project">По проектам</button></div>
       <div class="seg" role="group" aria-label="Масштаб">${preset}</div>
@@ -2728,8 +2756,31 @@ document.addEventListener('pointermove', e => {
   d.el.style.left = left + '%';
   d.el.style.width = w + '%';
   d.el.classList.add('editing');
+  previewFollowers(d);
   showDragHint(e, d);
 });
+// While a bar is dragged: where the cards waiting for it would go (hatched ghosts) and the new end of the project.
+function previewFollowers(d) {
+  const t = state.tasks.get(d.id);
+  $$('#gantt .tl-ghost').forEach(x => x.remove());
+  d.follow = null;
+  if (!t || !d.delta || d.edit === 'start') return;
+  const next = draggedDates(t, d), moved = L.shiftFollowers(tasksArr(), t.id, next);
+  moved.delete(t.id);
+  if (!moved.size) return;
+  const g = state.gantt, pct = x => ((dayNum(x) - dayNum(g.from)) / g.days) * 100, dayW = 100 / g.days;
+  for (const [id, x] of moved) {
+    const bar = $(`#gantt .tl-bar[data-bar="${CSS.escape(id)}"]`);
+    if (!bar || !isDate(x.start) || !isDate(x.finish)) continue;
+    const gh = document.createElement('span');
+    gh.className = 'tl-ghost';
+    gh.style.cssText = `left:${pct(x.start)}%;width:${Math.max(0.5, pct(x.finish) + dayW - pct(x.start))}%;top:${bar.style.top}`;
+    bar.parentElement.append(gh);
+    bar.classList.add('will-move');
+  }
+  const p = projectOf(t), all = tasksArr().filter(y => y.projectId === t.projectId).map(y => moved.has(y.id) || y.id === t.id ? { ...y, ...(y.id === t.id ? next : moved.get(y.id)) } : y);
+  d.follow = { moved, end0: cpOf(t.projectId).end, end1: L.criticalPath(all).end, p };
+}
 function showDragHint(e, d) {
   const t = state.tasks.get(d.id);
   const { start, finish } = draggedDates(t, d);
@@ -2737,6 +2788,14 @@ function showDragHint(e, d) {
   if (!hint) { hint = document.createElement('div'); hint.id = 'drag-hint'; document.body.append(hint); }
   const sign = d.delta > 0 ? '+' : '';
   hint.textContent = `${fmtDate(start)} → ${fmtDate(finish)}${d.delta ? ` (${sign}${d.delta} дн.)` : ''}`;
+  const f = d.follow;
+  if (f) {
+    const dl = projDeadline(f.p), late = dl && f.end1 > dl ? dayNum(f.end1) - dayNum(dl) : 0;
+    const more = document.createElement('div');
+    more.className = 'dh-more';
+    more.innerHTML = `сдвинутся ещё ${f.moved.size} ${plural(f.moved.size, 'карточка', 'карточки', 'карточек')}${f.end1 !== f.end0 ? `<br>сдача проекта ${fmtDate(f.end0)} → <b>${fmtDate(f.end1)}</b>` : ''}${late ? `<br><b class="neg">позже договора на ${late} дн.</b>` : ''}`;
+    hint.append(more);
+  }
   hint.style.left = e.clientX + 14 + 'px';
   hint.style.top = e.clientY + 16 + 'px';
 }
@@ -2754,6 +2813,7 @@ document.addEventListener('pointerup', () => {
   ganttDrag = null;
   document.body.classList.remove('panning', 'col-resizing', 'bar-dragging');
   document.getElementById('drag-hint')?.remove();
+  $$('#gantt .tl-ghost').forEach(x => x.remove()); $$('#gantt .will-move').forEach(x => x.classList.remove('will-move'));
   if (d.mode === 'resize') saveLocal('gantt', { days: state.gantt.days, nameW: state.gantt.nameW, group: state.gantt.group });
   // The click that ends a drag must not open a card. Chromium may skip that click when the bar under the
   // pointer was re-rendered, so the guard is cleared on the next task and can never swallow a later click.
@@ -2761,7 +2821,7 @@ document.addEventListener('pointerup', () => {
   if (d.mode === 'bar' && d.moved) {
     const t = state.tasks.get(d.id);
     if (!t || !d.delta) { renderNow(); return; }
-    commitDates(d.id, draggedDates(t, d));
+    commitDates(d.id, draggedDates(t, d), d.follow?.moved);
   }
 });
 document.addEventListener('wheel', e => {
@@ -6264,6 +6324,7 @@ document.addEventListener('click', e => {
     case 'set-dense': dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); break;
     case 'set-anim': anim = el.dataset.v === '1'; saveLocal('anim', anim); applyAnim(); renderViewMenu(); break;
     case 'cm-quick': case 'cm-plus1': case 'cm-assign': case 'cm-chat': case 'cm-copy': case 'cm-window': { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); break; }
+    case 'g-crit': state.gantt.crit = !state.gantt.crit; saveLocal('ganttCrit', state.gantt.crit); renderNow(); break;
     case 'review-queue': openReviewQueue(); break;
     case 'msg-open-any': msgOpen(); break;
     case 'att-go': state.tab = 'tasks'; state.filters.status = el.dataset.v; renderNow(); break;
@@ -6601,6 +6662,7 @@ applyNav();
 applyDense();
 applyAnim();
 state.kanban.lanes = loadLocal('kbLanes', '') || '';
+state.gantt.crit = !!loadLocal('ganttCrit', false);
 state.showAssign = { ...state.showAssign, ...loadLocal('showAssign', {}) };
 state.kbShow = { ...state.kbShow, ...loadLocal('kbShow', {}) };
 $('#app').addEventListener('scroll', rememberScroll, { passive: true });

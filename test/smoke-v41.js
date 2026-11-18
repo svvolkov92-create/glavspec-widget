@@ -123,6 +123,38 @@ app.on('browser-window-created', (_e, win) => {
         await js(`document.querySelector('#rq-root [data-rq="close"]')?.click()`); await wait(200);
       });
 
+
+      await step('58, 57: critical path and the effect of a move', async () => {
+        const D = n => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+        const proj = { type: 'set', col: 'projects', id: 'cp-p', data: { name: 'Котельная КП', code: 'КП-1', status: 'p_work', phases: [{ key: 'r', start: D(0), finish: D(27) }], createdAt: new Date().toISOString() } };
+        const mk = (id, sec, a, b, deps) => ({ type: 'set', col: 'tasks', id, data: { projectId: 'cp-p', sections: [sec], status: 'in_progress', readiness: 10, start: D(a), finish: D(b), dependsOn: deps, ownerId: 'u-gip', contractorId: 'demo-c1', createdAt: new Date().toISOString() } });
+        await js(`window.api.write(${JSON.stringify([proj, mk('cp-kr', 'КР', 0, 10, []), mk('cp-ov', 'ОВ', 11, 14, ['cp-kr']), mk('cp-eom', 'ЭОМ', 11, 20, ['cp-kr']), mk('cp-pos', 'ПОС', 21, 25, ['cp-eom'])])}, { action: 'test' })`); await wait(500);
+        await click('[data-act="tab"][data-id="gantt"]'); await wait(300);
+        await js(`(() => { const s = document.querySelector('#gq-project'); s.value = 'cp-p'; s.dispatchEvent(new Event('input', { bubbles: true })); })()`); await wait(300);
+        await click('[data-act="g-crit"]'); await wait(300);
+        const crit = await js(`['cp-kr', 'cp-eom', 'cp-pos', 'cp-ov'].map(id => document.querySelector('.tl-bar[data-bar="' + id + '"]')?.classList.contains('crit')).join()`);
+        check('58: КР → ЭОМ → ПОС critical, ОВ not', crit === 'true,true,true,false', crit);
+        check('58: ОВ shows its float', /запас 11 дн/.test(await text('.tl-bar[data-bar="cp-ov"]')), await text('.tl-bar[data-bar="cp-ov"]'));
+        const sum = await js(`document.querySelector('.cp-sum')?.textContent || ''`);
+        check('58: «сдача … · договор … · запас 2 дн.»', /сдача .* договор .* запас 2 дн/.test(sum), sum);
+        await shot('41-18-critical-path');
+        // drag КР by +4 days: the pointer moves ~4 day widths
+        const geo = await js(`(() => { const b = document.querySelector('.tl-bar[data-bar="cp-kr"]').getBoundingClientRect(); const tr = document.querySelector('#gantt [data-gantt-track]').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, day: tr.width / window.AppBridge.state.gantt.days }; })()`);
+        const ev = (type, x) => js(`document.querySelector('.tl-bar[data-bar="cp-kr"]').dispatchEvent(new PointerEvent('${type}', { bubbles: true, clientX: ${x}, clientY: ${geo.y}, button: 0 }))`);
+        await ev('pointerdown', geo.x); await ev('pointermove', geo.x + 10); await ev('pointermove', geo.x + geo.day * 4.2); await wait(150);
+        const prev = await js(`({ ghosts: document.querySelectorAll('#gantt .tl-ghost').length, hint: document.querySelector('#drag-hint')?.textContent || '' })`);
+        check('57: ghosts of the cards that move and the hint', prev.ghosts >= 3 && /сдвинутся ещё 3/.test(prev.hint) && /сдача проекта/.test(prev.hint) && /позже договора на 2 дн/.test(prev.hint), JSON.stringify(prev));
+        await shot('41-19-move-preview');
+        await js(`document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))`); await wait(300);
+        check('57: the reason window offers to move the waiting cards', await js(`!!document.querySelector('#m-follow')?.checked`));
+        await js(`(() => { const s = document.querySelector('#m-reason'); s.value = s.options[1].value; document.querySelector('#m-reason').closest('form').requestSubmit(); })()`); await wait(700);
+        const t = data().tasks;
+        check('57: КР +4, ЭОМ, ОВ and ПОС moved after it', t['cp-kr'].finish === D(14) && t['cp-eom'].start === D(15) && t['cp-eom'].finish === D(24) && t['cp-pos'].start === D(25) && t['cp-ov'].start === D(15), JSON.stringify(['cp-kr', 'cp-ov', 'cp-eom', 'cp-pos'].map(id => t[id].start + '…' + t[id].finish)));
+        check('57: the reason is in the followers’ history', (t['cp-pos'].history || []).some(h => h.type === 'finish' && /вслед за/.test(h.note || '')));
+        await click('[data-act="g-crit"]'); await wait(200);
+        await js(`(() => { const s = document.querySelector('#gq-project'); s.value = ''; s.dispatchEvent(new Event('input', { bubbles: true })); })()`); await wait(200);
+      });
+
       await step('7, 8: Gantt — assignments hidden by default, no-executor icon', async () => {
         await click('[data-act="tab"][data-id="gantt"]'); await wait(400);
         check('assignment hidden', !(await js(`!!document.querySelector('[data-bar="v41-as"]')`)));

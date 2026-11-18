@@ -83,3 +83,28 @@ test('specialist: no renaming, no contract numbers, customer money, budgets, for
   assert.equal(v.tasks[0].payments, undefined);
   assert.match(A.checkWrite(users[2], 'projects', snap.projects[0], { ...snap.projects[0], name: 'Новое' }, users), /ведут ГИП и главспецы/);
 });
+
+test('critical path: the chain that holds the end, float of the others', () => {
+  const T = (id, start, finish, dependsOn = []) => ({ id, start, finish, dependsOn, status: 'in_progress' });
+  const list = [
+    T('ar', '2026-12-01', '2026-12-10'),
+    T('kr', '2026-12-11', '2026-12-25', ['ar']),
+    T('ov', '2026-12-11', '2026-12-18', ['ar']),
+    T('eom', '2026-12-26', '2027-01-10', ['kr', 'ov']),
+  ];
+  const r = L.criticalPath(list);
+  assert.equal(r.end, '2027-01-10');
+  assert.deepEqual([...r.critical].sort(), ['ar', 'eom', 'kr']);
+  assert.equal(r.float.get('ov'), 7); // ОВ may slip a week before ЭОМ has to move
+  assert.equal(L.criticalPath([]).end, '');
+});
+
+test('moving a card pushes the cards waiting for it, keeping their length', () => {
+  const T = (id, start, finish, dependsOn = []) => ({ id, start, finish, dependsOn, status: 'in_progress' });
+  const list = [T('kr', '2026-12-11', '2026-12-25'), T('eom', '2026-12-26', '2027-01-10', ['kr']), T('pos', '2027-01-11', '2027-01-20', ['eom']), T('ss', '2027-01-05', '2027-01-08', ['kr'])];
+  const m = L.shiftFollowers(list, 'kr', { start: '2026-12-19', finish: '2027-01-02' }); // +8
+  assert.deepEqual(m.get('eom'), { start: '2027-01-03', finish: '2027-01-18' });
+  assert.deepEqual(m.get('pos'), { start: '2027-01-19', finish: '2027-01-28' });
+  assert.equal(m.has('ss'), false); // starts after the new finish anyway
+  assert.equal(L.shiftFollowers(list, 'kr', { start: '2026-12-01', finish: '2026-12-20' }).size, 1); // earlier — nobody moves
+});
