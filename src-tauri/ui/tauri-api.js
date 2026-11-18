@@ -17,7 +17,60 @@
   const LEVELS = { top: 'Поверх всех окон', normal: 'Обычное окно', desktop: 'На рабочем столе' };
   const THEMES = { system: 'Как в Windows', light: 'Светлая', dark: 'Тёмная', graphite: 'Графит', tandem: 'Тандем' };
   const ZOOMS = [0.8, 0.9, 1, 1.1, 1.25, 1.5];
-  const sys = { desktop: false, autostart: false }; // asked from Rust once at start
+  const sys = { desktop: false, autostart: false, win11: false, backdrops: ['none'] }; // asked once at start
+  /* ---------- 4.4: Windows 11 look (32, 33), monitors (38), a side of the screen (37) ---------- */
+  const BACKDROPS = ['none', 'mica', 'acrylic'], DOCKS = ['off', 'left', 'right'];
+  // Windows 11 reports platformVersion 13 and up; Mica exists only there, acrylic since Windows 10.
+  async function detectWindows() {
+    try {
+      const v = await navigator.userAgentData?.getHighEntropyValues?.(['platformVersion']);
+      const major = parseInt(String(v?.platformVersion || '0'), 10) || 0;
+      const isWin = /Windows/i.test(navigator.userAgent);
+      sys.win11 = isWin && major >= 13;
+      sys.backdrops = isWin ? (sys.win11 ? ['none', 'mica', 'acrylic'] : ['none', 'acrylic']) : ['none'];
+    } catch { /* stays plain */ }
+  }
+  // 32: Mica / acrylic behind the page instead of the own translucency. Errors fall back to the own one.
+  async function applyBackdrop(kind) {
+    document.documentElement.dataset.backdrop = kind;
+    try {
+      if (kind === 'none') await win.clearEffects?.();
+      else await win.setEffects({ effects: [kind] });
+      return true;
+    } catch (e) {
+      console.error('Фон окна:', e);
+      document.documentElement.dataset.backdrop = 'none';
+      return false;
+    }
+  }
+  // 37: the window keeps a side of the screen; the strip is re-applied after a resize, a move or being shown.
+  // One change at a time; a choice made meanwhile is applied right after (the last one wins).
+  // Moves and resizes caused by the docking itself are ignored for a moment.
+  let docking = false, dockWant = null, dockQuietUntil = 0;
+  async function applyDock(edge) {
+    dockWant = edge;
+    if (docking) return;
+    docking = true;
+    while (dockWant !== null) {
+      const e = dockWant; dockWant = null;
+      try {
+        if (e !== 'off' && (await win.isMaximized())) await win.unmaximize();
+        const width = e === 'off' ? 0 : (await getBounds()).width;
+        await invoke('appbar_set', { edge: e, width });
+      } catch (err) { console.error('Край экрана:', err); window.AppBridge?.toast(`Не удалось закрепить у края: ${err}`, true); }
+    }
+    dockQuietUntil = Date.now() + 600;
+    docking = false;
+  }
+  const dockNow = () => (ctx && DOCKS.includes(ctx.settings.get('dock')) ? ctx.settings.get('dock') : 'off');
+  let dockTimer = null;
+  const redock = () => { if (dockNow() === 'off' || docking || Date.now() < dockQuietUntil) return; clearTimeout(dockTimer); dockTimer = setTimeout(() => applyDock(dockNow()), 500); };
+  // 38: a monitor unplugged while Пульт runs — the window comes back to a connected one.
+  async function keepOnScreen() {
+    if (!ctx || dockNow() !== 'off' || !(await win.isVisible()) || (await win.isMaximized()) || (await win.isMinimized())) return;
+    const b = await getBounds(), fit = await fitToDisplay(b, ctx.settings.get('compact') ? COMPACT_DEFAULT : FULL_DEFAULT);
+    if (fit.x !== b.x || fit.y !== b.y || fit.width !== b.width) await setBounds(fit);
+  }
   const LATER = 'В версии 4.0 этого нет.';
   const later = async () => ({ ok: false, message: LATER });
 
@@ -44,7 +97,7 @@
   // As in src/main.js: before 1.6 there was only «always on top» on/off.
   const levelOf = s => (LEVELS[s.get('windowLevel')] && (s.get('windowLevel') !== 'desktop' || sys.desktop) ? s.get('windowLevel') : s.get('alwaysOnTop') === false ? 'normal' : 'top');
   win.onFocusChanged(({ payload: focused }) => { if (!focused && ctx && levelOf(ctx.settings) === 'desktop') toBottom(); });
-  T.event.listen('probe:shown', () => { if (ctx && levelOf(ctx.settings) === 'desktop') setTimeout(toBottom, 50); });
+  T.event.listen('probe:shown', () => { if (ctx && levelOf(ctx.settings) === 'desktop') setTimeout(toBottom, 50); if (ctx && dockNow() !== 'off') applyDock(dockNow()); });
 
   /* ---------- size and place: remembered separately for the full and the compact window ---------- */
   const boundsKey = () => (ctx.settings.get('compact') ? 'compactBounds' : 'fullBounds');
@@ -77,7 +130,7 @@
       ctx.settings.set({ [boundsKey()]: await getBounds() });
     }, 400);
   }
-  win.onMoved(rememberBounds);
+  win.onMoved(() => { rememberBounds(); redock(); });
   // Compact mode: a small window with the essentials; each mode keeps its own size and place.
   async function setCompact(on) {
     const s = ctx.settings;
@@ -127,21 +180,27 @@
       theme: s.get('theme') || 'system', zoom: clampZoom(s.get('zoom')), compact: !!s.get('compact'),
       maximized: await win.isMaximized(), opacity: s.get('opacity') ?? 0.82, // translucency is CSS over a transparent window
       clickThrough: ghost.on, autostart: sys.autostart, hotkey: 'Ctrl+Alt+G',
+      backdrop: BACKDROPS.includes(s.get('backdrop')) ? s.get('backdrop') : 'none', backdrops: sys.backdrops, win11: sys.win11,
+      dock: DOCKS.includes(s.get('dock')) ? s.get('dock') : 'off',
     };
   }
   const pushState = async () => { const st = await windowState(); for (const cb of winListeners) cb(st); windows?.state(st); trayLater(); };
-  win.onResized(() => { pushState(); rememberBounds(); });
+  win.onResized(() => { pushState(); rememberBounds(); redock(); });
   // Start: the saved look (theme, zoom), size and place, level — then the window is shown (it starts hidden).
   let looked = null;
   const startLook = () => (looked ||= (async () => {
     const c = await ready();
-    [sys.desktop, sys.autostart] = await Promise.all([invoke('desktop_supported').catch(() => false), invoke('autostart_get').catch(() => false)]);
+    [sys.desktop, sys.autostart] = await Promise.all([invoke('desktop_supported').catch(() => false), invoke('autostart_get').catch(() => false), detectWindows()]);
     const st = await windowState();
     applyScheme(st.theme); applyZoom(st.zoom);
     await applyMinSize();
     try { await setBounds(await fitToDisplay(c.settings.get(boundsKey()), st.compact ? COMPACT_DEFAULT : FULL_DEFAULT)); } catch (e) { console.error('Размер окна:', e); }
     await win.show();
     await applyLevel(st.level);
+    if (st.backdrop !== 'none' && sys.backdrops.includes(st.backdrop)) applyBackdrop(st.backdrop);
+    if (st.dock !== 'off') applyDock(st.dock);
+    setInterval(() => keepOnScreen().catch(() => {}), 15 * 1000);
+    win.onFocusChanged(({ payload }) => { if (payload) keepOnScreen().catch(() => {}); });
     startDigest();
     trayLater();
   })());
@@ -287,7 +346,7 @@
     onWindowState: cb => { winListeners.push(cb); return () => winListeners.splice(winListeners.indexOf(cb), 1); },
     minimize: () => win.minimize(),
     setMaximized: async on => { (on ? await win.maximize() : await win.unmaximize()); pushState(); },
-    hide: () => win.hide(), // back via the tray icon
+    hide: async () => { if (dockNow() !== 'off') await invoke('appbar_set', { edge: 'off', width: 0 }).catch(() => {}); return win.hide(); }, // back via the tray icon
     openDataFolder: () => invoke('open_data_folder').catch(e => console.error(e)),
     setSize: (w, h) => win.setSize(new LogicalSize(w, h)),
     setTheme: theme => { applyScheme(theme); setting({ theme }); },
@@ -323,12 +382,39 @@
     } catch { return false; }
   };
   // 55: right away only what needs this person — and only when the window is not in front (otherwise the window shows it).
-  known.notifyMe = async text => {
+  const laterText = new Map(); // target → text, for «Через час»
+  known.notifyMe = async (text, target = '') => {
     if (!window.PultQuiet) return false;
     const inFront = await Promise.resolve().then(() => win.isFocused()).catch(() => false) && await Promise.resolve().then(() => win.isVisible()).catch(() => true);
-    return inFront ? false : window.PultQuiet.send(text);
+    if (inFront) return false;
+    if (target) laterText.set(target, text);
+    return window.PultQuiet.send(text, target);
   };
   known.setQuiet = on => { if (!window.PultQuiet) return []; window.PultQuiet.on = !!on; return on ? [] : window.PultQuiet.held.splice(0); };
+  known.setBackdrop = async kind => {
+    if (!BACKDROPS.includes(kind) || !sys.backdrops.includes(kind)) return false;
+    const ok = await applyBackdrop(kind);
+    await setting({ backdrop: ok ? kind : 'none' });
+    return ok;
+  };
+  // 33: hovering the maximize button on Windows 11 shows the Snap Layouts.
+  known.snapLayouts = () => (sys.win11 ? invoke('snap_layouts').catch(() => false) : false);
+  known.setDock = async edge => {
+    if (!DOCKS.includes(edge)) return;
+    await setting({ dock: edge });
+    await applyDock(edge);
+    pushState();
+  };
+  // 41: Ctrl+Alt+N from any program — the window shows the quick entry; it goes away again after Enter or Esc
+  // if it was not in front before.
+  T.event.listen('quick:open', e => { window.AppBridge?.quickEntry?.({ hideAfter: !e.payload?.wasInFront }); });
+  // 36: a notification button («Открыть», «Через час») or a click on the text.
+  T.event.listen('toast:action', async e => {
+    const [verb, ...rest] = String(e.payload || '').split('|'), target = rest.join('|');
+    if (verb === 'later') { const t = laterText.get(target); if (t) setTimeout(() => window.PultQuiet.send(t, target), 60 * 60 * 1000); return; }
+    await win.unminimize().catch(() => {}); await win.show(); await win.setFocus().catch(() => {});
+    window.AppBridge?.openTarget?.(target);
+  });
   known.windowOpen = windows.windowOpen;
   known.onWindowMain = windows.onWindowMain;
 

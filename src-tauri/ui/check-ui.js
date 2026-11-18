@@ -17,7 +17,8 @@ const log = []; const check = (n, ok, x = '') => log.push(`${ok ? 'OK  ' : 'FAIL
 const wait = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   const b = await chromium.launch();
-  const ctx = await b.newContext({ viewport: { width: 1400, height: 900 } });
+  // 4.4: the window believes it runs on Windows 11 (Mica, Snap Layouts are offered there only).
+  const ctx = await b.newContext({ viewport: { width: 1400, height: 900 }, userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0' });
   // Tauri events between windows: every page of the context gets every event; window opening is queued for the test.
   const opened = [], closed = [];
   await ctx.exposeBinding('__bus', (_s, name, payload) => {
@@ -64,10 +65,14 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
         return { port: localCab.server.address().port, lan: [], teamKey: localCab.teamKey() };
       }
       case 'cabinet_local_stop': return null;
+      case 'snap_layouts': sysCalls.push('snap'); return true;
+      case 'appbar_set': sysCalls.push(`appbar:${args.edge}:${Math.round(args.width)}`); return args.edge !== 'off';
+      case 'notify_actions': sysCalls.push(`toast:${args.open}:${args.buttons.map(b => b.label).join('/')}:${args.body}`); return true;
       default: throw 'unknown command ' + cmd;
     }
   });
   await ctx.addInitScript(() => {
+    try { Object.defineProperty(navigator, 'userAgentData', { value: { getHighEntropyValues: async () => ({ platformVersion: '15.0.0' }) } }); } catch { /* keep */ }
     // A stand-in window that remembers its place and what was asked of it.
     const w = window.__win = { x: 0, y: 0, width: 1320, height: 860, visible: false, top: null, skip: null, min: null, calls: [] };
     const sp = new URLSearchParams(location.search).get('w');
@@ -78,7 +83,8 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       setSize: async s => { w.width = s.width; w.height = s.height; }, setPosition: async p => { w.x = p.x; w.y = p.y; }, setMinSize: async s => { w.min = s; },
       outerPosition: async () => ({ x: w.x, y: w.y }), outerSize: async () => ({ width: w.width, height: w.height }), scaleFactor: async () => 1,
       show: async () => { w.visible = true; w.calls.push('show'); }, hide: async () => { w.visible = false; w.calls.push('hide'); },
-      setAlwaysOnTop: async on => { w.top = on; }, setSkipTaskbar: async on => { w.skip = on; }, setTheme: async () => {}, setIgnoreCursorEvents: async () => {} };
+      setAlwaysOnTop: async on => { w.top = on; }, setSkipTaskbar: async on => { w.skip = on; }, setTheme: async () => {}, setIgnoreCursorEvents: async () => {},
+      setEffects: async e => { w.calls.push('fx:' + e.effects.join()); }, clearEffects: async () => { w.calls.push('fx:none'); }, isFocused: async () => w.focused !== false };
     function Size(width, height) { this.width = width; this.height = height; }
     function Pos(x, y) { this.x = x; this.y = y; }
     window.__emit = (name, payload) => (listeners[name] || []).forEach(f => f({ payload }));
@@ -432,6 +438,58 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       check('4.3: empty dialog field — message, highlight, cursor', m.err && !m.hidden && m.bad && m.focus === 'm-text', JSON.stringify(m));
       await js(() => document.querySelector('.modal [data-m="cancel"]').click());
     } else check('4.3: save-preset dialog opens', false);
+  }
+  // 4.4: Windows — Mica (32), Snap Layouts (33), a side of the screen (37), notification buttons (36), Ctrl+Alt+N (41), Alt hints (40).
+  {
+    const actClick = (act, extra = {}) => js(([a, x]) => { const b = document.createElement('button'); b.dataset.act = a; Object.assign(b.dataset, x); document.body.append(b); b.click(); b.remove(); }, [act, extra]);
+    await js(() => document.querySelector('[data-act="view-menu"]').click()); await wait(200);
+    const vm = await js(() => [...document.querySelectorAll('#view-menu [data-act="set-backdrop"]')].map(b => b.textContent));
+    check('4.4: «Фон окна» offers Mica and acrylic on Windows 11', vm.join() === 'Своя прозрачность,Mica,Акрил', vm.join());
+    await js(() => document.querySelector('#view-menu [data-act="set-backdrop"][data-v="mica"]').click()); await wait(400);
+    const m1 = await js(() => ({ attr: document.documentElement.dataset.backdrop, slider: document.querySelector('#alpha').disabled, calls: window.__win.calls.filter(c => c.startsWith('fx:')) }));
+    check('4.4: Mica is applied, the translucency slider steps aside', m1.attr === 'mica' && m1.slider && m1.calls.at(-1) === 'fx:mica' && disk.settings.backdrop === 'mica', JSON.stringify(m1));
+    await js(() => document.querySelector('#view-menu [data-act="set-backdrop"][data-v="none"]').click()); await wait(400);
+    check('4.4: back to the own translucency', await js(() => document.documentElement.dataset.backdrop === 'none' && window.__win.calls.at(-1) === 'fx:none' && !document.querySelector('#alpha').disabled));
+    await js(() => document.querySelector('[data-act="view-menu"]').click()); await wait(100);
+    // 33: resting on «развернуть»
+    await p.hover('#btn-max'); await wait(900);
+    check('4.4: hovering «развернуть» asks Windows for the Snap Layouts', sysCalls.includes('snap'));
+    await p.mouse.move(400, 400);
+    // 37
+    await js(() => window.api.setDock('right')); await wait(300);
+    check('4.4: «Справа» keeps the right side of the screen', sysCalls.some(c => /^appbar:right:\d+$/.test(c)) && disk.settings.dock === 'right', sysCalls.filter(c => c.startsWith('appbar')).join());
+    await js(() => window.api.setDock('off')); await wait(300);
+    check('4.4: «Нет» gives the strip back', sysCalls.at(-1) === 'appbar:off:0' && disk.settings.dock === 'off', sysCalls.at(-1));
+    // 36: a notification with buttons when the window is not in front; «Открыть» opens the card
+    const tid = await js(() => [...window.AppBridge.state.tasks.values()].find(t => !t.deletedAt)?.id);
+    await js(() => { window.__win.focused = false; });
+    await js(([id]) => window.api.notifyMe('ЭОМ · Корпус: ждёт вашей проверки', 'task:' + id), [tid]); await wait(200);
+    check('4.4: notification with «Открыть» and «Через час»', sysCalls.some(c => c === `toast:task:${tid}:Открыть/Через час:ЭОМ · Корпус: ждёт вашей проверки`), sysCalls.filter(c => c.startsWith('toast')).join());
+    await js(() => { window.__win.focused = true; });
+    await js(([id]) => window.__emit('toast:action', 'open|task:' + id), [tid]); await wait(500);
+    check('4.4: «Открыть» from the notification opens the card', await js(([id]) => window.AppBridge.state.drawer?.kind === 'task' && window.AppBridge.state.drawer.id === id, [tid]));
+    await js(() => document.querySelector('#dform [data-act="discard"]')?.click()); await wait(200);
+    // 41: Ctrl+Alt+N from another program
+    const pr = await js(() => { const p = [...window.AppBridge.state.projects.values()].find(x => !x.archived && x.code); return p && { id: p.id, code: p.code }; });
+    const hidesBefore = await js(() => window.__win.calls.filter(c => c === 'hide').length);
+    await js(() => window.__emit('quick:open', { wasInFront: false })); await wait(300);
+    check('4.4: Ctrl+Alt+N opens the quick line with «+ »', await js(() => document.querySelector('#pal-q')?.value === '+ ' && !!document.querySelector('.pal-quick')));
+    const tasksBefore = Object.keys(disk.data.tasks).length;
+    await js(([code]) => { const i = document.querySelector('#pal-q'); i.value = `+ ЭОМ #${code} !+3 проверка быстрого ввода`; i.dispatchEvent(new Event('input')); }, [pr?.code || 'нет']); await wait(200);
+    const qprev = await js(() => document.querySelector('#pal-list')?.textContent || '');
+    await js(() => document.querySelector('#pal-q').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))); await wait(1500);
+    const made = Object.values(disk.data.tasks).find(t => /проверка быстрого ввода/.test(t.title || ''));
+    const plus3 = (() => { const d = new Date(); d.setDate(d.getDate() + 3); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+    check('4.4: «#шифр !+3» — the card in that project with the finish in 3 days', !!made && made.projectId === pr?.id && made.finish === plus3 && Object.keys(disk.data.tasks).length === tasksBefore + 1, JSON.stringify({ made: made && { p: made.projectId, f: made.finish }, want: [pr?.id, plus3], qprev: qprev.slice(0, 160) }));
+    check('4.4: after Enter Пульт goes back to the tray', await js(() => window.__win.calls.filter(c => c === 'hide').length) === hidesBefore + 1);
+    await js(() => window.__win.visible = true);
+    // 40: holding Alt
+    await js(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }))); await wait(600);
+    const alt = await js(() => ({ on: document.body.classList.contains('alt-hints'), first: document.querySelector('#tabs [data-alt-key]')?.dataset.altKey, k: document.querySelector('[data-act="open-search"]')?.dataset.altKey }));
+    check('4.4: holding Alt shows the keys', alt.on && alt.first === 'Alt+1' && alt.k === 'Ctrl+K', JSON.stringify(alt));
+    await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-alt.png' }).catch(() => {});
+    await js(() => document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', bubbles: true }))); await wait(100);
+    check('4.4: releasing Alt hides them', await js(() => !document.body.classList.contains('alt-hints') && !document.querySelector('[data-alt-key]')));
   }
   // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
   const w0 = await js(() => window.__win);

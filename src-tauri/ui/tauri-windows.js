@@ -53,6 +53,10 @@
     return `sat-${spec.kind}-${h.toString(36)}`;
   };
 
+  // 38: the last place and size of a project / chat window (shared localStorage of the app's windows).
+  const keptKey = kind => `glavspec.satBounds.${kind}`;
+  const keptBounds = kind => { try { const b = JSON.parse(localStorage.getItem(keptKey(kind)) || 'null'); return b && [b.x, b.y, b.width, b.height].every(Number.isFinite) ? b : null; } catch { return null; } };
+
   /* ---------- the main window: answers the separate windows, opens them ---------- */
   // Calls a separate window does not forward: they act on that window itself (see satellite()).
   const OWN = new Set(['minimize', 'setMaximized', 'hide', 'setSize', 'reloadWindow', 'onWindowState', 'onData', 'onCabinet',
@@ -107,6 +111,14 @@
         decorations: false, transparent: true, resizable: true, focus: true,
         dragDropEnabled: false, // HTML drag and drop in the page (tabs, kanban) needs this off on Windows
       };
+      // 38: a project or chat window opens where the last one of its kind was, if that place is still on a monitor.
+      const kept = keptBounds(spec.kind);
+      if (kept && spec.kind !== 'tray' && !Number.isFinite(spec.x)) {
+        const mons = await T.window.availableMonitors?.().catch(() => []) || [];
+        const on = !mons.length || mons.some(m => { const s = m.scaleFactor || 1, x = m.position.x / s, y = m.position.y / s, w = m.size.width / s, h = m.size.height / s;
+          return kept.x < x + w - 40 && kept.x + kept.width > x + 40 && kept.y >= y - 10 && kept.y < y + h - 40; });
+        if (on) Object.assign(opts, kept);
+      }
       // Dropped outside the window: the new one appears under the cursor, its title bar where the tab was let go.
       if (Number.isFinite(spec.x) && Number.isFinite(spec.y)) { opts.x = Math.max(0, Math.round(spec.x - 140)); opts.y = Math.max(0, Math.round(spec.y - 18)); }
       if (spec.kind === 'tray') {
@@ -156,13 +168,36 @@
     let shared = null;
     const own = async () => ({ ...shared, compact: false, clickThrough: false, maximized: await win.isMaximized() });
     const pushOwn = async () => { if (!shared) return; const s = await own(); winCbs.forEach(cb => cb(s)); };
+    let backdrop = 'none';
     function takeShared(st) {
       shared = st;
       applyScheme(st.theme); applyZoom(st.zoom);
+      // 32: the same window background as the main window.
+      const want = /^sat-tray-/.test(LABEL) ? 'none' : (st.backdrop || 'none');
+      if (want !== backdrop) {
+        backdrop = want;
+        document.documentElement.dataset.backdrop = want;
+        (want === 'none' ? win.clearEffects?.() : win.setEffects?.({ effects: [want] }))?.catch?.(() => { document.documentElement.dataset.backdrop = 'none'; });
+      }
       win.setAlwaysOnTop(st.level === 'top').catch(() => {});
     }
     listen('sat:state', st => { takeShared(st); pushOwn(); });
-    win.onResized(() => pushOwn());
+    win.onResized(() => { pushOwn(); keep(); });
+    win.onMoved(() => keep());
+    // 38: remember where this kind of window was put (not the tray panel, not maximized).
+    const KIND = (new URLSearchParams(location.search).get('w') || '').split(':')[0];
+    let keepTimer = null;
+    function keep() {
+      if (!KIND || KIND === 'tray') return;
+      clearTimeout(keepTimer);
+      keepTimer = setTimeout(async () => {
+        try {
+          if (await win.isMaximized() || await win.isMinimized()) return;
+          const [pos, size, sf] = await Promise.all([win.outerPosition(), win.outerSize(), win.scaleFactor()]);
+          localStorage.setItem(keptKey(KIND), JSON.stringify({ x: Math.round(pos.x / sf), y: Math.round(pos.y / sf), width: Math.round(size.width / sf), height: Math.round(size.height / sf) }));
+        } catch { /* not kept */ }
+      }, 400);
+    }
     // The tray panel hides as soon as the user clicks elsewhere, like the Windows clock flyout.
     if (/^sat-tray-/.test(LABEL)) win.onFocusChanged(({ payload }) => { if (payload === false) win.hide().catch(() => {}); });
 
@@ -183,6 +218,8 @@
       windowDock: spec => { emit('sat:main', spec); return close(); },
       onWindowMain: () => () => {},
       fbList: async () => [],
+      snapLayouts: () => (shared?.win11 ? T.core.invoke('snap_layouts').catch(() => false) : false), // acts on this window
+      setDock: () => {}, setBackdrop: kind => call('setBackdrop', [kind]),
     };
     return new Proxy(known, {
       get(target, name) {

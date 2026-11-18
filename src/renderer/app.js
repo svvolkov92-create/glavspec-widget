@@ -3439,12 +3439,13 @@ function openUsage() {
 /* ---------- keyboard help (F1) ---------- */
 const HOTKEYS = [
   ['Общие', [['Ctrl+K или Ctrl+F', 'поиск по карточкам, проектам, людям'], ['Ctrl+N', 'новая карточка'], ['Ctrl+Z', 'отменить последнее действие'], ['Ctrl+J', 'журнал действий'],
-    ['Alt+1…9', 'вкладки по порядку'], ['F11 или двойной щелчок по заголовку', 'окно на весь экран / обратно'], ['Ctrl+Alt+G', 'сквозные клики вкл/выкл (работает и из других программ)'],
+    ['Alt+1…9', 'вкладки по порядку (зажмите Alt — подсказки на экране)'], ['F11 или двойной щелчок по заголовку', 'окно на весь экран / обратно'], ['Ctrl+Alt+G', 'сквозные клики вкл/выкл (работает и из других программ)'],
+    ['Ctrl+Alt+N', 'быстрая карточка из любой программы: «+ ЭОМ #шифр !15.12 @Орлов», Enter — и Пульт снова в трее'],
     ['Ctrl + = / − / 0', 'масштаб интерфейса'], ['F1 или ?', 'эта подсказка']]],
   ['Таблицы и списки', [['Двойной щелчок по ячейке', 'правка прямо в таблице: статус, подрядчик, даты, бюджет'], ['Щелчок по заголовку столбца', 'сортировка'],
     ['Счётчик в заголовке («сорвано 2»…)', 'открыть эти карточки списком']]],
   ['Открытая карточка', [['Alt+↑ / Alt+↓', 'предыдущая / следующая карточка списка'], ['Ctrl+Enter в обсуждении', 'отправить сообщение'], ['Esc', 'закрыть (спросит про несохранённое)']]],
-  ['Диаграмма Ганта', [['Тянуть фон', 'прокрутка по датам'], ['Ctrl + колесо', 'масштаб'], ['Тянуть полоску / её край', 'сдвинуть работу / изменить старт или финиш']]],
+  ['Диаграмма Ганта и Канбан', [['Shift + колесо', 'прокрутка вбок'], ['Тянуть фон', 'прокрутка по датам (Гант)'], ['Ctrl + колесо', 'масштаб (Гант)'], ['Тянуть полоску / её край', 'сдвинуть работу / изменить старт или финиш']]],
 ];
 function openHelp() {
   if (document.querySelector('.help-modal')) return;
@@ -4930,7 +4931,7 @@ function needsMeNotify() {
   const why = t => (t.status === 'review' ? 'ждёт вашей проверки' : t.status === 'revision' ? 'вернули на доработку'
     : (t.comments || []).at(-1)?.ts === t.notify[me] ? 'новое сообщение' : 'назначено вам');
   const one = t => `${marksText(t)} · ${projectOf(t)?.name || ''}: ${why(t)}`;
-  api.notifyMe?.(fresh.length === 1 ? one(fresh[0]) : `Нужно ваше внимание (${fresh.length}): ${fresh.slice(0, 3).map(one).join('; ')}${fresh.length > 3 ? '…' : ''}`);
+  api.notifyMe?.(fresh.length === 1 ? one(fresh[0]) : `Нужно ваше внимание (${fresh.length}): ${fresh.slice(0, 3).map(one).join('; ')}${fresh.length > 3 ? '…' : ''}`, fresh.length === 1 ? `task:${fresh[0].id}` : 'day');
 }
 function focusQuiet(on) {
   const held = api.setQuiet?.(on) || [];
@@ -6344,8 +6345,14 @@ function viewSectionsHtml(full) {
         <button class="btn ghostbtn sm" type="button" data-act="zoom-step" data-dir="0" title="Ctrl + 0">Сбросить</button></div></div>
     <div class="vm-sec"><span class="vm-h">Анимации</span><div class="seg"><button class="btn sm ${anim ? 'on' : ''}" type="button" data-act="set-anim" data-v="1">Включены</button><button class="btn sm ${anim ? '' : 'on'}" type="button" data-act="set-anim" data-v="0">Выключены</button></div></div>`;
   const densHtml = `<div class="vm-sec"><span class="vm-h">Плотность интерфейса</span><div class="seg"><button class="btn sm ${dense ? '' : 'on'}" type="button" data-act="set-dense" data-v="0">Удобно</button><button class="btn sm ${dense ? 'on' : ''}" type="button" data-act="set-dense" data-v="1">Компактно</button></div><span class="hint">Компактно — мельче шрифт, плотнее строки, кнопки и отступы: больше помещается на экране.</span></div>`;
-  if (!full) return theme + zoomHtml + densHtml;
-  return theme + zoomHtml + densHtml + `
+  // 32 (Windows): Mica / acrylic behind the window instead of the own translucency. 37: keep a side of the screen.
+  const BACKDROP_L = { none: 'Своя прозрачность', mica: 'Mica', acrylic: 'Акрил' };
+  const backHtml = (w.backdrops || []).length > 1 ? `<div class="vm-sec"><span class="vm-h">Фон окна</span><div class="seg">${w.backdrops.map(k => `<button class="btn sm ${w.backdrop === k ? 'on' : ''}" type="button" data-act="set-backdrop" data-v="${k}">${BACKDROP_L[k]}</button>`).join('')}</div>
+    <span class="hint">${w.backdrop && w.backdrop !== 'none' ? 'Фон Windows под окном: размытые обои, цвет темы Windows. Ползунок прозрачности в этом режиме не нужен.' : (w.win11 ? 'Mica — фон Windows 11, как у Проводника и Параметров; акрил — сильнее размытие.' : 'Акрил — размытый фон Windows под окном.')}</span></div>` : '';
+  const dockHtml = w.dock ? `<div class="vm-sec"><span class="vm-h">Край экрана</span><div class="seg">${[['off', 'Нет'], ['left', 'Слева'], ['right', 'Справа']].map(([k, l]) => `<button class="btn sm ${w.dock === k ? 'on' : ''}" type="button" data-act="set-dock" data-v="${k}">${l}</button>`).join('')}</div>
+    <span class="hint">Пульт стоит у края во всю высоту, как панель задач: развёрнутые окна других программ не заходят под него. Ширина — нынешняя ширина окна.</span></div>` : '';
+  if (!full) return theme + backHtml + zoomHtml + densHtml;
+  return theme + backHtml + zoomHtml + densHtml + dockHtml + `
     <div class="vm-sec"><span class="vm-h">Панель вкладок</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div>
       ${nav.pos === 'left' ? `<label class="chk vm-mini"><input type="checkbox" data-act="nav-mini-chk"${nav.mini ? ' checked' : ''}> Только значки</label>` : ''}</div>
     <div class="vm-sec"><span class="vm-h">Положение окна</span>
@@ -6503,6 +6510,25 @@ function parseQuick(text) {
     if (isDate(iso)) out.finish = iso; else out.problems.push('дата не распознана');
     rest = rest.replace(dm[0], ' ');
   }
+  // 41: «!15.12», «!завтра», «!+3» — the finish; «#шифр» or «#слово» — the project.
+  const bang = rest.match(/\s!(\S+)/);
+  if (bang) {
+    const v = bang[1].toLowerCase(), d = new Date(state.today + 'T00:00:00');
+    let iso = '';
+    const m = v.match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?$/);
+    if (m) { const y = m[3] ? (m[3].length === 2 ? '20' + m[3] : m[3]) : state.today.slice(0, 4); iso = `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; if (!m[3] && iso < state.today) iso = `${Number(y) + 1}${iso.slice(4)}`; }
+    else if (v === 'завтра' || v === 'послезавтра' || /^\+\d{1,3}$/.test(v)) { d.setDate(d.getDate() + (v === 'завтра' ? 1 : v === 'послезавтра' ? 2 : Number(v.slice(1)))); iso = todayStr(d); }
+    if (isDate(iso)) out.finish = iso; else out.problems.push(`срок «!${bang[1]}» не распознан — например !15.12, !завтра, !+3`);
+    rest = rest.replace(bang[0], ' ');
+  }
+  const hash = rest.match(/\s#(\S+)/);
+  let hashProject = null;
+  if (hash) {
+    const h = hash[1].toLowerCase().replace(/ё/g, 'е');
+    hashProject = liveProjects().find(p => String(p.code || '').toLowerCase() === h) || liveProjects().find(p => `${p.name} ${p.code}`.toLowerCase().replace(/ё/g, 'е').includes(h)) || null;
+    if (!hashProject) out.problems.push(`проект «#${hash[1]}» не найден`);
+    rest = rest.replace(hash[0], ' ');
+  }
   const at = rest.match(/\s@(\S+)/);
   if (at) {
     const q = at[1].toLowerCase().replace(/ё/g, 'е');
@@ -6515,13 +6541,13 @@ function parseQuick(text) {
   for (const w of words) { const m = w.replace(/[,;]$/, '').toUpperCase(); if (known.has(m) || known.has(m.replace(/\d+$/, ''))) out.marks.push(m); else left.push(w); }
   // Project: the one whose name or code shares the most words with what is left.
   const norm = v => String(v || '').toLowerCase().replace(/ё/g, 'е');
-  let best = null, bestN = 0;
-  for (const p of liveProjects()) {
+  let best = hashProject, bestN = hashProject ? Infinity : 0;
+  if (!hashProject) for (const p of liveProjects()) {
     const hay = norm(`${p.name} ${p.code}`), n = left.filter(w => w.length > 1 && hay.includes(norm(w))).length;
     if (n > bestN) { best = p; bestN = n; }
   }
-  if (best) { out.projectId = best.id; const hay = norm(`${best.name} ${best.code}`); out.title = left.filter(w => !(w.length > 1 && hay.includes(norm(w)))).join(' '); }
-  else { out.title = left.join(' '); out.problems.push('проект не найден — напишите часть названия или шифр'); }
+  if (best) { out.projectId = best.id; const hay = norm(`${best.name} ${best.code}`); out.title = hashProject ? left.join(' ') : left.filter(w => !(w.length > 1 && hay.includes(norm(w)))).join(' '); }
+  else { out.title = left.join(' '); if (!hash) out.problems.push('проект не найден — напишите часть названия, шифр или #шифр'); }
   if (!out.marks.length && !out.title) out.problems.push('нужен раздел или текст задачи');
   return out;
 }
@@ -6536,13 +6562,15 @@ async function quickCreate(q, full) {
     `Карточка добавлена: ${marksText(draft)} · ${state.projects.get(q.projectId)?.name || ''}`);
   return ok;
 }
-function openPalette() {
-  if (document.querySelector('.palette-back')) return;
+// opts.quick: 41 — opened by Ctrl+Alt+N from another program: the line starts with «+ », and if the window was not
+// in front before, it goes back to the tray after Enter or Esc, so the person returns to their work.
+function openPalette(opts = {}) {
+  if (document.querySelector('.palette-back')) { if (opts.quick) { const i = $('#pal-q'); i.value = '+ '; i.dispatchEvent(new Event('input')); i.focus(); } return; }
   setFileMenu(false);
   const root = document.createElement('div');
   root.className = 'palette-back';
   root.innerHTML = `<div class="palette" role="dialog" aria-modal="true" aria-label="Поиск">
-    <input id="pal-q" placeholder="Поиск: раздел, объект, подрядчик… · «+ ЭОМ Корпус 3 до 15.12 @Орлов» — новая карточка" autocomplete="off" spellcheck="false">
+    <input id="pal-q" placeholder="Поиск: раздел, объект, подрядчик… · «+ ЭОМ #Корпус3 !15.12 @Орлов» — новая карточка" autocomplete="off" spellcheck="false">
     <div class="pal-list" id="pal-list" role="listbox"></div>
     <div class="pal-foot hint">↑↓ — выбор · Enter — открыть · Esc — закрыть · начните с «+», чтобы быстро добавить карточку</div>
   </div>`;
@@ -6568,7 +6596,7 @@ function openPalette() {
       : `<div class="none">${input.value.trim() ? 'Ничего не найдено.' : 'Начните вводить — например «СКУД» или фамилию исполнителя.'}</div>`);
     list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
   };
-  const close = () => root.remove();
+  const close = () => { root.remove(); if (opts.hideAfter) setTimeout(() => api.hide(), 900); };
   const go = it => {
     if (!it) return;
     close();
@@ -6590,8 +6618,22 @@ function openPalette() {
   });
   list.addEventListener('mousedown', e => { const el = e.target.closest('.pal-item'); if (el) { e.preventDefault(); go(items[Number(el.dataset.i)]); } });
   root.addEventListener('mousedown', e => { if (e.target === root) close(); });
+  if (opts.quick) { input.value = '+ '; root.querySelector('.palette').classList.add('pal-quick'); }
   draw();
   input.focus();
+}
+function quickEntry(o = {}) {
+  if (state.win.compact) { api.setCompact(false); state.win.compact = false; }
+  if (!A.canCreateTasks(state.me)) { openPalette({ hideAfter: !!o.hideAfter }); return; }
+  openPalette({ quick: true, hideAfter: !!o.hideAfter });
+}
+// 36: «Открыть» in a Windows notification: «task:<id>», «day» (several things), «chat:<id>».
+function openTarget(target) {
+  const [kind, id] = String(target || '').split(':');
+  if (state.win.compact) { api.setCompact(false); state.win.compact = false; }
+  if (kind === 'task' && state.tasks.has(id)) return openTask(id);
+  if (kind === 'project' && state.projects.has(id)) return openProjectPage(id);
+  state.tab = 'day'; saveLocal('tab', 'day'); renderNow();
 }
 
 async function autoBackupMenu() {
@@ -6713,6 +6755,10 @@ function applyWinState(s) {
   document.documentElement.dataset.theme = s.theme || 'system';
   const slider = $('#alpha');
   if (document.activeElement !== slider) slider.value = String(Math.round(s.opacity * 100));
+  const backdrop = s.backdrop && s.backdrop !== 'none';
+  if (s.backdrop) document.documentElement.dataset.backdrop = s.backdrop;
+  slider.disabled = backdrop;
+  slider.closest('.alpha').title = backdrop ? 'Сейчас фон окна — Mica или акрил (Окно → Фон окна); прозрачность задаёт Windows' : 'Непрозрачность окна';
   $('#btn-pin').setAttribute('aria-pressed', String(!!s.alwaysOnTop));
   $('#btn-pin').title = s.alwaysOnTop ? 'Закреплено поверх всех окон — нажмите, чтобы открепить' : 'Закрепить поверх всех окон';
   $('#btn-compact').title = s.compact ? 'Развернуть' : 'Компактный виджет';
@@ -6930,6 +6976,8 @@ document.addEventListener('click', e => {
     case 'fold-all': setFold(el.dataset.keys.split(' ').filter(Boolean), el.dataset.on === '1'); break;
     case 'move-task': e.stopPropagation(); reassign(id, el.dataset.kind, el.dataset.from); break;
     case 'set-dense': dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); break;
+    case 'set-backdrop': api.setBackdrop?.(el.dataset.v).then(ok => { if (ok === false) toast('Этот фон Windows здесь недоступен — осталась своя прозрачность.', true); }); break;
+    case 'set-dock': api.setDock?.(el.dataset.v); break;
     case 'set-anim': anim = el.dataset.v === '1'; saveLocal('anim', anim); applyAnim(); renderViewMenu(); break;
     case 'cm-quick': case 'cm-plus1': case 'cm-assign': case 'cm-chat': case 'cm-copy': case 'cm-window': { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); break; }
     case 'proj-mode': projMode = el.dataset.v === 'portfolio' ? 'portfolio' : 'list'; saveLocal('projMode', projMode); renderNow(); break;
@@ -7085,6 +7133,43 @@ document.addEventListener('drop', e => {
   track('drop:move');
   reassign(m.id, m.kind, m.from, t.to);
 });
+
+// 33 (Windows 11): resting the mouse on «развернуть» shows the Snap Layouts, as on ordinary windows.
+{
+  const mb = $('#btn-max');
+  let snapT = null;
+  mb?.addEventListener('mouseenter', () => { if (state.win.compact || !state.win.win11) return; clearTimeout(snapT); snapT = setTimeout(() => api.snapLayouts?.(), 650); });
+  mb?.addEventListener('mouseleave', () => clearTimeout(snapT));
+  mb?.addEventListener('mousedown', () => clearTimeout(snapT));
+}
+// 40: holding Alt shows the keys over the interface: Alt+1…9 on the tabs, Ctrl+K, Ctrl+N, F1, F11.
+{
+  let altT = null;
+  const hintsOff = () => { clearTimeout(altT); altT = null; document.body.classList.remove('alt-hints'); document.querySelectorAll('[data-alt-key]').forEach(x => x.removeAttribute('data-alt-key')); };
+  const hintsOn = () => {
+    if (state.win.compact) return;
+    visibleTabs().slice(0, 9).forEach((t, i) => $(`#tabs [data-id="${t.id}"]`)?.setAttribute('data-alt-key', `Alt+${i + 1}`));
+    $('[data-act="open-search"]')?.setAttribute('data-alt-key', 'Ctrl+K');
+    $('#btn-max')?.setAttribute('data-alt-key', 'F11');
+    if (state.drawer?.kind === 'task') $('[data-act="save-stay"]')?.setAttribute('data-alt-key', 'Ctrl+S');
+    document.body.classList.add('alt-hints');
+  };
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Alt' && !e.ctrlKey && !e.shiftKey && !e.repeat) { clearTimeout(altT); altT = setTimeout(hintsOn, 450); return; }
+    if (e.key !== 'Alt') hintsOff();
+  }, true);
+  document.addEventListener('keyup', e => { if (e.key === 'Alt') { if (document.body.classList.contains('alt-hints')) e.preventDefault(); hintsOff(); } }, true);
+  window.addEventListener('blur', hintsOff);
+  document.addEventListener('mousedown', hintsOff, true);
+}
+// 40: Shift + wheel scrolls the Kanban sideways, as the Gantt.
+document.addEventListener('wheel', e => {
+  if (!e.shiftKey || e.ctrlKey || !e.deltaY) return;
+  const kb = e.target.closest?.('.kb');
+  if (!kb || kb.scrollWidth <= kb.clientWidth) return;
+  e.preventDefault();
+  kb.scrollLeft += e.deltaY;
+}, { passive: false });
 
 // Double click on the empty part of the title bar toggles «на весь экран», as in ordinary windows.
 document.addEventListener('dblclick', e => {
@@ -7282,7 +7367,7 @@ setInterval(() => { if (todayStr() !== state.today) render(); }, 60 * 1000);
 
 /* ---------- boot ---------- */
 // What the testing aid (feedback-ui.js) may use; remove together with that file.
-window.AppBridge = { state, toast, esc, TABS, setFileMenu: open => setFileMenu(open) };
+window.AppBridge = { state, toast, esc, TABS, setFileMenu: open => setFileMenu(open), quickEntry, openTarget };
 try { const m = sessionStorage.getItem('glavspec.toast'); if (m) { sessionStorage.removeItem('glavspec.toast'); setTimeout(() => toast(m), 600); } } catch { /* optional */ }
 applyNav();
 applyDense();

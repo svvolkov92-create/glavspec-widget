@@ -9,6 +9,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 mod cabinet;
 mod files;
 mod io;
+mod native;
 mod system;
 use files::Files;
 use tauri::State;
@@ -51,6 +52,9 @@ fn main() {
     // Ctrl+Alt+G toggles click-through, as in the Electron version: the way back when the window ignores the mouse.
     let hotkey = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyG);
     let to_register = hotkey.clone();
+    // 4.4 (41): Ctrl+Alt+N from any program — quick entry of a card; the window comes up with the input line.
+    let quick = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyN);
+    let quick_register = quick.clone();
     let files = match Files::open() {
         Ok(f) => f,
         Err(e) => {
@@ -76,12 +80,25 @@ fn main() {
                             let _ = window.emit("probe:ghost-toggle", ());
                         }
                     }
+                    if shortcut == &quick && event.state() == ShortcutState::Pressed {
+                        if let Some(window) = app.get_webview_window("main") {
+                            // Whether it was in front decides if it goes away again after Enter.
+                            let was = window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) && !window.is_minimized().unwrap_or(false);
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.emit("quick:open", serde_json::json!({ "wasInFront": was }));
+                        }
+                    }
                 })
                 .build(),
         )
         .setup(move |app| {
             if let Err(e) = app.global_shortcut().register(to_register) {
                 eprintln!("Горячая клавиша Ctrl+Alt+G занята другой программой: {e}");
+            }
+            if let Err(e) = app.global_shortcut().register(quick_register) {
+                eprintln!("Горячая клавиша Ctrl+Alt+N занята другой программой: {e}");
             }
             system::create_tray(app.handle())?;
             // The window starts hidden and shows itself once its saved size and place are applied.
@@ -114,13 +131,15 @@ fn main() {
             io::dialog_save, io::dialog_open, io::dialog_confirm, io::fs_write, io::fs_read, io::fs_exists, io::fs_mkdir,
             io::fs_list, io::fs_remove, io::open_path, io::open_url, io::known_dirs, io::print_html,
             cabinet::http_request, cabinet::secret_protect, cabinet::secret_unprotect,
-            cabinet::cabinet_local_start, cabinet::cabinet_local_stop, cabinet::cabinet_local_running
+            cabinet::cabinet_local_start, cabinet::cabinet_local_stop, cabinet::cabinet_local_running,
+            native::snap_layouts, native::appbar_set, native::notify_actions
         ])
         .build(tauri::generate_context!())
         .expect("Пульт главспеца не запустился")
         // The built-in cabinet server is a child process: it stops with the app.
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                native::appbar_release();
                 cabinet::stop(&app.state::<cabinet::LocalServer>());
             }
         });

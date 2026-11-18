@@ -5,7 +5,12 @@
 (function () {
   const { invoke } = window.__TAURI__.core;
   // 55: «Не беспокоить» while a focus runs — Windows notifications are held and handed back to the window when it ends.
-  window.PultQuiet = { on: false, held: [], send(text) { if (this.on) { this.held.push(text); return Promise.resolve(false); } return invoke('notify', { body: text }).catch(() => false); } };
+  // With a target (a card, «day») the notification gets the buttons «Открыть» and «Через час» (36).
+  window.PultQuiet = { on: false, held: [], send(text, target = '') {
+    if (this.on) { this.held.push(text); return Promise.resolve(false); }
+    if (!target) return invoke('notify', { body: text }).catch(() => false);
+    return invoke('notify_actions', { body: text, open: target, buttons: [{ label: 'Открыть', action: `open|${target}` }, { label: 'Через час', action: `later|${target}` }] }).catch(() => invoke('notify', { body: text }).catch(() => false));
+  } };
   const SC = window.StoreCore, L = window.Logic;
 
   // Same defaults as `new Settings(…)` in src/main.js.
@@ -98,7 +103,7 @@
     const dirs = await invoke('known_dirs');
     const files = window.createFiles({
       store, journal, settings, A: window.Access, L, Composition: window.Composition, StoreError: SC.StoreError, Buffer: window.Buffer,
-      io: tauriIo(dirs), appVersion: '4.3.0', R: reportCode(),
+      io: tauriIo(dirs), appVersion: '4.4.0', R: reportCode(),
       currentUser: () => core.currentUser(), userView: () => core.userView(), changed: () => onChanged(),
     });
     const cabinetRules = await cabinetOf({ store, settings, files, core, dirs, onCabinet: () => onCabinet?.() });

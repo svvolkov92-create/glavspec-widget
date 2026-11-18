@@ -1,6 +1,6 @@
 [package]
 name = "pult-glavspeca"
-version = "4.3.0"
+version = "4.4.0"
 description = "Пульт главспеца 4.0 (Tauri)"
 edition = "2021"
 
@@ -22,7 +22,9 @@ ureq = "2"
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Security_Cryptography"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Security_Cryptography", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell"] }
+# 4.4 (36): notifications with buttons («Открыть», «Через час»)
+tauri-winrt-notification = "0.8"
 
 # Small binary: the point of the probe is to measure size.
 [profile.release]
