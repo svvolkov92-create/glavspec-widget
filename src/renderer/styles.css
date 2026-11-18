@@ -1871,3 +1871,25 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 .dtab.ws-tab .dt-open svg, .dtab.ws-chat .mc-ic { margin-right: 4px }
 .dtab .dt-open .hint { margin-left: 4px; font-weight: 400 }
 .dtab.ws-chat .mc-ic { width: 18px; height: 18px; font-size: 10px }
+/* 4.6 (1): «Для заказчика» by tabs */
+.cust-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line) }
+.cust-nav .btn.on { border-color: var(--accent); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent) }
+.cust-new { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; background: #F26A1F; color: #fff; font-style: normal; font-size: 11px; font-weight: 700 }
+.dpanel[data-panel="cust"][data-cs] .sub[data-cs] { display: none }
+.dpanel[data-panel="cust"][data-cs="plan"] .sub[data-cs="plan"], .dpanel[data-panel="cust"][data-cs="req"] .sub[data-cs="req"], .dpanel[data-panel="cust"][data-cs="ird"] .sub[data-cs="ird"],
+.dpanel[data-panel="cust"][data-cs="meet"] .sub[data-cs="meet"], .dpanel[data-panel="cust"][data-cs="docs"] .sub[data-cs="docs"], .dpanel[data-panel="cust"][data-cs="money"] .sub[data-cs="money"],
+.dpanel[data-panel="cust"][data-cs="show"] .sub[data-cs="show"] { display: block }
+.dpanel[data-panel="cust"][data-cs]:not([data-cs="cab"]) #cab-box { display: none }
+.dpanel[data-panel="cust"][data-cs="cab"] #cust-box .sub[data-cs] { display: none }
+/* 4.6 (10): who gives what to whom */
+.tc-secs { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px }
+.tc-sec { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--glass) }
+.tc-sec h4 { margin: 0 0 6px; font-size: 14px }
+.tc-io { display: grid; grid-template-columns: 74px 1fr; gap: 6px; margin-top: 4px }
+.tc-io ul { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.4 }
+.tc-io-h { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #1E7A45; padding-top: 2px }
+.tc-io-h.out { color: #B04E0D }
+/* 4.6 (11): surveys */
+.sv-t tr.off td { opacity: .5 }
+.sv-t input:not([type="checkbox"]), .sv-t select { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--glass); min-width: 0; width: 100% }
+.sv-choice { display: flex; flex-direction: column; gap: 4px; align-items: flex-start }

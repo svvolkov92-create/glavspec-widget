@@ -2122,7 +2122,7 @@ function viewProjectPage(p) {
     <button class="btn ghostbtn sm" type="button" data-act="techcard" title="Этапы, волны, задания смежникам">Техкарта</button>
     ${canEdit ? `<button class="btn sm" type="button" data-act="project-timeline" data-id="${esc(p.id)}">Сроки</button><button class="btn sm" type="button" data-act="assign-board" data-id="${esc(p.id)}">Назначить исполнителей</button><button class="btn sm" type="button" data-act="ask-customer" data-id="${esc(p.id)}" title="ТУ, письма, согласования, решения — заказчик увидит в «Нужно от вас»">Запросить у заказчика</button>${A.canChat(state.me, p) ? (() => { const c = chatById(projectChatId(p.id)), n = c ? msgUnread(c).length : 0; return `<button class="btn sm" type="button" data-act="msg-project" data-id="${esc(p.id)}">Чат проекта${n ? ` <span class="cnt bad">${n}</span>` : ''}</button>`; })() : ''}<button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="comp">Состав проекта</button><button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="cust">Для заказчика</button><button class="btn sm" type="button" data-act="open-project" data-id="${esc(p.id)}">Изменить</button>` : ''}</div>`;
   const noComp = !comp ? `<section class="panel"><div class="empty-in"><p>Состав проекта ещё не сформирован. Генератор предложит разделы по ПП РФ № 87 и рабочую документацию к ним; каждый раздел станет задачей.</p>${canEdit ? `<button class="btn primary" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="comp">Открыть генератор состава</button>` : ''}</div></section>` : '';
-  return `<div class="pt-page">${head}${summary}${people}${noComp}${pdHtml}${rdHtml}${otherHtml}${irdBlock(p)}${lettersBlock(p)}</div>`;
+  return `<div class="pt-page">${head}${summary}${people}${noComp}${pdHtml}${rdHtml}${otherHtml}${irdBlock(p)}${surveysBlock(p)}${lettersBlock(p)}</div>`;
 }
 // Blocks of the project page that are not its documentation (source data, letters).
 const auxBlock = (...a) => ptBlock(...a).replace('class="panel pt-block', 'class="panel pt-block pt-aux');
@@ -2130,7 +2130,10 @@ const auxBlock = (...a) => ptBlock(...a).replace('class="panel pt-block', 'class
 const IRD_FOLDERS = [['rights', 'Правоустанавливающие документы'], ['gpzu', 'ГПЗУ'], ['tz', 'Техническое задание'], ['tu', 'Технические условия'],
   ['geology', 'Инженерная геология'], ['geodesy', 'Инженерная геодезия'], ['ecology', 'Инженерная экология'], ['survey', 'Обмеры / обследование'],
   ['sketch', 'Согласование эскиза'], ['other', 'Прочее']];
-const irdFolderList = p => [...IRD_FOLDERS, ...(p.irdFolders || []).map(f => [f.id, f.name])];
+const SURVEY_FOLDERS = ['geodesy', 'geology', 'ecology', 'hydromet', 'survey'];
+// When the surveys are «ours» (item 11), their folders live in the «Инженерные изыскания» block, unless files are already there.
+const irdFolderList = p => [...IRD_FOLDERS, ...(p.irdFolders || []).map(f => [f.id, f.name])]
+  .filter(([id]) => p.surveys !== 'ours' || !SURVEY_FOLDERS.includes(id) || (p.irdFiles || []).some(x => x.folder === id));
 const irdKind = folder => ({ gpzu: 'gpzu', geodesy: 'geodesy', geology: 'geology', ecology: 'ecology', tu: 'tu' }[folder] || 'other');
 let irdOpen = {}; // project id → folder id
 function irdStatus(f) {
@@ -2152,7 +2155,36 @@ function irdBlock(p) {
         ${edit ? `<label class="ird-d">выдан <input type="date" data-ird="issued" data-pid="${esc(p.id)}" data-fid="${esc(f.id)}" value="${esc(f.issued || '')}"></label><label class="ird-d">до <input type="date" data-ird="until" data-pid="${esc(p.id)}" data-fid="${esc(f.id)}" value="${esc(f.until || '')}"></label>` : `<span class="hint">${f.issued ? 'выдан ' + fmtDate(f.issued) : ''}</span>`}
         ${st ? `<span class="chip tone-${tone}">${st}</span>` : ''}${edit ? `<button class="btn ghostbtn sm" type="button" data-act="ird-del" data-id="${esc(p.id)}" data-fid="${esc(f.id)}" title="Убрать" aria-label="Убрать">×</button>` : ''}</div>`; }).join('') || `<p class="hint ird-empty">${edit ? 'Перетащите сюда файлы из Проводника или нажмите «Загрузить».' : 'В этой папке пока ничего нет.'}</p>`}
       ${edit && inF.length ? '<p class="hint ird-tip">Для ГПЗУ и топосъёмки срок действия считается от даты выдачи сам; для ТУ и остального — впишите по тексту документа.</p>' : ''}</div></div>`;
-  return auxBlock('pi:' + p.id, 'Исходные данные', `<span class="meta">${files.length}${bad ? ` · <span class="neg">истёк ${bad}</span>` : ''}${warn ? ` · истекает ${warn}` : ''}</span>`, body);
+  return auxBlock('pi:' + p.id, 'Сбор ИРД', `<span class="meta">${files.length}${bad ? ` · <span class="neg">истёк ${bad}</span>` : ''}${warn ? ` · истекает ${warn}` : ''}</span>`, body);
+}
+/* ---------- 4.6 (item 11): engineering surveys as their own block when «Тандем» does them ---------- */
+const SURVEY_KINDS = [['geodesy', 'Инженерно-геодезические'], ['geology', 'Инженерно-геологические'], ['ecology', 'Инженерно-экологические'],
+  ['hydromet', 'Инженерно-гидрометеорологические'], ['survey', 'Обследование конструкций']];
+const SURVEY_STATUS = [['plan', 'Не начаты'], ['work', 'В работе'], ['report', 'Отчёт получен'], ['passed', 'Прошли экспертизу']];
+const surveyRows = p => SURVEY_KINDS.map(([k, title], i) => ({ k, title, ...(i < 3 ? { on: true } : { on: false }), ...(p.surveyRows || {})[k] }));
+function surveysBlock(p) {
+  if (p.surveys !== 'ours') return '';
+  const edit = A.canManageCatalog(state.me) && !p.archived, files = p.irdFiles || [];
+  const rows = surveyRows(p).filter(r => edit || r.on);
+  const late = rows.filter(r => r.on && isDate(r.finish) && r.finish < state.today && !['report', 'passed'].includes(r.status)).length;
+  const body = `<table class="pd-t sv-t"><thead><tr>${edit ? '<th></th>' : ''}<th>Вид изысканий</th><th>Кто делает</th><th>Срок отчёта</th><th>Состояние</th><th>Отчёт</th></tr></thead><tbody>
+    ${rows.map(r => { const n = files.filter(f => f.folder === r.k).length, overdue = r.on && isDate(r.finish) && r.finish < state.today && !['report', 'passed'].includes(r.status);
+      return `<tr class="${r.on ? '' : 'off'}">${edit ? `<td><input type="checkbox" data-sv="on" data-pid="${esc(p.id)}" data-k="${r.k}"${r.on ? ' checked' : ''} aria-label="Нужны"></td>` : ''}
+        <td><b>${esc(r.title)}</b></td>
+        <td>${edit ? `<input data-sv="who" data-pid="${esc(p.id)}" data-k="${r.k}" value="${esc(r.who || '')}" list="sv-who" placeholder="ООО «Геоплан» или сотрудник" maxlength="120"${r.on ? '' : ' disabled'}>` : esc(r.who || '—')}</td>
+        <td>${edit ? `<input type="date" data-sv="finish" data-pid="${esc(p.id)}" data-k="${r.k}" value="${esc(r.finish || '')}"${r.on ? '' : ' disabled'}>` : (isDate(r.finish) ? fmtDate(r.finish) : '—')}${overdue ? ' <span class="chip tone-bad">просрочен</span>' : ''}</td>
+        <td>${edit ? `<select data-sv="status" data-pid="${esc(p.id)}" data-k="${r.k}"${r.on ? '' : ' disabled'}>${SURVEY_STATUS.map(([k, l]) => `<option value="${k}"${(r.status || 'plan') === k ? ' selected' : ''}>${l}</option>`).join('')}</select>` : esc(SURVEY_STATUS.find(x => x[0] === (r.status || 'plan'))[1])}</td>
+        <td>${n ? `<button class="linkbtn" type="button" data-act="sv-files" data-id="${esc(p.id)}" data-folder="${r.k}">файлы (${n})</button>` : ''}${edit && r.on && canFiles() ? ` <button class="btn ghostbtn sm" type="button" data-act="sv-upload" data-id="${esc(p.id)}" data-folder="${r.k}">Загрузить</button>` : ''}</td></tr>`; }).join('')}</tbody></table>
+    <datalist id="sv-who">${[...state.contractors.values()].filter(c => !c.deletedAt).map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>
+    <p class="hint">Изыскания делает «Тандем» — поэтому они отдельным блоком. Если их даёт заказчик, переключите в карточке проекта: тогда отчёты — в «Сборе ИРД».</p>`;
+  return auxBlock('sv:' + p.id, 'Инженерные изыскания', `<span class="meta">${rows.filter(r => r.on && ['report', 'passed'].includes(r.status)).length} из ${rows.filter(r => r.on).length} готово${late ? ` · <span class="neg">просрочено ${late}</span>` : ''}</span>`, body);
+}
+function surveyPatch(pid, k, patch) {
+  const p = state.projects.get(pid);
+  if (!p) return;
+  const cur = { ...(p.surveyRows || {}) };
+  cur[k] = { ...(cur[k] || {}), ...patch };
+  write(op.update('projects', pid, { surveyRows: cur }), 'Изыскания обновлены');
 }
 async function irdAdd(pid, fileObjs, folder) {
   const p = state.projects.get(pid);
@@ -3848,7 +3880,7 @@ function formSnapshot() {
   const f = $('#dform');
   if (!f) return null;
   const fields = $$('input, select, textarea', f).filter(i => i.name && !i.closest('[data-transient]'))
-    .map(i => [i.name, i.type === 'checkbox' ? i.checked : i.value]);
+    .map(i => [i.name, i.type === 'checkbox' || i.type === 'radio' ? i.checked : i.value]);
   return JSON.stringify([fields, state.draft]);
 }
 function markClean() { state.dirtyBase = formSnapshot(); }
@@ -5551,6 +5583,31 @@ const pdIn = (path, value, attrs = '') => `<input data-pd="${path}" value="${esc
 const pdDate = (path, value) => `<input type="date" data-pd="${path}" value="${esc(value || '')}">`;
 const pdSel = (path, opts, cur) => `<select data-pd="${path}">${opts.map(([k, l]) => `<option value="${k}"${cur === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
 const pdChk = (path, on, label = '') => `<label class="chk"><input type="checkbox" data-pd="${path}"${on ? ' checked' : ''}>${label}</label>`;
+/* ---------- 4.6 (item 1): «Для заказчика» by tabs; a mark where the customer has written something new ---------- */
+const CUST_SECS = [['cab', 'Кабинет'], ['plan', 'Этапы и вехи'], ['req', 'Нужно от заказчика'], ['ird', 'Исходные данные'], ['meet', 'Договорённости и встречи'], ['docs', 'Сроки документов'], ['money', 'Договор и финансы'], ['show', 'Что показывать']];
+let custSec = loadLocal('custSec', 'plan');
+// Unread messages of the customer for this project, by the tab they belong to.
+function custUnread(pid) {
+  const out = {};
+  for (const m of cab?.messages || []) {
+    if (m.projectId !== pid || m.read) continue;
+    const req = (state.draft?.requests || []).find(r => r.id === m.requestId);
+    const k = m.kind === 'answer' ? (req?.irdId ? 'ird' : 'req') : m.kind === 'meeting' ? 'meet' : 'cab';
+    out[k] = (out[k] || 0) + 1;
+  }
+  return out;
+}
+function custNav() {
+  const panel = $('.dpanel[data-panel="cust"]');
+  if (!panel) return;
+  const secs = CUST_SECS.filter(([k]) => k !== 'money' || A.isGip(state.me));
+  if (!secs.some(([k]) => k === custSec)) custSec = 'plan';
+  const unread = custUnread(state.drawer?.id);
+  let nav = panel.querySelector('.cust-nav');
+  if (!nav) { nav = document.createElement('nav'); nav.className = 'cust-nav'; nav.setAttribute('role', 'tablist'); panel.prepend(nav); }
+  nav.innerHTML = secs.map(([k, l]) => `<button class="btn sm${k === custSec ? ' on' : ''}" type="button" role="tab" aria-selected="${k === custSec}" data-act="cust-sec" data-v="${k}">${l}${unread[k] ? `<i class="cust-new" title="Новое от заказчика: ${unread[k]}">${unread[k]}</i>` : ''}</button>`).join('');
+  panel.dataset.cs = custSec;
+}
 function renderCustomer() {
   const box = $('#cust-box'), d = state.draft;
   if (!box || !d) return;
@@ -5559,21 +5616,22 @@ function renderCustomer() {
   const list = (key, cols, head, empty) => `<table class="pd-t"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}<th></th></tr></thead><tbody>
     ${d[key].map((x, i) => `<tr>${cols(x, i)}<td><button class="btn ghostbtn sm" type="button" data-act="pd-del" data-list="${key}" data-i="${i}" aria-label="Удалить">✕</button></td></tr>`).join('') || `<tr><td colspan="${head.length + 1}" class="hint">${empty}</td></tr>`}</tbody></table>
     <button class="btn sm" type="button" data-act="pd-add" data-list="${key}">+ Добавить</button>`;
+  custNav();
   box.innerHTML = `<div class="cust-top"><span class="hint">${now.planned ? `Сейчас: <b>${esc(now.current?.label || '—')}</b> · ${now.behind ? `<span class="neg">отставание ${now.behind} дн.</span>` : 'по графику'}${now.next ? ` · до «${esc(now.next.title)}» ${now.daysToNext} дн.` : ''}` : 'Задайте даты этапов — по ним строится план и «N дней до…» на странице заказчика.'}</span><span class="spacer"></span>
       <button class="btn" type="button" data-act="cust-page" data-format="pdf">PDF</button><button class="btn primary" type="button" data-act="cust-page" data-format="html">Сохранить и создать страницу</button></div>
-    <div class="sub"><h3>Этапы проекта</h3>${A.isGip(state.me) ? '' : '<p class="hint">Этап «Договор» ведёт ГИП.</p>'}
+    <div class="sub" data-cs="plan"><h3>Этапы проекта</h3>${A.isGip(state.me) ? '' : '<p class="hint">Этап «Договор» ведёт ГИП.</p>'}
       ${phaseTableHtml(d.phases, (i, f) => `data-pd="phases.${i}.${f}"`)}${phaseGanttHtml(d.phases, d.milestones)}</div>
-    <div class="sub"><h3>Вехи</h3>${list('milestones', (x, i) => `<td class="grow">${pdIn(`milestones.${i}.title`, x.title, 'placeholder="Заключение экспертизы" maxlength="120"')}</td><td>${pdDate(`milestones.${i}.date`, x.date)}</td><td>${pdChk(`milestones.${i}.done`, x.done, ' пройдена')}</td>`, ['Веха', 'Дата', ''], 'Ключевые даты для заказчика: договор, ПД на экспертизу, заключение, выдача РД.')}</div>
-    <div class="sub"><h3>Нужно от заказчика</h3>${list('requests', (x, i) => `<td class="grow">${pdIn(`requests.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}
+    <div class="sub" data-cs="plan"><h3>Вехи</h3>${list('milestones', (x, i) => `<td class="grow">${pdIn(`milestones.${i}.title`, x.title, 'placeholder="Заключение экспертизы" maxlength="120"')}</td><td>${pdDate(`milestones.${i}.date`, x.date)}</td><td>${pdChk(`milestones.${i}.done`, x.done, ' пройдена')}</td>`, ['Веха', 'Дата', ''], 'Ключевые даты для заказчика: договор, ПД на экспертизу, заключение, выдача РД.')}</div>
+    <div class="sub" data-cs="req"><h3>Нужно от заказчика</h3>${list('requests', (x, i) => `<td class="grow">${pdIn(`requests.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}
         <div class="req-files">${(x.files || []).map((f, k) => `<span class="aq-file"><button class="linkbtn" type="button" data-act="att-open" data-fid="${esc(f.id)}" title="Открыть">${icon('file')}${esc(f.name)}</button><button class="linkbtn" type="button" data-act="req-unattach" data-i="${i}" data-k="${k}" aria-label="Убрать файл">✕</button></span>`).join('')}<button class="linkbtn" type="button" data-act="req-attach" data-i="${i}">+ файл для согласования</button></div></td><td>${pdDate(`requests.${i}.due`, x.due)}</td><td class="grow">${pdIn(`requests.${i}.why`, x.why, 'placeholder="Зачем: без них экспертиза не примет ИОС1" maxlength="200"')}</td><td>${pdChk(`requests.${i}.done`, x.done, ' получено')}</td>`, ['Что', 'Срок', 'Зачем', ''], 'Исходные данные, решения и ответы, которые ждём от заказчика. «Получено» убирает строку со страницы.')}</div>
-    <div class="sub"><h3>Исходные данные</h3><p class="hint">Что нужно для проектирования и в каком оно состоянии — вкладка «Исходные данные» у заказчика. «Запросить» ставит строку в «Нужно от вас»: заказчик отвечает прямо со страницы, ответ приходит сюда — его можно принять или вернуть с замечанием.</p>${list('ird', (x, i) => { const rq = irdRequest(x);
+    <div class="sub" data-cs="ird"><h3>Исходные данные</h3><p class="hint">Что нужно для проектирования и в каком оно состоянии — вкладка «Исходные данные» у заказчика. «Запросить» ставит строку в «Нужно от вас»: заказчик отвечает прямо со страницы, ответ приходит сюда — его можно принять или вернуть с замечанием.</p>${list('ird', (x, i) => { const rq = irdRequest(x);
         return `<td>${pdSel(`ird.${i}.kind`, IRD_KINDS, x.kind || irdKindOf(x.title))}</td><td class="grow">${pdIn(`ird.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}</td><td>${pdIn(`ird.${i}.who`, x.who, 'placeholder="Заказчик" maxlength="60" list="ird-who"')}</td>
         <td>${pdSel(`ird.${i}.status`, IRD_STATUS, x.status)}</td><td>${pdDate(`ird.${i}.due`, x.due)}</td><td class="grow">${pdIn(`ird.${i}.note`, x.note, 'placeholder="Примечание для заказчика" maxlength="200"')}</td>
         <td class="nowrap">${rq ? `<span class="chip tone-work" title="${esc(rq.title)}">запрошено${rq.due ? ' до ' + fmtDate(rq.due).slice(0, 5) : ''}</span>` : ['accepted', 'done'].includes(x.status) ? '' : `<button class="btn sm" type="button" data-act="ird-request" data-i="${i}">Запросить</button>`}</td>`; }, ['Тип', 'Что нужно', 'Кто готовит', 'Статус', 'Срок', 'Примечание', ''], 'Задание на проектирование, ГПЗУ, ТУ, письма, согласования…')}
       <div class="row-in">${irdAskable().length ? `<button class="btn sm" type="button" data-act="ird-request-all">Запросить у заказчика всё недостающее (${irdAskable().length})</button>` : ''}${(d.requests || []).some(r => !r.done && r.title) ? '<button class="btn ghostbtn sm" type="button" data-act="ird-letter">Текст письма-запроса</button>' : ''}</div>
       <datalist id="ird-who"><option value="Заказчик"><option value="«Тандем»"><option value="Изыскатели"><option value="«Тандем» по доверенности"><option value="Заказчик и «Тандем»"></datalist>
       ${Techcard.SOURCE_DATA.some(([t]) => !d.ird.some(x => x.title.trim().toLowerCase() === t.toLowerCase())) ? `<button class="btn sm" type="button" data-act="ird-techcard">${d.ird.length ? 'Дополнить по техкарте' : 'Заполнить по техкарте'}</button>` : ''}</div>
-    <div class="sub"><h3>Последняя договорённость</h3><div class="row-in">Протокол № ${pdIn('protocol.no', d.protocol.no, 'class="sm-in" maxlength="20"')} от ${pdDate('protocol.date', d.protocol.date)}</div>
+    <div class="sub" data-cs="meet"><h3>Последняя договорённость</h3><div class="row-in">Протокол № ${pdIn('protocol.no', d.protocol.no, 'class="sm-in" maxlength="20"')} от ${pdDate('protocol.date', d.protocol.date)}</div>
       <table class="pd-t"><thead><tr><th>Пункт</th><th>Кто</th><th>Срок</th><th>Статус</th><th>%</th><th></th></tr></thead><tbody>
       ${d.protocol.items.map((x, i) => `<tr><td class="grow">${pdIn(`protocol.items.${i}.text`, x.text, 'placeholder="Ответы экспертизе по КР" maxlength="200"')}</td>
         <td><select data-pd="protocol.items.${i}.who"><option value="us"${x.who !== 'customer' ? ' selected' : ''}>мы</option><option value="customer"${x.who === 'customer' ? ' selected' : ''}>заказчик</option></select></td>
@@ -5582,24 +5640,24 @@ function renderCustomer() {
         <td>${pdIn(`protocol.items.${i}.pct`, x.pct || '', 'class="sm-in" inputmode="numeric" placeholder="—"')}</td>
         <td><button class="btn ghostbtn sm" type="button" data-act="pd-del" data-list="protocol.items" data-i="${i}" aria-label="Удалить">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="hint">Пункты протокола последней встречи — заказчик увидит их со статусом.</td></tr>'}</tbody></table>
       <button class="btn sm" type="button" data-act="pd-add" data-list="protocol.items">+ Пункт</button></div>
-    <div class="sub"><h3>Встречи</h3><p class="hint">Ближайшая встреча — на главной и во «Встречах» у заказчика, с кнопками «В календарь» и «Перенести»; прошедшие — с номером протокола.</p>${list('meetings', (x, i) => `<td>${pdDate(`meetings.${i}.date`, x.date)}</td><td>${pdIn(`meetings.${i}.from`, x.from, 'class="sm-in" placeholder="11:00" maxlength="5"')}–${pdIn(`meetings.${i}.to`, x.to, 'class="sm-in" placeholder="12:00" maxlength="5"')}</td>
+    <div class="sub" data-cs="meet"><h3>Встречи</h3><p class="hint">Ближайшая встреча — на главной и во «Встречах» у заказчика, с кнопками «В календарь» и «Перенести»; прошедшие — с номером протокола.</p>${list('meetings', (x, i) => `<td>${pdDate(`meetings.${i}.date`, x.date)}</td><td>${pdIn(`meetings.${i}.from`, x.from, 'class="sm-in" placeholder="11:00" maxlength="5"')}–${pdIn(`meetings.${i}.to`, x.to, 'class="sm-in" placeholder="12:00" maxlength="5"')}</td>
         <td class="grow">${pdIn(`meetings.${i}.title`, x.title, 'placeholder="Совещание по замечаниям экспертизы" maxlength="160"')}</td><td class="grow">${pdIn(`meetings.${i}.place`, x.place, 'placeholder="онлайн или адрес" maxlength="160"')}</td><td>${pdIn(`meetings.${i}.protocolNo`, x.protocolNo, 'class="sm-in" placeholder="№" maxlength="20"')}</td>`, ['Дата', 'Время', 'Тема', 'Где', 'Протокол'], 'Встречи с заказчиком: прошедшие и ближайшая.')}</div>
-    <div class="sub"><h3>Сроки документов</h3>${list('docs', (x, i) => { const kind = x.kind || L.docKindOf(x.title), rule = L.docRule(kind), auto = L.docUntil(kind, x.issued), left = isDate(x.until) ? dayNum(x.until) - dayNum(state.today) : null;
+    <div class="sub" data-cs="docs"><h3>Сроки документов</h3>${list('docs', (x, i) => { const kind = x.kind || L.docKindOf(x.title), rule = L.docRule(kind), auto = L.docUntil(kind, x.issued), left = isDate(x.until) ? dayNum(x.until) - dayNum(state.today) : null;
         return `<td>${pdSel(`docs.${i}.kind`, L.DOC_KINDS.map(([k, l]) => [k, l]), kind)}</td><td class="grow">${pdIn(`docs.${i}.title`, x.title, 'placeholder="ТУ на водоснабжение и водоотведение" maxlength="160"')}</td>
           <td>${pdIn(`docs.${i}.no`, x.no, 'class="sm-in" placeholder="№" maxlength="40"')}</td><td>${pdDate(`docs.${i}.issued`, x.issued)}</td>
           <td>${pdDate(`docs.${i}.until`, x.until)}<div class="hint doc-rule">${rule ? (x.until && x.until !== auto && auto ? `вручную · по правилу: ${fmtDate(auto)}` : esc(rule.basis)) : 'по тексту документа'}${left !== null ? ` · ${left < 0 ? `<span class="neg">истёк</span>` : left <= (x.remind ?? 60) ? `<span class="warnv">истекает через ${left} дн.</span>` : `ещё ${left} дн.`}` : ''}</div></td>
           <td>за ${pdIn(`docs.${i}.remind`, x.remind ?? 60, 'class="sm-in" inputmode="numeric"')} дн.</td>`; }, ['Тип', 'Документ', '№', 'Дата выпуска', 'Действует до', 'Напомнить в сводке'], 'ГПЗУ, изыскания, ТУ — когда истекают. Для ГПЗУ и топосъёмки срок считается от даты выпуска сам; ТУ, СТУ и прочее — по тексту документа. Напоминание появится в сводке.')}</div>
-    ${A.isGip(state.me) ? `<div class="sub"><h3>Договор и финансы <span class="chip tone-idle">только ГИП</span></h3><p class="hint">Договор заказчика с «Тандемом» — не путать с бюджетами подрядчиков. Пока номер договора пуст, вкладки «Договор и финансы» у заказчика нет.</p>
+    ${A.isGip(state.me) ? `<div class="sub" data-cs="money"><h3>Договор и финансы <span class="chip tone-idle">только ГИП</span></h3><p class="hint">Договор заказчика с «Тандемом» — не путать с бюджетами подрядчиков. Пока номер договора пуст, вкладки «Договор и финансы» у заказчика нет.</p>
       <div class="fgrid"><div class="f"><label>Номер договора</label>${pdIn('contract.no', d.contract.no, 'placeholder="26/07-12" maxlength="40"')}</div><div class="f"><label>Дата</label>${pdDate('contract.date', d.contract.date)}</div>
         <div class="f wide"><label>Предмет</label>${pdIn('contract.subject', d.contract.subject, 'placeholder="Инженерные изыскания и проектная документация, стадия П" maxlength="200"')}</div>
         <div class="f"><label>Стоимость, ₽</label>${pdIn('contract.sum', d.contract.sum, 'inputmode="decimal" placeholder="4 860 000" maxlength="20"')}</div><div class="f"><label>Статус</label>${pdSel('contract.status', CONTRACT_STATUS, d.contract.status)}</div></div>
       <h4>График оплат</h4>${list('payments', (x, i) => `<td class="grow">${pdIn(`payments.${i}.title`, x.title, 'placeholder="Аванс" maxlength="120"')}</td><td>${pdIn(`payments.${i}.sum`, x.sum, 'inputmode="decimal" placeholder="1 458 000" maxlength="20"')}</td><td class="grow">${pdIn(`payments.${i}.cond`, x.cond, 'placeholder="при подписании" maxlength="120"')}</td><td>${pdSel(`payments.${i}.status`, PAY_STATUS, x.status)}</td><td>${pdDate(`payments.${i}.date`, x.date)}</td>`, ['Этап', 'Сумма', 'Условие', 'Статус', 'Дата'], 'Аванс, оплата за этапы, окончательный расчёт.')}
       <h4>Счета и акты</h4>${list('bills', (x, i) => `<td class="grow">${pdIn(`bills.${i}.title`, x.title, 'placeholder="Акт № 2 по проектной документации" maxlength="160"')}</td><td>${pdDate(`bills.${i}.date`, x.date)}</td><td>${pdSel(`bills.${i}.status`, BILL_STATUS, x.status)}</td><td>${pdDate(`bills.${i}.due`, x.due)}</td>`, ['Документ', 'Дата', 'Статус', 'Оплатить до'], 'Счета и акты по договору — без файлов, только статус.')}</div>` : ''}
-    <div class="sub"><h3>Рекомендация ГИПа и контакт</h3>
+    <div class="sub" data-cs="show"><h3>Рекомендация ГИПа и контакт</h3>
       <div class="fgrid"><div class="f wide"><label>Заголовок</label>${pdIn('advice.title', d.advice.title, 'placeholder="Рабочая документация на сети" maxlength="120"')}</div>
         <div class="f wide"><label>Текст</label><textarea data-pd="advice.text" maxlength="600" placeholder="Что посоветовать заказчику на этом этапе">${esc(d.advice.text)}</textarea></div>
         <div class="f"><label>Контакт на странице</label><select data-pd="contactId"><option value="">— не показывать —</option>${staff.map(u => `<option value="${esc(u.id)}"${u.id === d.contactId ? ' selected' : ''}>${esc(u.name)}${u.phone ? '' : ' (нет телефона)'}</option>`).join('')}</select><span class="hint">Телефон и почта — из карточки сотрудника.</span></div></div></div>
-    <div class="sub"><h3>Что показывать заказчику</h3><div class="pd-show">${pdChk('show.plan', d.show.plan, ' план и вехи')}${pdChk('show.sections', d.show.sections, ' разделы проекта')}${pdChk('show.advice', d.show.advice, ' рекомендация ГИПа')}${pdChk('show.revisions', d.show.revisions, ' номера изменений')}${pdChk('show.ird', d.show.ird, ' исходные данные')}${pdChk('show.meetings', d.show.meetings, ' встречи и протокол')}${pdChk('show.team', d.show.team, ' команда проекта (участники)')}${A.isGip(state.me) ? pdChk('show.finance', d.show.finance, ' договор и финансы') : ''}${pdChk('show.soon', d.show.soon, ' «Навигатор» и «3D-модель» с пометкой «скоро»')}</div>
+    <div class="sub" data-cs="show"><h3>Что показывать заказчику</h3><div class="pd-show">${pdChk('show.plan', d.show.plan, ' план и вехи')}${pdChk('show.sections', d.show.sections, ' разделы проекта')}${pdChk('show.advice', d.show.advice, ' рекомендация ГИПа')}${pdChk('show.revisions', d.show.revisions, ' номера изменений')}${pdChk('show.ird', d.show.ird, ' исходные данные')}${pdChk('show.meetings', d.show.meetings, ' встречи и протокол')}${pdChk('show.team', d.show.team, ' команда проекта (участники)')}${A.isGip(state.me) ? pdChk('show.finance', d.show.finance, ' договор и финансы') : ''}${pdChk('show.soon', d.show.soon, ' «Навигатор» и «3D-модель» с пометкой «скоро»')}</div>
       <p class="hint">Подрядчики, бюджеты подрядчиков и внутренние замечания на странице не показываются никогда; договор заказчика — только если ГИП его заполнил и включил.</p></div>`;
 }
 // Source data and requests: a row is «asked» when an open request points to it.
@@ -5643,7 +5701,7 @@ function setCab(v) {
   const unreadBefore = cab?.messages?.filter(m => !m.read).length || 0, countBefore = cab?.messages?.length || 0;
   cab = v;
   if (document.querySelector('.settings-modal')) renderSettings();
-  if ($('#cab-box')) { renderCabinetBox(); if ((cab?.messages?.length || 0) !== countBefore) loadCabCustomers(true); } // «последний вход» moves with new messages
+  if ($('#cab-box')) { renderCabinetBox(); custNav(); if ((cab?.messages?.length || 0) !== countBefore) loadCabCustomers(true); } // «последний вход» moves with new messages
   const unread = cab?.messages?.filter(m => !m.read).length || 0;
   if (state.loaded && (state.tab === 'overview' || unread !== unreadBefore)) render();
 }
@@ -6017,7 +6075,7 @@ function askTimeline(p) {
   });
 }
 // Tech card as an in-app reference: the same model (techcard.js) the generator uses for assignments and waves.
-const TC_SECS = [['stages', 'Этапы'], ['source', 'Исходные данные'], ['waves', 'Волны ПД'], ['assign', 'Задания смежникам'], ['rd', 'ПД → РД'], ['summary', 'Сводные разделы']];
+const TC_SECS = [['stages', 'Этапы'], ['source', 'Исходные данные'], ['waves', 'Волны ПД'], ['bysec', 'Кто кому что'], ['assign', 'Задания смежникам'], ['rd', 'ПД → РД'], ['summary', 'Сводные разделы']];
 function techcardBody(sec) {
   const T = Techcard, lbl = k => k.replace(/^ИОС(\d)$/, 'ИОС $1');
   // Sections are [num, abbr, title, …]; ИОС subsections are [abbr, title, marks].
@@ -6041,6 +6099,24 @@ function techcardBody(sec) {
   if (sec === 'rd') return `<p class="hint">Что генератор предлагает в рабочую документацию к разделу ПД (✓ — включено по умолчанию). Обозначения разделов РД — по ГОСТ Р 21.101-2026 и принятые на практике.</p>`
     + tbl(['Раздел ПД', 'Разделы РД'], Object.entries(Composition.RD_SUGGEST).map(([k, list]) => [`<b>${esc(lbl(k))}</b>`, list.map(([m, on]) => `<span class="chip ${on ? 'tone-work' : 'tone-idle'}" title="${esc(Composition.RD_MARKS[m]?.[0] || '')}">${on ? '✓ ' : ''}${esc(m)}</span>`).join(' ')]));
   if (sec === 'summary') return tbl(['Раздел', 'Что получает', 'Что отдаёт', 'Когда'], T.SUMMARY.map(r => r.map(esc)));
+  // 4.6 (item 10): for each section, briefly — what it gets from whom and what it gives to whom.
+  if (sec === 'bysec') {
+    const ALIAS = { ИОС1: 'ЭОМ', ИОС2: 'ВК · вода', ИОС3: 'ВК · канализация', ИОС4: 'ОВ, ТС, ИТП', ИОС5: 'СС', ИОС6: 'ГС' };
+    const name = k => `${lbl(k)}${ALIAS[k] ? ` <span class="hint">(${ALIAS[k]})</span>` : ''}`;
+    const short = k => esc(ALIAS[k] ? ALIAS[k].split(/[ ,·]/)[0] : lbl(k));
+    const keys = Object.keys(T.WAVES).filter(k => !['ИД', 'СМ', 'ПЗ'].includes(k));
+    const all = T.pairs(keys);
+    const one = k => {
+      const inc = all.filter(x => x.to === k), out = all.filter(x => x.from === k);
+      if (!inc.length && !out.length) return '';
+      const rows = (list, side) => list.map(x => `<li><b>${side === 'in' ? 'от ' : ''}${short(side === 'in' ? x.from : x.to)}</b> — ${esc(x.what)}</li>`).join('');
+      return `<div class="tc-sec" data-key="${esc(k)}"><h4>${name(k)} <span class="hint">· волна ${T.waveOf(k)}</span></h4>
+        ${inc.length ? `<div class="tc-io"><span class="tc-io-h">Получает</span><ul>${rows(inc, 'in')}</ul></div>` : ''}
+        ${out.length ? `<div class="tc-io"><span class="tc-io-h out">Выдаёт</span><ul>${rows(out, 'out')}</ul></div>` : ''}</div>`;
+    };
+    return `<p class="hint">Например: ОВ получает планировки от АР и сетку колонн от КР, выдаёт КР и АР отверстия и нагрузки, ЭОМ — электрические нагрузки. Из этих пар генератор делает задания-подзадачи.</p>
+      <div class="tc-secs">${keys.map(one).join('')}</div>`;
+  }
   return '';
 }
 function openTechcard(sec = 'stages') {
@@ -6142,6 +6218,9 @@ function openProject(id, tab = 'main') {
       <div class="f"><label for="pr-code">Шифр</label><input id="pr-code" name="code" value="${esc(p.code || '')}" placeholder="0425-24" maxlength="40"></div>
       <div class="f"><label for="pr-client">Заказчик</label><input id="pr-client" name="client" value="${esc(p.client || '')}" placeholder="ООО «…»" maxlength="160"></div>
       <div class="f"><label for="pr-gip">ГИП</label><select id="pr-gip" name="gipId">${gipOptions(id ? p.gipId : (A.isGip(state.me) ? state.me.id : ''))}</select></div>
+      <div class="f wide"><span class="lbl-t">Инженерные изыскания</span><div class="seg sv-choice">
+        <label class="chk"><input type="radio" name="surveys" value="customer"${p.surveys === 'ours' ? '' : ' checked'}> даёт заказчик — отчёты в «Сборе ИРД»</label>
+        <label class="chk"><input type="radio" name="surveys" value="ours"${p.surveys === 'ours' ? ' checked' : ''}> делаем мы — отдельный блок «Инженерные изыскания»</label></div></div>
       <div class="f"><span class="lbl-t">Значок проекта</span><div class="icon-pick"><span id="pr-icon-box">${projIcon(p) ? imgIcon(p.icon, 'proj-ic big') : '<span class="hint">нет</span>'}</span>
         <input type="hidden" name="icon" value="${esc(ICON_OK(p.icon) ? p.icon : '')}"><button class="btn sm" type="button" data-act="proj-icon">Выбрать картинку…</button><button class="btn ghostbtn sm" type="button" data-act="proj-icon-clear"${ICON_OK(p.icon) ? '' : ' hidden'}>Убрать</button></div>
         <span class="hint">Видна на вкладке проекта, в списке и в чате проекта.</span></div>
@@ -6214,7 +6293,7 @@ async function submitSimple(keepOpen = false) {
   const created = { createdAt: new Date().toISOString() };
   let ok = false;
   if (kind === 'project') {
-    const data = { name: val('name'), code: val('code'), client: val('client'), gipId: state.users.has(val('gipId')) ? val('gipId') : '', status: L.PROJECT_STATUSES[val('status')] ? val('status') : '', folder: val('folder'), note: val('note'), icon: ICON_OK(val('icon')) ? val('icon') : '' };
+    const data = { name: val('name'), code: val('code'), client: val('client'), gipId: state.users.has(val('gipId')) ? val('gipId') : '', status: L.PROJECT_STATUSES[val('status')] ? val('status') : '', folder: val('folder'), note: val('note'), icon: ICON_OK(val('icon')) ? val('icon') : '', surveys: $('#dform [name="surveys"]:checked')?.value === 'ours' ? 'ours' : 'customer' };
     if (!data.name) return formError('Укажите название объекта.', 'main', 'name');
     if (id) {
       if (projectDraftData().error) { const e = projectDraftData(); return formError(e.error, e.tab); }
@@ -7163,6 +7242,7 @@ document.addEventListener('click', e => {
     case 'fold': setFold([el.dataset.key], !isFolded(el.dataset.key)); break;
     case 'fold-all': setFold(el.dataset.keys.split(' ').filter(Boolean), el.dataset.on === '1'); break;
     case 'move-task': e.stopPropagation(); reassign(id, el.dataset.kind, el.dataset.from); break;
+    case 'cust-sec': custSec = el.dataset.v; saveLocal('custSec', custSec); custNav(); break;
     case 'set-dense': dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); break;
     case 'set-backdrop': api.setBackdrop?.(el.dataset.v).then(ok => { if (ok === false) toast('Этот фон Windows здесь недоступен — осталась своя прозрачность.', true); }); break;
     case 'set-dock': api.setDock?.(el.dataset.v); break;
@@ -7173,6 +7253,12 @@ document.addEventListener('click', e => {
     case 'review-queue': openReviewQueue(); break;
     case 'ird-folder': irdOpen[el.dataset.id] = el.dataset.v; renderNow(); break;
     case 'ird-upload': { const pid = el.dataset.id, folder = el.closest('.ird')?.querySelector('[data-ird-folder]')?.dataset.irdFolder || 'other'; api.attachAdd(pid).then(r => irdAdd(pid, [r], folder)); break; }
+    case 'sv-upload': { const pid = el.dataset.id, folder = el.dataset.folder; api.attachAdd(pid).then(r => irdAdd(pid, [r], folder)); break; }
+    case 'sv-files': { const p = state.projects.get(el.dataset.id), list = (p?.irdFiles || []).filter(f => f.folder === el.dataset.folder);
+      // The newest report opens; with several, the plate names the others.
+      const last = list.at(-1);
+      if (last) api.attachOpen(p.id, last.id).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть файл.', true); else if (list.length > 1) toast(`Открыт последний: ${last.name}. Ещё: ${list.slice(0, -1).map(f => f.name).join(', ')}`); });
+      break; }
     case 'ird-open': api.attachOpen(el.dataset.id, el.dataset.fid).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть файл.', true); }); break;
     case 'ird-del': { const p = state.projects.get(el.dataset.id); if (p) write(op.update('projects', p.id, { irdFiles: (p.irdFiles || []).filter(f => f.id !== el.dataset.fid) }), 'Файл убран'); break; }
     case 'ird-newfolder': { const p = state.projects.get(el.dataset.id); if (p) askText('Новая папка', 'Название папки', 'Например: Согласования с сетевыми').then(name => { if (!name?.trim()) return; const id = newId(); irdOpen[p.id] = id; write(op.update('projects', p.id, { irdFolders: [...(p.irdFolders || []), { id, name: name.trim().slice(0, 80) }] }), 'Папка добавлена'); }); break; }
@@ -7467,6 +7553,7 @@ document.addEventListener('change', e => {
     return;
   }
   if (t.dataset.ird) { irdPatch(t.dataset.pid, t.dataset.fid, { [t.dataset.ird]: t.value }); return; }
+  if (t.dataset.sv) { surveyPatch(t.dataset.pid, t.dataset.k, { [t.dataset.sv]: t.dataset.sv === 'on' ? t.checked : t.value.trim() }); return; }
   if (t.dataset.pd && /^docs\.\d+\.(kind|issued)$/.test(t.dataset.pd)) {
     // A fixed-term kind fills «действует до» from the date of issue, unless it was typed by hand (differs from the rule).
     const x = state.draft.docs[Number(t.dataset.pd.split('.')[1])], kind = x.kind || L.docKindOf(x.title), auto = L.docUntil(kind, x.issued);

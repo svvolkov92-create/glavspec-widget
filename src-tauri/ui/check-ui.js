@@ -565,6 +565,38 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await js(() => document.querySelector('[data-act="msg-close"]')?.click()); await wait(200);
     await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-45.png' }).catch(() => {});
   }
+  // 4.6: «Для заказчика» by tabs (1), «Кто кому что» in the tech card (10), surveys as their own block (11).
+  {
+    const clickAct = (act, extra = {}) => js(([a, x]) => { const b = document.createElement('button'); b.dataset.act = a; Object.assign(b.dataset, x); document.body.append(b); b.click(); b.remove(); }, [act, extra]);
+    const pid = await js(() => [...window.AppBridge.state.projects.values()].find(p => !p.archived && !p.deletedAt).id);
+    await clickAct('open-project', { id: pid }); await wait(500);
+    await js(() => document.querySelector('.dtabs [data-act="dtab"][data-id="cust"]')?.click()); await wait(500);
+    const cn = await js(() => ({ tabs: [...document.querySelectorAll('.cust-nav [data-act="cust-sec"]')].map(b => b.textContent.replace(/\d+$/, '')), shown: [...document.querySelectorAll('#cust-box .sub[data-cs]')].filter(x => x.offsetParent).map(x => x.dataset.cs) }));
+    check('4.6: «Для заказчика» is split into tabs', cn.tabs.includes('Нужно от заказчика') && cn.tabs.includes('Сроки документов') && new Set(cn.shown).size === 1, JSON.stringify(cn));
+    await js(() => document.querySelector('.cust-nav [data-v="docs"]').click()); await wait(200);
+    check('4.6: a tab shows only its block', await js(() => [...document.querySelectorAll('#cust-box .sub[data-cs]')].filter(x => x.offsetParent).every(x => x.dataset.cs === 'docs') && !!document.querySelector('#cust-box .sub[data-cs="docs"]').offsetParent));
+    await js(() => document.querySelector('.cust-nav [data-v="cab"]').click()); await wait(200);
+    check('4.6: «Кабинет» shows the cabinet box', await js(() => !!document.querySelector('#cab-box').offsetParent && ![...document.querySelectorAll('#cust-box .sub[data-cs]')].some(x => x.offsetParent)));
+    await js(() => document.querySelector('.cust-nav [data-v="plan"]').click());
+    // 11: switch the project to «делаем мы»
+    await js(() => document.querySelector('.dtabs [data-act="dtab"][data-id="main"]')?.click()); await wait(200);
+    await js(() => { const r = document.querySelector('#dform [name="surveys"][value="ours"]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); }); await wait(200);
+    await js(() => document.querySelector('#dform button[type="submit"]').click()); await wait(700);
+    check('4.6: the project keeps «изыскания делаем мы»', disk.data.projects[pid].surveys === 'ours', String(disk.data.projects[pid].surveys));
+    await js(() => document.querySelector('#dform [data-act="discard"]')?.click()); await wait(200);
+    await clickAct('project-page', { id: pid }); await wait(500);
+    const sv = await js(() => ({ heads: [...document.querySelectorAll('.pt-aux h3')].map(h => h.textContent), rows: document.querySelectorAll('.sv-t tbody tr').length }));
+    check('4.6: project page has «Сбор ИРД» and «Инженерные изыскания»', sv.heads.includes('Сбор ИРД') && sv.heads.includes('Инженерные изыскания') && sv.rows === 5, JSON.stringify(sv));
+    await js(() => { const i = document.querySelector('.sv-t input[data-sv="finish"][data-k="geology"]'); i.value = '2026-01-10'; i.dispatchEvent(new Event('change', { bubbles: true })); }); await wait(500);
+    check('4.6: a survey past its date is marked overdue', (disk.data.projects[pid].surveyRows || {}).geology?.finish === '2026-01-10' && await js(() => /просрочено 1/.test(document.querySelector('.pt-aux .meta')?.parentElement?.textContent || '') || [...document.querySelectorAll('.pt-aux')].some(b => /просрочено 1/.test(b.textContent))));
+    check('4.6: survey folders leave «Сбор ИРД»', await js(() => ![...document.querySelectorAll('.ird-folders .ird-f')].some(b => /Инженерная геология/.test(b.textContent))));
+    // 10
+    await js(() => document.querySelector('[data-act="techcard"]').click()); await wait(300);
+    await js(() => document.querySelector('.tc-nav [data-sec="bysec"]').click()); await wait(200);
+    const ov = await js(() => document.querySelector('.tc-sec[data-key="ИОС4"]')?.textContent.replace(/\s+/g, ' ') || '');
+    check('4.6: tech card «Кто кому что»: ОВ gets plans from АР, gives КР openings and ЭОМ loads', /ОВ/.test(ov) && /Получает.*от АР/.test(ov) && /Выдаёт.*КР — Отверстия/.test(ov) && /ЭОМ — Электрические нагрузки/.test(ov), ov.slice(0, 300));
+    await js(() => document.querySelector('.tc-back')?.remove());
+  }
   // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
   const w0 = await js(() => window.__win);
   check('window shown at its saved place', w0.visible && w0.calls.includes('show') && w0.x === 200 && w0.width === 1200, JSON.stringify(w0));
