@@ -30,10 +30,15 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon(icon)
         .tooltip("Пульт главспеца")
         .show_menu_on_left_click(false)
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-                show_main(tray.app_handle());
+        .on_tray_icon_event(|tray, event| match event {
+            // 4.1.1 (item 35): a left click opens the «Сегодня» mini panel next to the clock; the window places it.
+            // The position is physical pixels of the click.
+            TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, position, .. } => {
+                let _ = tray.app_handle().emit("tray:click", serde_json::json!({ "x": position.x, "y": position.y }));
             }
+            // A double click (Windows) opens the whole Пульт, as before.
+            TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => show_main(tray.app_handle()),
+            _ => {}
         })
         .on_menu_event(|app, event| {
             let id = event.id().as_ref().to_string();

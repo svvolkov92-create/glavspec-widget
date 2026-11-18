@@ -265,6 +265,7 @@
     importPick: async () => (await ready()).files.importPick(),
     attachAdd: async projectId => (await ready()).files.attachAdd(projectId),
     attachOpen: async (projectId, fileId) => (await ready()).files.attachOpen(projectId, fileId),
+    attachBytes: async (projectId, name, bytes) => (await ready()).files.attachBytes(projectId, name, bytes),
     // Customer cabinet: the shared rules (src/core/cabinet-rules.js).
     cabinetGet: async () => (await ready()).cabinet.view(),
     onCabinet: cb => { cabListeners.push(cb); return () => cabListeners.splice(cabListeners.indexOf(cb), 1); },
@@ -300,6 +301,26 @@
   };
   // Separate windows for a project or a chat: opened from here, every call of theirs is answered here.
   windows = window.TauriWindows.host({ known, focus: async () => { await win.unminimize().catch(() => {}); await win.show(); await win.setFocus().catch(() => {}); } });
+  // 4.1.1 (item 34): how many things wait for the user — a red number over the taskbar icon (Windows overlay icon).
+  let badgeN = -1;
+  known.setBadge = async n => {
+    n = Math.max(0, Math.min(99, Math.round(Number(n) || 0)));
+    if (n === badgeN) return true;
+    badgeN = n;
+    if (typeof win.setOverlayIcon !== 'function') return false;
+    try {
+      if (!n) { await win.setOverlayIcon(undefined); return true; }
+      const c = document.createElement('canvas'); c.width = c.height = 32;
+      const g = c.getContext('2d');
+      g.fillStyle = '#D92D20'; g.beginPath(); g.arc(16, 16, 15, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = '#ffffff'; g.lineWidth = 2; g.stroke();
+      g.fillStyle = '#ffffff'; g.font = `bold ${n > 9 ? 16 : 20}px Segoe UI, Arial, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(String(n), 16, 17);
+      const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+      await win.setOverlayIcon(new Uint8Array(await blob.arrayBuffer()));
+      return true;
+    } catch { return false; }
+  };
   known.windowOpen = windows.windowOpen;
   known.onWindowMain = windows.onWindowMain;
 

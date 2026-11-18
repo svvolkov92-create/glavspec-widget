@@ -842,6 +842,33 @@ function viewDay() {
       <section class="panel"><div class="panel-h"><h3>Мои карточки</h3><span class="meta">${mine.length}</span></div><div class="day-list">${todo.join('') || `<p class="hint day-empty">${spec ? 'Карточек пока нет — их выдаёт главспец или ГИП.' : 'Лично на вас карточек нет.'}</p>`}</div></section></div></section>`;
 }
 
+// What waits for the user right now: to check, overdue of mine (or all, for GIP/chief), unread mentions.
+function badgeCount() {
+  const a = attention(), spec = isSpec();
+  const overdue = spec ? myCards().filter(t => timing(t).overdue).length : a.overdue.length;
+  const mentions = [...state.chats.values()].reduce((n, c) => n + msgMentions(c).length, 0);
+  return (spec ? 0 : a.review.length) + overdue + mentions;
+}
+/* ---------- 4.1.1: the «Сегодня» panel from the tray (item 35): what is urgent, without opening the whole Пульт ---------- */
+function viewTrayPanel() {
+  if (!state.me) return '<div class="hint tp-empty">Откройте Пульт и выберите пользователя.</div>';
+  const a = attention(), mine = myCards(), spec = isSpec();
+  const review = spec ? [] : a.review, overdue = spec ? mine.filter(t => timing(t).overdue) : a.overdue;
+  const soon = (spec ? mine : a.week).filter(t => !timing(t).overdue && isDate(t.finish) && dayNum(t.finish) - dayNum(state.today) <= 3);
+  const unread = [...state.chats.values()].reduce((n, c) => n + msgUnread(c).length, 0);
+  const row = (t, tone, side) => `<button class="tp-row" type="button" data-act="tp-task" data-id="${esc(t.id)}"><span class="chip tone-${tone}">${side}</span><span class="tp-t">${marksHtml(t)} ${esc(projectOf(t)?.name || '')}</span></button>`;
+  const notStarted = mine.filter(t => t.status === 'not_started').slice(0, 3);
+  const sec = (title, html) => (html ? `<section class="tp-sec"><h4>${title}</h4>${html}</section>` : '');
+  const body = sec('Срок сорван', overdue.slice(0, 5).map(t => row(t, 'bad', isDate(t.finish) ? `−${dayNum(state.today) - dayNum(t.finish)} дн.` : 'сорван')).join(''))
+    + sec('Ждут проверки', review.slice(0, 5).map(t => row(t, 'review', 'проверить')).join(''))
+    + sec('Срок в ближайшие 3 дня', soon.slice(0, 5).map(t => row(t, 'warn', fmtDate(t.finish).slice(0, 5))).join(''))
+    + sec('Можно начать', notStarted.map(t => `<div class="tp-row tp-start">${marksHtml(t)} <span class="tp-t">${esc(projectOf(t)?.name || '')}</span><button class="btn primary sm" type="button" data-act="cm-quick" data-q="start" data-id="${esc(t.id)}">▶ Начать</button></div>`).join(''));
+  return `<div class="tp"><div class="tp-h drag"><b>Сегодня</b><span class="hint">${esc(new Date(state.today + 'T12:00').toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' }))}</span><span class="spacer"></span>
+      ${unread ? `<button class="chip tone-work" type="button" data-act="tp-main" data-v="msg">сообщения ${unread}</button>` : ''}</div>
+    <div class="tp-body">${body || '<p class="hint tp-empty">Ничего срочного — всё по плану.</p>'}</div>
+    <div class="tp-f"><button class="btn primary" type="button" data-act="tp-main" data-v="open">Открыть Пульт</button><button class="btn" type="button" data-act="tp-main" data-v="day">Мой день</button></div></div>`;
+}
+
 /* ---------- 4.1.1: review queue (item 49) — the cards waiting for my decision, one after another ---------- */
 let rq = null; // { ids, i }
 function openReviewQueue() {
@@ -1235,7 +1262,7 @@ function openProjectPage(id) {
 const SOLO = (() => {
   try {
     const v = new URLSearchParams(location.search).get('w') || '', i = v.indexOf(':');
-    return i > 0 && ['project', 'chat'].includes(v.slice(0, i)) && v.length > i + 1 ? { kind: v.slice(0, i), id: v.slice(i + 1) } : null;
+    return i > 0 && ['project', 'chat', 'tray'].includes(v.slice(0, i)) && v.length > i + 1 ? { kind: v.slice(0, i), id: v.slice(i + 1) } : null;
   } catch { return null; }
 })();
 // Only where the app can open windows (the Tauri version); the Electron preload has no windowOpen.
@@ -3373,6 +3400,8 @@ function renderNow() {
   const app = $('#app');
   if (!state.loaded) { app.innerHTML = '<div class="hint">Загружаем данные…</div>'; return; }
   const active = document.activeElement?.id, caret = document.activeElement?.selectionStart;
+  if (SOLO?.kind === 'tray') { app.innerHTML = viewTrayPanel(); return; }
+  if (!SOLO && state.me) api.setBadge?.(badgeCount()); // 4.1.1 (34): the number over the taskbar icon
   if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
   if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
   const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
@@ -4127,8 +4156,64 @@ function taskMainPanel(t, isNew) {
           <span class="hint">Чертежи и файлы раздела. Кнопка «📁 Папка» в шапке карточки откроет её в Проводнике.</span></div>
         <div class="f wide"><label for="t-note">Примечание</label><textarea id="t-note" name="note" maxlength="2000">${esc(t.note || '')}</textarea></div>
       </div></details>
+      ${taskFilesHtml(t)}
     </div>`;
 }
+/* ---------- 4.1.1 (item 39): files of a card — dropped from Explorer, a screenshot pasted with Ctrl+V ---------- */
+const canFiles = () => typeof api.attachBytes === 'function';
+function taskFilesHtml(t) {
+  if (!canFiles()) return '';
+  const files = Array.isArray(t.files) ? t.files : [];
+  return `<div class="f wide tf" id="tf-box"><span class="lbl">Файлы${files.length ? ` <span class="hint">${files.length}</span>` : ''}</span>
+    <div class="tf-list">${files.map(f => `<span class="aq-file tf-file">${icon('file')}<button class="linkbtn" type="button" data-act="tf-open" data-fid="${esc(f.id)}" title="Открыть">${esc(f.name)}</button> <span class="hint">${fileSize(f.size)}</span><button class="btn ghostbtn sm" type="button" data-act="tf-del" data-fid="${esc(f.id)}" title="Убрать из карточки" aria-label="Убрать">×</button></span>`).join('')}</div>
+    <div class="tf-drop">${t.id ? 'Перетащите сюда файлы из Проводника или нажмите <b>Ctrl+V</b>, чтобы вставить скриншот' : 'Сохраните карточку — потом сюда можно будет перетаскивать файлы'}</div></div>`;
+}
+async function attachToTask(taskId, fileList) {
+  const t = state.tasks.get(taskId);
+  if (!t || !canFiles()) return;
+  const added = [];
+  for (const f of [...fileList].slice(0, 20)) {
+    if (!f || !f.size) continue;
+    const name = f.name && f.name !== 'image.png' ? f.name : `Скриншот ${new Date().toLocaleString('ru-RU').replace(/[:.,]/g, '-').replace(/\s+/g, ' ')}.png`;
+    const r = await api.attachBytes(t.projectId, name, new Uint8Array(await f.arrayBuffer()));
+    if (r?.ok) added.push(r.file); else toast(r?.message || `Не удалось приложить «${name}».`, true);
+  }
+  if (!added.length) return;
+  const cur = state.tasks.get(taskId);
+  await write(op.update('tasks', taskId, { files: [...(Array.isArray(cur.files) ? cur.files : []), ...added] }), `${marksText(t)}: ${added.length === 1 ? `приложен «${added[0].name}»` : `приложено файлов: ${added.length}`}`);
+  refreshTaskFiles();
+}
+// The open card shows its file list without losing what is typed in the form.
+function refreshTaskFiles() { const box = $('#tf-box'), t = state.drawer?.kind === 'task' && state.tasks.get(state.drawer.id); if (box && t) box.outerHTML = taskFilesHtml(t); }
+const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+const fileTarget = e => {
+  if (e.target.closest?.('#dform') && state.drawer?.kind === 'task' && state.drawer.id) return state.drawer.id;
+  return e.target.closest?.('[data-kb-id]')?.dataset.kbId || e.target.closest?.('.tl-bar[data-bar]')?.dataset.bar || '';
+};
+document.addEventListener('dragover', e => {
+  if (!hasFiles(e) || !canFiles()) return;
+  const id = fileTarget(e);
+  $$('.file-over').forEach(x => x.classList.remove('file-over'));
+  if (!id) return;
+  e.preventDefault(); e.stopPropagation();
+  e.dataTransfer.dropEffect = 'copy';
+  (e.target.closest('#tf-box, #dform, [data-kb-id], .tl-bar') || e.target).classList.add('file-over');
+}, true);
+document.addEventListener('dragleave', e => { if (hasFiles(e) && !e.relatedTarget) $$('.file-over').forEach(x => x.classList.remove('file-over')); }, true);
+document.addEventListener('drop', e => {
+  if (!hasFiles(e) || !canFiles()) return;
+  $$('.file-over').forEach(x => x.classList.remove('file-over'));
+  const id = fileTarget(e);
+  if (!id) return;
+  e.preventDefault(); e.stopPropagation();
+  attachToTask(id, e.dataTransfer.files);
+}, true);
+document.addEventListener('paste', e => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length || !canFiles() || state.drawer?.kind !== 'task' || !state.drawer.id) return;
+  e.preventDefault();
+  attachToTask(state.drawer.id, files);
+});
 
 function historyLine(h) {
   if (h.type === 'finish') {
@@ -6359,6 +6444,10 @@ document.addEventListener('click', e => {
     case 'proj-mode': projMode = el.dataset.v === 'portfolio' ? 'portfolio' : 'list'; saveLocal('projMode', projMode); renderNow(); break;
     case 'g-crit': state.gantt.crit = !state.gantt.crit; saveLocal('ganttCrit', state.gantt.crit); renderNow(); break;
     case 'review-queue': openReviewQueue(); break;
+    case 'tf-open': { const t = state.tasks.get(state.drawer?.id); if (t) api.attachOpen(t.projectId, el.dataset.fid).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть файл.', true); }); break; }
+    case 'tf-del': { const t = state.tasks.get(state.drawer?.id); if (t) write(op.update('tasks', t.id, { files: (t.files || []).filter(f => f.id !== el.dataset.fid) }), 'Файл убран из карточки').then(refreshTaskFiles); break; }
+    case 'tp-task': api.windowMain?.({ kind: 'task', id: el.dataset.id }); api.hide?.(); break;
+    case 'tp-main': { const c = [...state.chats.values()].find(x => msgUnread(x).length); api.windowMain?.(el.dataset.v === 'msg' && c ? { kind: 'chat', id: c.id } : { kind: 'main', id: el.dataset.v === 'day' ? 'day' : 'open' }); api.hide?.(); break; }
     case 'msg-open-any': msgOpen(); break;
     case 'att-go': state.tab = 'tasks'; state.filters.status = el.dataset.v; renderNow(); break;
     case 'ep-pick': epSet(el.dataset.pick, el.dataset.ref); break;
@@ -6702,12 +6791,14 @@ $('#app').addEventListener('scroll', rememberScroll, { passive: true });
 if (SOLO) {
   document.body.classList.add('solo', 'solo-' + SOLO.kind);
   if (SOLO.kind === 'project') { state.tab = 'projects'; state.openProjectId = SOLO.id; }
-  else { msg.mode = 'solo'; msg.chatId = SOLO.id; }
+  else if (SOLO.kind === 'chat') { msg.mode = 'solo'; msg.chatId = SOLO.id; }
 }
 // A separate window hands a project or a chat back (or asks to open another one here).
 api.onWindowMain?.(spec => {
   if (spec?.kind === 'project' && state.projects.has(spec.id)) { if (state.tab !== 'projects') { state.tab = 'projects'; saveLocal('tab', 'projects'); } openProjectPage(spec.id); }
   else if (spec?.kind === 'chat' && spec.id) { if (msg.mode === 'pill') { msg.mode = 'full'; msg.enter = true; } msgOpen(spec.id); }
+  else if (spec?.kind === 'task' && state.tasks.has(spec.id)) openTask(spec.id); // from the tray panel
+  else if (spec?.kind === 'main' && spec.id === 'day') { state.tab = 'day'; saveLocal('tab', 'day'); renderNow(); }
 });
 api.onData(setData);
 api.onCabinet?.(setCab);

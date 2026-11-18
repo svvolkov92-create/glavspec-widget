@@ -295,6 +295,35 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     check('⧉ in a chat opens it in its own window', opened.length === n + 1 && opened.at(-1).opts.url.includes(encodeURIComponent('chat:' + chatId)) && /^sat-chat-/.test(opened.at(-1).label), JSON.stringify(opened.at(-1)));
     await js(() => { const b = document.createElement('button'); b.dataset.act = 'msg-close'; document.body.append(b); b.click(); b.remove(); }); await wait(300);
   }
+  // 4.1.1: the «Сегодня» panel from a tray click (34/35), files dropped on a card (39).
+  {
+    const n0 = opened.length;
+    await js(() => window.__TAURI__.event.emit('tray:click', { x: 1800, y: 1050 })); await wait(400);
+    const o = opened.at(-1);
+    check('4.1.1: a tray click opens the «Сегодня» panel (on top, no taskbar button)', opened.length === n0 + 1 && /^sat-tray-/.test(o.label) && o.opts.url === 'index.html?w=' + encodeURIComponent('tray:today') && o.opts.alwaysOnTop === true && o.opts.skipTaskbar === true && o.opts.decorations === false, JSON.stringify(o?.opts));
+    const tp = await ctx.newPage();
+    const terr = []; tp.on('pageerror', e => terr.push(e.message)); tp.on('console', m => { if (m.type() === 'error') terr.push(m.text()); });
+    await tp.setViewportSize({ width: 380, height: 520 });
+    await tp.goto('http://127.0.0.1:8766/' + o.opts.url); await wait(1200);
+    check('4.1.1: the panel shows «Сегодня» and «Открыть Пульт»', await tp.evaluate(() => !!document.querySelector('.tp .tp-h') && !!document.querySelector('[data-act="tp-main"][data-v="open"]')), await tp.evaluate(() => document.body.innerText.slice(0, 200)));
+    check('4.1.1: no errors in the panel', terr.length === 0, terr.join(' | '));
+    await tp.screenshot({ path: require('os').tmpdir() + '/tauri-ui-tray-panel.png' }).catch(() => {});
+    await tp.close();
+    check('4.1.1: taskbar number is set without errors', typeof (await js(() => typeof window.api.setBadge)) === 'string' && (await js(() => window.api.setBadge(3).then(r => typeof r))) === 'boolean');
+    // A file from Explorer dropped on a Kanban card.
+    await js(() => document.querySelector('[data-act="tab"][data-id="kanban"]').click()); await wait(300);
+    const kid = await js(() => document.querySelector('[data-kb-id]')?.dataset.kbId);
+    await js(() => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([37, 80, 68, 70, 45, 49])], 'ТУ на водоснабжение.pdf', { type: 'application/pdf' }));
+      const card = document.querySelector('[data-kb-id]');
+      card.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      card.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    });
+    await wait(800);
+    const tf = disk.data.tasks[kid]?.files || [];
+    check('4.1.1: a dropped file is kept with the card and in the data folder', tf.length === 1 && tf[0].name === 'ТУ на водоснабжение.pdf' && tf[0].size === 6 && Object.keys(fsMem).some(k => k.endsWith('\\' + tf[0].id)), JSON.stringify(tf));
+  }
   // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
   const w0 = await js(() => window.__win);
   check('window shown at its saved place', w0.visible && w0.calls.includes('show') && w0.x === 200 && w0.width === 1200, JSON.stringify(w0));

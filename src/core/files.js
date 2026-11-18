@@ -326,8 +326,27 @@
     } catch (e) { return { ok: false, message: `Не удалось взять файл: ${msgOf(e)}` }; }
   }
   // Opens the local copy: saved next to the others under its own name, so Windows picks the right program.
+  // 4.1.1 (item 39): a file dropped from Explorer or a screenshot pasted with Ctrl+V — bytes from the page, no dialog.
+  // Kept with the project's other attachments; anyone who can see the project may add (specialists too, to their cards).
+  async function attachBytes(projectId, name, bytes) {
+    const me = currentUser();
+    if (!me) return { ok: false, message: 'Сначала выберите пользователя.' };
+    if (!store.data.projects[projectId]) return { ok: false, message: 'Проект не найден.' };
+    const data = bytes instanceof Uint8Array ? bytes : Uint8Array.from(Array.isArray(bytes) ? bytes : Object.values(bytes || {}));
+    if (!data.length) return { ok: false, message: 'Пустой файл.' };
+    if (data.length > ATTACH_MAX) return { ok: false, message: 'Файл больше 30 МБ — такие лучше класть в папку проекта и давать ссылку.' };
+    const id = 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const dir = attachDir(projectId);
+    await io.mkdir(dir);
+    await io.writeFile(io.join(dir, id), data);
+    const clean = String(name || 'файл').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 200) || 'файл';
+    const ext = io.extname(clean).slice(1).toLowerCase();
+    return { ok: true, file: { id, name: clean, size: data.length, type: TYPES[ext] || 'application/octet-stream', at: new Date().toISOString(), by: me.id } };
+  }
   async function attachOpen(projectId, fileId) {
-    const f = (store.data.projects[projectId]?.requests || []).flatMap(r => r.files || []).find(x => x.id === fileId);
+    const p = store.data.projects[projectId];
+    const cards = Object.values(store.data.tasks || {}).filter(t => t.projectId === projectId);
+    const f = [...(p?.requests || []).flatMap(r => r.files || []), ...cards.flatMap(t => t.files || [])].find(x => x.id === fileId);
     if (!f) return { ok: false, message: 'Файл не найден.' };
     const src = io.join(attachDir(projectId), safeId(fileId));
     if (!(await io.exists(src))) return { ok: false, message: 'Файла нет на этом компьютере — его приложили на другом.' };
@@ -359,5 +378,5 @@
   }
 
   return { exportReport, customerPage, composition, docDefaults, openTemplates, openLast, openProjectFolder, openTaskFolder, pickFolder, contactOpen,
-    backupSave, backupRestore, autoBackup, autoBackupGet, autoBackupSet, importPick, safeName, customerTeam, customerContact, attachAdd, attachOpen, attachmentBytes };
+    backupSave, backupRestore, autoBackup, autoBackupGet, autoBackupSet, importPick, safeName, customerTeam, customerContact, attachAdd, attachBytes, attachOpen, attachmentBytes };
 });

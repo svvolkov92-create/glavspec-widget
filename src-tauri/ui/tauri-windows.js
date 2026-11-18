@@ -10,8 +10,9 @@
   const LABEL = win.label || 'main';
   const emit = (name, payload) => T.event.emit(name, payload);
   const listen = (name, f) => T.event.listen(name, e => f(e.payload || {}));
-  const SIZES = { project: { width: 1040, height: 760 }, chat: { width: 480, height: 680 } };
-  const KINDS = ['project', 'chat'];
+  const SIZES = { project: { width: 1040, height: 760 }, chat: { width: 480, height: 680 }, tray: { width: 380, height: 520 } };
+  const KINDS = ['project', 'chat', 'tray'];
+  const MAIN_KINDS = ['project', 'chat', 'task', 'main']; // what a separate window may hand to the main one
 
   /* ---------- the look, same in every window ---------- */
   // Electron switches prefers-color-scheme for the page (nativeTheme.themeSource); here the stylesheet's dark
@@ -70,17 +71,35 @@
       emit('sat:reply', { to: from, id, ...reply });
     });
     // A separate window hands its page back («В главное окно») or asks to open another project or chat here.
-    listen('sat:main', spec => { if (!KINDS.includes(spec.kind) || !spec.id) return; for (const cb of mainListeners) cb(spec); focus(); });
+    listen('sat:main', spec => { if (!MAIN_KINDS.includes(spec.kind) || !spec.id) return; for (const cb of mainListeners) cb(spec); focus(); });
+    // 4.1.1 (item 35): a left click on the tray icon — the «Сегодня» panel above the click point.
+    listen('tray:click', ({ x, y }) => windowOpen({ kind: 'tray', id: 'today', title: 'Сегодня', tx: x, ty: y }));
 
     async function windowOpen(spec) {
       if (!spec || !KINDS.includes(spec.kind) || !spec.id) return { ok: false, message: 'Нечего открыть в отдельном окне.' };
       const label = labelOf(spec);
       const existing = await T.webviewWindow.WebviewWindow.getByLabel(label).catch(() => null);
+      const size = SIZES[spec.kind];
+      // The tray panel stands above the click point (the taskbar is usually at the bottom), inside the screen.
+      const trayAt = async () => {
+        const dpr = window.devicePixelRatio || 1;
+        const sw = screen.availWidth || 1920, sh = screen.availHeight || 1080;
+        const px = Number(spec.tx) / dpr, py = Number(spec.ty) / dpr;
+        if (!Number.isFinite(px) || !Number.isFinite(py)) return { x: sw - size.width - 12, y: sh - size.height - 12 };
+        const x = Math.round(Math.min(Math.max(8, px - size.width + 24), sw - size.width - 8));
+        const y = Math.round(py > sh / 2 ? Math.max(8, py - size.height - 16) : py + 16); // taskbar at the top: below
+        return { x, y };
+      };
       if (existing) {
+        if (spec.kind === 'tray') {
+          const vis = await existing.isVisible().catch(() => false);
+          if (vis) { await existing.hide().catch(() => {}); return { ok: true, label, existed: true }; } // second click hides
+          const at = await trayAt();
+          await existing.setPosition(new ((T.dpi && T.dpi.LogicalPosition) || T.window.LogicalPosition)(at.x, at.y)).catch(() => {});
+        }
         await existing.unminimize().catch(() => {}); await existing.show().catch(() => {}); await existing.setFocus().catch(() => {});
         return { ok: true, label, existed: true };
       }
-      const size = SIZES[spec.kind];
       const opts = {
         url: `index.html?w=${encodeURIComponent(`${spec.kind}:${spec.id}`)}`,
         title: `${String(spec.title || '').slice(0, 80) || (spec.kind === 'project' ? 'Проект' : 'Чат')} — Пульт главспеца`,
@@ -90,6 +109,9 @@
       };
       // Dropped outside the window: the new one appears under the cursor, its title bar where the tab was let go.
       if (Number.isFinite(spec.x) && Number.isFinite(spec.y)) { opts.x = Math.max(0, Math.round(spec.x - 140)); opts.y = Math.max(0, Math.round(spec.y - 18)); }
+      if (spec.kind === 'tray') {
+        Object.assign(opts, await trayAt(), { title: 'Сегодня — Пульт главспеца', resizable: false, alwaysOnTop: true, skipTaskbar: true, minWidth: undefined, minHeight: undefined, transparent: false });
+      }
       return new Promise(resolve => {
         const w = new T.webviewWindow.WebviewWindow(label, opts);
         w.once('tauri://created', () => resolve({ ok: true, label }));
@@ -141,6 +163,8 @@
     }
     listen('sat:state', st => { takeShared(st); pushOwn(); });
     win.onResized(() => pushOwn());
+    // The tray panel hides as soon as the user clicks elsewhere, like the Windows clock flyout.
+    if (/^sat-tray-/.test(LABEL)) win.onFocusChanged(({ payload }) => { if (payload === false) win.hide().catch(() => {}); });
 
     const close = () => { emit('sat:bye', { from: LABEL }); return win.close(); };
     const sub = list => cb => { list.push(cb); return () => list.splice(list.indexOf(cb), 1); };
@@ -150,7 +174,7 @@
       onData: sub(dataCbs), onCabinet: sub(cabCbs), onWindowState: sub(winCbs),
       minimize: () => win.minimize(),
       setMaximized: async on => { (on ? await win.maximize() : await win.unmaximize()); pushOwn(); },
-      hide: close, // ✕ and Alt+F4 close a separate window; the main one stays
+      hide: /^sat-tray-/.test(LABEL) ? () => win.hide() : close, // ✕ and Alt+F4 close a separate window; the main one stays
       setSize: (w, h) => win.setSize(new ((T.dpi && T.dpi.LogicalSize) || T.window.LogicalSize)(w, h)),
       reloadWindow: async () => { location.reload(); return { ok: true }; },
       setCompact: () => {}, setClickThrough: () => {}, hoverUnlock: () => {},
