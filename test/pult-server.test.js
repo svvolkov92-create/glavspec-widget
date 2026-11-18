@@ -95,7 +95,7 @@ test('pult server: setup, invitations, rights, conflicts, live updates, files', 
     assert.ok((await s.rpc(gip, 'write', [{ type: 'update', col: 'users', id: 'u-chief', data: { canSeeBudget: true } }], { action: 'Права' })).ok);
     const cv2 = (await s.call('GET', '/api/view', null, chief)).body.data;
     assert.equal(cv2.tasks.find(t => t.id === 't1').budget, 500000);
-    assert.equal(cv2.projects.find(p => p.id === 'p1').contract.no, '47-П', 'with the money — the contract too');
+    assert.equal(cv2.projects.find(p => p.id === 'p1').contract, undefined, 'the customer\'s contract stays with the GIP');
 
     // The specialist: own cards, own project; may not edit someone else's card.
     const sv = (await s.call('GET', '/api/view', null, spec)).body.data;
