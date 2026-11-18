@@ -75,7 +75,8 @@
   const later = async () => ({ ok: false, message: LATER });
 
   const dataListeners = [];
-  const emitData = () => { if (!ctx) return; const view = ctx.core.userView(); for (const cb of dataListeners) cb(view); windows?.data(view); trayLater(); };
+  // A change that comes while the core is still starting (the server answers first) is sent once it is ready.
+  const emitData = () => { if (!ctx) { starting?.then(() => emitData()); return; } const view = ctx.core.userView(); for (const cb of dataListeners) cb(view); windows?.data(view); trayLater(); };
   let ctx = null, starting = null;
   const cabListeners = [];
   const emitCabinet = () => { if (!ctx) return; const v = ctx.cabinet.view(); for (const cb of cabListeners) cb(v); windows?.cabinet(v); };
@@ -286,7 +287,37 @@
   const saved = async result => { const f = await ctx.flush(); return f.ok ? result : f; };
 
   const known = {
-    getData: async () => { const c = await ready(); return { data: c.core.userView(), warning: c.warning }; },
+    getData: async () => { const c = await ready(); return { data: c.core.userView(), warning: c.warning, remote: c.status ? c.status() : null }; },
+    // «Сервер Пульта»: where this window takes its data, signing in, moving the base, accounts (GIP), conflicts.
+    serverInfo: async () => {
+      const c = await ready();
+      if (!c.remote) return { mode: 'local' };
+      return { mode: 'server', ...c.status(), conflicts: c.remote.state.conflicts.map((x, i) => ({ i, at: x.at, list: x.list })) };
+    },
+    serverSignIn: async req => {
+      const r = await window.TauriCore.server.signIn(req || {});
+      if (!r.ok) return r;
+      (await ready()).settings.set({ server: r.server });
+      setTimeout(() => location.reload(), 600);
+      return { ok: true, me: r.me };
+    },
+    serverMove: async req => {
+      const c = await ready();
+      if (c.remote) return { ok: false, message: 'Пульт уже работает с сервером.' };
+      const r = await window.TauriCore.server.moveBase(req || {}, c, msg => window.AppBridge?.toast(msg));
+      if (!r.ok) return r;
+      c.settings.set({ server: r.server });
+      setTimeout(() => location.reload(), 2500);
+      return r;
+    },
+    serverDisconnect: async () => { (await ready()).settings.set({ server: null }); setTimeout(() => location.reload(), 300); return { ok: true }; },
+    serverCall: async (fn, ...args) => {
+      const c = await ready();
+      if (!c.remote) return { ok: false, message: 'Пульт работает со своим файлом, а не с сервером.' };
+      if (!['accounts', 'inviteCreate', 'accountDisable', 'accountReset', 'passwordChange', 'signOutOthers'].includes(fn)) return { ok: false, message: 'Неизвестная команда.' };
+      return c.remote.call(fn, ...args);
+    },
+    serverResolve: async (i, keepMine) => { const c = await ready(); return c.remote ? c.remote.resolve(i, keepMine) : { ok: false }; },
     onData: cb => { dataListeners.push(cb); return () => dataListeners.splice(dataListeners.indexOf(cb), 1); },
     write: async (ops, meta) => { const c = await ready(); return saved(c.core.write(ops, meta)); },
     switchUser: async id => { const c = await ready(); return c.core.switchUser(id); },

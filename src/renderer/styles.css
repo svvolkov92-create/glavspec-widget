@@ -1893,3 +1893,18 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 .sv-t tr.off td { opacity: .5 }
 .sv-t input:not([type="checkbox"]), .sv-t select { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--glass); min-width: 0; width: 100% }
 .sv-choice { display: flex; flex-direction: column; gap: 4px; align-items: flex-start }
+/* «Сервер Пульта» */
+.srv-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; margin-left: 6px; border: 1px solid var(--line); border-radius: 13px; background: var(--glass); color: var(--ink); font: 600 12px/1 var(--f-ui, inherit); cursor: pointer; white-space: nowrap }
+.srv-chip i { width: 8px; height: 8px; border-radius: 50%; background: #1E7A45 }
+.srv-chip.off i, .srv-chip.wait i { background: #F26A1F }
+.srv-chip.off { border-color: #F6D6C1; background: #FFF4EC; color: #B04E0D }
+.srv-chip.bad i { background: #B3261E } .srv-chip.bad { color: #B3261E }
+.srv-modal .modal.wide { width: min(880px, calc(100vw - 32px)) }
+.srv-tabs { margin: 8px 0 12px }
+.srv-acc td { vertical-align: top }
+.srv-acc tr.off td { opacity: .6 }
+.srv-acts { white-space: nowrap }
+.srv-invite { margin-top: 10px; padding: 10px; border: 1px dashed #F26A1F; border-radius: 8px }
+.srv-invite textarea { width: 100%; font: 12.5px/1.4 var(--f-mono, monospace); margin: 6px 0 }
+.srv-invite .big { font-size: 18px; letter-spacing: .08em }
+.conflict-modal .modal { width: min(760px, calc(100vw - 32px)) }

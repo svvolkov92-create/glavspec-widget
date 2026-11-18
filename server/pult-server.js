@@ -390,7 +390,7 @@ function createServer(cfgIn = {}) {
 
   /* ----- the customer cabinet on this base ----- */
   const cabinet = cfg.cabinetPort ? require('./cabinet-on-base.js')({ cfg, store, core, asUser, A, L, LIB, attachDir, acc }) : null;
-  if (cabinet) RPC.cabinet = (me, fn, ...args) => cabinet.call(me, fn, args);
+  RPC.cabinet = cabinet ? (me, fn, ...args) => cabinet.call(me, fn, args) : () => ({ ok: false, allowed: false, message: 'Кабинет заказчика на этом сервере не включён.' });
 
   /* ----- web client ----- */
   const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };

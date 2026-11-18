@@ -637,6 +637,78 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await js(() => document.querySelector('[data-act="tab"][data-id="kanban"]').click()); await wait(300);
   check('4.1: Kanban card view menu and assignments switch', await js(() => !!document.querySelector('.kb-view') && !!document.querySelector('[data-act="show-assign"][data-v="kanban"]')));
   await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-check.png' });
+  // «Сервер Пульта»: the GIP moves the base through the window, the window works with the shared base, live updates,
+  // work without a connection (queue), a conflict, files. A real server in this process.
+  {
+    const { createServer: createPult } = require(require('path').resolve('server/pult-server.js'));
+    const pDir = fs.mkdtempSync(require('path').join(require('os').tmpdir(), 'pult-srv-'));
+    const PORT = 8791;
+    let pult = null;
+    const up = async () => { pult = createPult({ dataDir: pDir, host: '127.0.0.1', port: PORT, configFile: pDir + '/none.json', devOrigins: ['http://127.0.0.1:8766'], publicUrl: 'http://127.0.0.1:' + PORT }); await new Promise(r => pult.server.listen(PORT, '127.0.0.1', r)); };
+    const down = async () => { pult.close(); pult.server.closeAllConnections?.(); await new Promise(r => pult.server.close(r)); };
+    const http2 = async (method, pth, body, tok) => (await fetch(`http://127.0.0.1:${PORT}${pth}`, { method, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: body ? JSON.stringify(body) : undefined })).json();
+    await up();
+    // the current user must be the GIP
+    const gipId = await js(() => [...window.AppBridge.state.users.values()].find(u => u.role === 'gip').id);
+    await js(id => window.api.switchUser(id), gipId); await wait(400);
+    const tasksLocal = await js(() => window.AppBridge.state.tasks.size);
+    await js(() => document.querySelector('[data-act="server"]').click()); await wait(300);
+    await js(() => document.querySelector('.srv-modal [data-st="move"]').click()); await wait(300);
+    await js(([port, code]) => { const set = (s, v) => { document.querySelector(s).value = v; }; set('#sv-url', 'http://127.0.0.1:' + port); set('#sv-code', code); set('#sv-login', 'volkov'); set('#sv-pass', 'secret-123'); }, [PORT, pult.acc.setupCode]);
+    await js(() => document.querySelector('.srv-modal [data-sv="move"]').click());
+    await wait(4500);
+    check('server: the base moved from the window', Object.keys(pult.store.data.tasks).length === tasksLocal && !!pult.acc.byUser[gipId], `${Object.keys(pult.store.data.tasks).length} / ${tasksLocal}`);
+    check('server: the window remembers the server (token protected)', disk.settings.server?.url === 'http://127.0.0.1:' + PORT && String(disk.settings.server.token).startsWith('dpapi:'));
+    await wait(1500);
+    const chip = await js(() => ({ text: document.querySelector('#srv-chip')?.textContent, n: window.AppBridge.state.tasks.size }));
+    check('server: after the restart the window shows the shared base', chip.text === 'Сервер' && chip.n === tasksLocal, JSON.stringify(chip));
+    // A change goes to the server.
+    const tid = await js(() => [...window.AppBridge.state.tasks.values()].find(t => !t.deletedAt).id);
+    const w1 = await js(id => window.api.write([{ type: 'update', col: 'tasks', id, data: { note: 'с сервера' } }], { action: 'Заметка' }), tid);
+    check('server: a change is written on the server', w1?.ok && pult.store.data.tasks[tid].note === 'с сервера', JSON.stringify(w1));
+    // Invitation through the window (GIP), the chief joins and changes something — the GIP's window gets it live.
+    const chiefId = await js(() => [...window.AppBridge.state.users.values()].find(u => u.role === 'chief').id);
+    await js(() => document.querySelector('#srv-chip').click()); await wait(700);
+    await js(id => document.querySelector(`.srv-modal [data-sv="invite"][data-id="${id}"]`).click(), chiefId); await wait(500);
+    const code = await js(() => document.querySelector('#sv-inv .mono')?.textContent);
+    check('server: invitation code shown with a text to send', /^[A-Z2-9]{8}$/.test(code || '') && await js(() => /Сервер Пульта/.test(document.querySelector('#sv-inv textarea').value)), code);
+    await js(() => document.querySelector('.srv-modal [data-sv="close"]').click());
+    const chief = await http2('POST', '/api/join', { code, login: 'orlov', password: 'orlov-pass-1' });
+    const ctask = (await http2('GET', '/api/view', null, chief.token)).data.tasks[0];
+    await http2('POST', '/api/rpc', { fn: 'write', args: [[{ type: 'update', col: 'tasks', id: ctask.id, data: { note: 'от главспеца' } }], {}] }, chief.token);
+    await wait(1500);
+    check('server: a change of another person arrives by itself', await js(id => window.AppBridge.state.tasks.get(id)?.note, ctask.id) === 'от главспеца');
+    // Without a connection: the change shows at once and waits; the server comes back — it goes out.
+    await down(); await wait(500);
+    const w2 = await js(id => window.api.write([{ type: 'update', col: 'tasks', id, data: { note: 'без связи' } }], {}), tid); await wait(1500);
+    const offChip = await js(() => document.querySelector('#srv-chip')?.textContent);
+    check('server: offline — the change is kept and waits', w2?.queued && /Нет связи · ждут отправки 1/.test(offChip || '') && await js(id => window.AppBridge.state.tasks.get(id).note, tid) === 'без связи', offChip);
+    // Meanwhile (on the server) the chief changes the same field of his card; the GIP changes it offline too → conflict.
+    await js(id => window.api.write([{ type: 'update', col: 'tasks', id, data: { finish: '2027-01-20' } }], {}), ctask.id);
+    await up();
+    await http2('POST', '/api/rpc', { fn: 'write', args: [[{ type: 'update', col: 'tasks', id: ctask.id, data: { finish: '2027-01-10' } }], {}] }, chief.token);
+    await wait(9000);
+    check('server: back online — the queue went out', pult.store.data.tasks[tid].note === 'без связи' && await js(() => document.querySelector('#srv-chip')?.textContent) === 'Сервер');
+    const cf = await js(() => ({ on: !!document.querySelector('.conflict-modal'), text: document.querySelector('.conflict-modal')?.textContent || '' }));
+    check('server: two changed one field — the person is asked', cf.on && /Плановый финиш/.test(cf.text) && /20\.01\.27/.test(cf.text) && /10\.01\.27/.test(cf.text), cf.text.slice(0, 200));
+    await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-conflict.png' }).catch(() => {});
+    if (cf.on) { await js(() => document.querySelector('.conflict-modal [data-cf="mine"]').click()); await wait(1200); }
+    check('server: «Оставить моё» wins', pult.store.data.tasks[ctask.id].finish === '2027-01-20', pult.store.data.tasks[ctask.id].finish);
+    // Files go to the server and come back.
+    const pid = await js(() => [...window.AppBridge.state.projects.values()][0].id);
+    const fu = await js(id => window.api.attachBytes(id, 'Обмер.pdf', new Uint8Array([5, 6, 7])), pid);
+    check('server: a file goes to the server', fu?.ok && require('fs').existsSync(require('path').join(pDir, 'attachments', pid, fu.file.id)), JSON.stringify(fu).slice(0, 120));
+    // The user picker: no switching on the server.
+    await js(() => document.querySelector('#btn-user').click()); await wait(200);
+    check('server: no switching between people', await js(() => !document.querySelector('#user-menu [data-act="switch-user"]') && !!document.querySelector('#user-menu [data-act="server"]')));
+    await js(() => document.querySelector('#btn-user').click());
+    // Back to the file on this computer.
+    await js(() => window.api.serverDisconnect()); await wait(1800);
+    check('server: disconnect → the local file again', !disk.settings.server && await js(() => !document.querySelector('#srv-chip') || document.querySelector('#srv-chip').hidden));
+    await down();
+    // While the server was switched off on purpose, the browser logs the refused connections.
+    for (let i = errs.length - 1; i >= 0; i--) if (/ERR_CONNECTION_REFUSED/.test(errs[i])) errs.splice(i, 1);
+  }
   check('no page errors', errs.length === 0, errs.join(' | '));
   console.log(log.join('\n')); process.exitCode = log.some(l => l.startsWith('FAIL')) ? 1 : 0;
   if (localCab) { localCab.store.flush(); localCab.server.closeAllConnections?.(); localCab.server.close(); }

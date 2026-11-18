@@ -15,7 +15,7 @@ fs.copyFileSync(path.join(__dirname, 'tauri-windows.js'), path.join(to, 'tauri-w
 fs.copyFileSync(path.join(__dirname, 'tauri-api.js'), path.join(to, 'tauri-api.js'));
 fs.copyFileSync(path.join(__dirname, 'tauri-core.js'), path.join(to, 'tauri-core.js'));
 // The shared rules of the Electron main process (src/core), loaded after logic.js / access.js / composition.js.
-const CORE = ['store-core.js', 'journal-diff.js', 'handlers.js', 'chats.js', 'files.js', 'cabinet-rules.js'];
+const CORE = ['store-core.js', 'journal-diff.js', 'handlers.js', 'chats.js', 'files.js', 'cabinet-rules.js', 'remote-client.js'];
 fs.mkdirSync(path.join(to, 'core'));
 for (const f of CORE) fs.copyFileSync(path.join(root, 'src', 'core', f), path.join(to, 'core', f));
 
@@ -115,6 +115,7 @@ const appScript = html.indexOf('<script src="app.js">');
 if (appScript < 0) throw new Error('index.html changed: no <script src="app.js">');
 html = html.slice(0, appScript) + CORE.map(f => `<script src="core/${f}"></script>\n`).join('')
   + '<script src="buffer.js"></script>\n<script src="pako.min.js"></script>\n<script src="node-modules.js"></script>\n<script src="tauri-core.js"></script>\n' + html.slice(appScript);
-html = html.replace(csp, (_m, a, c, b) => `${a}${c}; connect-src 'self' ipc: http://ipc.localhost${b}`);
+// «Сервер Пульта» is reached over https; plain http only on this computer (tests, a server next to the app).
+html = html.replace(csp, (_m, a, c, b) => `${a}${c}; connect-src 'self' ipc: http://ipc.localhost https: http://127.0.0.1:* http://localhost:*${b}`);
 fs.writeFileSync(file, html);
 console.log('Interface prepared in', path.relative(root, to));

@@ -24,8 +24,14 @@
   let onCabinet = null;
   async function init({ onChanged, cabinetChanged }) {
     onCabinet = cabinetChanged;
-    const loaded = await invoke('store_load');
     const savedSettings = await invoke('settings_load');
+    // «Сервер Пульта»: with a sign-in saved, the window works with the shared base instead of the file here.
+    if (savedSettings?.server?.url && savedSettings.server.token) {
+      const values = { ...SETTINGS_DEFAULTS, ...savedSettings };
+      const settings = { get: key => values[key], set(patch) { Object.assign(values, patch); invoke('settings_save', { values }).catch(e => console.error('Не удалось сохранить настройки окна:', e)); } };
+      return remoteInit({ settings, onChanged });
+    }
+    const loaded = await invoke('store_load');
 
     // Writes go out one at a time; several changes in a row are saved once with the latest state.
     let dirty = false, saving = null, lastError = null;
@@ -103,7 +109,7 @@
     const dirs = await invoke('known_dirs');
     const files = window.createFiles({
       store, journal, settings, A: window.Access, L, Composition: window.Composition, StoreError: SC.StoreError, Buffer: window.Buffer,
-      io: tauriIo(dirs), appVersion: '4.6.0', R: reportCode(),
+      io: tauriIo(dirs), appVersion: APP_VERSION, R: reportCode(),
       currentUser: () => core.currentUser(), userView: () => core.userView(), changed: () => onChanged(),
     });
     const cabinetRules = await cabinetOf({ store, settings, files, core, dirs, onCabinet: () => onCabinet?.() });
@@ -172,6 +178,221 @@
     return rules;
   }
 
+  /* ---------- «Сервер Пульта»: the shared base (src/core/remote-client.js) ---------- */
+  const unprotect = async stored => {
+    const s = String(stored || '');
+    if (s.startsWith('dpapi:')) return invoke('secret_unprotect', { data: s.slice(6) });
+    return s.startsWith('plain:') ? s.slice(6) : s;
+  };
+  const protect = async text => { try { return 'dpapi:' + await invoke('secret_protect', { text }); } catch { return 'plain:' + text; } };
+  // Every file a project refers to: request files, source data, letters, cards.
+  function fileRefs(view, projectId) {
+    const p = (view?.projects || []).find(x => x.id === projectId) || {};
+    return [...(p.requests || []).flatMap(r => r.files || []), ...(p.irdFiles || []), ...(p.letters || []).flatMap(l => l.files || []),
+      ...(view?.tasks || []).filter(t => t.projectId === projectId).flatMap(t => t.files || [])].filter(f => f && f.id);
+  }
+  async function remoteInit({ settings, onChanged }) {
+    const srv = settings.get('server');
+    const dirs = await invoke('known_dirs');
+    const io = tauriIo(dirs);
+    const cacheFile = io.join(dirs.userData, 'server-cache.json');
+    let cache = null;
+    try { if (await invoke('fs_exists', { path: cacheFile })) cache = JSON.parse(window.Buffer.from(await invoke('fs_read', { path: cacheFile }), 'base64').toString('utf8')); } catch { cache = null; }
+    // The cached part of the base belongs to the login it was taken with.
+    if (cache && cache.login !== srv.login) cache = null;
+    let cacheTimer = null;
+    const storage = { load: () => cache, save: obj => { cache = { ...obj, login: srv.login }; clearTimeout(cacheTimer); cacheTimer = setTimeout(() => io.writeFile(cacheFile, JSON.stringify(cache)).catch(e => console.error('Копия данных сервера:', e)), 400); } };
+    let authLost = '';
+    const remote = window.createRemote({
+      url: srv.url, token: await unprotect(srv.token), storage,
+      onChanged: () => { rebuild(); onChanged(); }, onAuthLost: m => { authLost = m; onChanged(); }, onConflict: () => onChanged(),
+    });
+    // What the report and page code reads: a copy of the part of the base this person sees, nothing more.
+    const store = {
+      data: SC.emptyData(), warning: null,
+      snapshot() { return SC.snapshot(this.data); },
+      apply() { throw new SC.StoreError('На сервере данные меняются только через сервер.'); },
+      applyAll() { throw new SC.StoreError('На сервере данные меняются только через сервер.'); },
+      save() {}, replaceAll() { throw new SC.StoreError('Восстановление — через «Восстановить из копии» на сервере.'); },
+    };
+    function rebuild() {
+      const v = remote.view();
+      if (!v) return;
+      const d = SC.emptyData();
+      for (const col of SC.COLLECTIONS) for (const x of v[col] || []) { const { id, ...rest } = x; if (id) d[col][id] = rest; }
+      store.data = d;
+    }
+    rebuild();
+    const EMPTY = { projects: [], contractors: [], tasks: [], users: [], chats: [], depts: [], me: null };
+    const me = () => remote.view()?.me || null;
+    const isGip = () => window.Access.isGip(me());
+    const core = {
+      currentUser: me, userView: () => remote.view() || EMPTY,
+      write: (ops, meta) => remote.call('write', ops, meta),
+      switchUser: () => ({ ok: false, message: 'На сервере каждый входит своим логином — переключать пользователей не нужно.' }),
+      taskSeen: id => remote.call('taskSeen', id), taskComment: (id, t) => remote.call('addComment', id, t),
+      taskCommentEdit: (id, c, t) => remote.call('editComment', id, c, t), taskThank: (id, c) => remote.call('thankComment', id, c),
+      demoClear: () => remote.call('clearDemo'), journalGet: ({ since } = {}) => remote.call('getJournal', since || ''),
+      migrateUsers() {}, purgeTrash() {},
+    };
+    const chats = {
+      send: (a, b, c) => remote.call('chatSend', a, b, c), edit: (a, b, c) => remote.call('chatEdit', a, b, c), seen: a => remote.call('chatSeen', a),
+      direct: a => remote.call('chatDirect', a), create: a => remote.call('chatCreate', a), update: (a, b) => remote.call('chatUpdate', a, b),
+      leave: a => remote.call('chatLeave', a), seedDemo: () => remote.call('chatSeedDemo'), migrateProjectChats() {},
+    };
+    const files = window.createFiles({
+      store, journal: { append() {}, read: async () => [] }, settings, A: window.Access, L: window.Logic, Composition: window.Composition, StoreError: SC.StoreError, Buffer: window.Buffer,
+      io, appVersion: APP_VERSION, R: reportCode(), currentUser: me, userView: core.userView, changed: () => onChanged(),
+    });
+    // Files live on the server: picked here, sent there; opened from a downloaded copy.
+    const TYPES = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dwg: 'image/vnd.dwg', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', zip: 'application/zip' };
+    const typeOf = name => TYPES[io.extname(name).slice(1).toLowerCase()] || 'application/octet-stream';
+    const up = async (pid, name, bytes) => {
+      if (bytes.length > 30 * 1024 * 1024) return { ok: false, message: 'Файл больше 30 МБ — такие лучше класть в папку проекта и давать ссылку.' };
+      try { return await remote.upload(pid, name, typeOf(name), bytes); } catch (e) { return { ok: false, message: `Не удалось отправить файл на сервер: ${e.message}` }; }
+    };
+    files.attachAdd = async pid => {
+      const file = await io.openDialog({ title: 'Файл', defaultPath: settings.get('attachDir') || null, filters: [{ name: 'Все файлы', extensions: ['*'] }] });
+      if (!file) return { canceled: true };
+      settings.set({ attachDir: io.dirname(file) });
+      return up(pid, io.basename(file).slice(0, 200), new Uint8Array(await io.readFile(file)));
+    };
+    files.attachBytes = async (pid, name, bytes) => up(pid, String(name || 'файл').slice(0, 200), bytes instanceof Uint8Array ? bytes : Uint8Array.from(Object.values(bytes || {})));
+    files.attachmentBytes = async (pid, fid) => { try { return window.Buffer.from(await remote.download(pid, fid)); } catch { return null; } };
+    files.attachOpen = async (pid, fid) => {
+      const f = fileRefs(remote.view(), pid).find(x => x.id === fid);
+      if (!f) return { ok: false, message: 'Файл не найден.' };
+      let bytes;
+      try { bytes = await remote.download(pid, fid); } catch (e) { return { ok: false, message: e.message }; }
+      const view = io.join(dirs.userData, 'attachments', pid.replace(/[^A-Za-z0-9_-]/g, ''), 'open', `${fid}-${files.safeName(f.name) || 'файл'}`);
+      await io.mkdir(io.dirname(view));
+      await io.writeFile(view, bytes);
+      const err = await io.openPath(view);
+      return err ? { ok: false, message: `Не удалось открыть: ${err}` } : { ok: true };
+    };
+    // Copies: the GIP downloads the whole base from the server (also into the auto-copy folder — the «second place»).
+    async function serverCopy() {
+      const r = await remote.call('backupGet');
+      if (!r?.ok) throw new Error(r?.message || 'Сервер не отдал копию.');
+      return JSON.stringify(r.data);
+    }
+    files.backupSave = async () => {
+      if (!isGip()) return { ok: false, message: 'Копию базы с сервера скачивает ГИП.' };
+      const target = await io.saveDialog({ title: 'Копия базы с сервера', defaultPath: io.join(dirs.documents, `Пульт-сервер-копия-${window.Logic.todayStr()}.json`), filters: [{ name: 'Копия Пульта', extensions: ['json'] }] });
+      if (!target) return { canceled: true };
+      try { await io.writeFile(target, await serverCopy()); return { ok: true, path: target }; } catch (e) { return { ok: false, message: e.message }; }
+    };
+    files.backupRestore = async () => {
+      if (!isGip()) return { ok: false, message: 'Восстанавливает ГИП.' };
+      const file = await io.openDialog({ title: 'Копия для восстановления на сервере', filters: [{ name: 'Копия Пульта', extensions: ['json'] }] });
+      if (!file) return { canceled: true };
+      let data;
+      try { data = JSON.parse(window.Buffer.from(await io.readFile(file)).toString('utf8')); } catch { return { ok: false, message: 'Это не копия Пульта.' }; }
+      if (!(await io.confirm({ title: 'Восстановить на сервере', message: 'Заменить всю общую базу этой копией?', detail: 'Изменения всей команды после этой копии пропадут. Нынешняя база сохранится на сервере в папке копий.', ok: 'Заменить' }))) return { canceled: true };
+      return remote.call('backupRestore', data);
+    };
+    let autoError = null;
+    files.autoBackup = async (force = false) => {
+      const dir = settings.get('autoBackupDir');
+      if (!dir || !isGip()) return { ok: true };
+      const last = settings.get('autoBackupLast') || '';
+      if (!force && last && Date.now() - Date.parse(last) < 12 * 3600e3) return { ok: true };
+      try {
+        await io.writeFile(io.join(dir, `Пульт-сервер-копия-${window.Logic.todayStr()}.json`), await serverCopy());
+        settings.set({ autoBackupLast: new Date().toISOString() }); autoError = null;
+        return { ok: true };
+      } catch (e) { autoError = e.message; return { ok: false, message: e.message }; }
+    };
+    files.autoBackupGet = () => ({ dir: settings.get('autoBackupDir') || '', last: settings.get('autoBackupLast') || '', error: autoError, server: true });
+    files.autoBackupSet = async off => {
+      if (!isGip()) return { ok: false, message: 'Автокопию настраивает ГИП.' };
+      if (off) { settings.set({ autoBackupDir: '' }); return { ok: true, dir: '' }; }
+      const dir = await io.openDialog({ title: 'Папка для копии базы с сервера (флешка, облачная папка)', directory: true });
+      if (!dir) return { canceled: true };
+      settings.set({ autoBackupDir: dir, autoBackupLast: '' });
+      const r = await files.autoBackup(true);
+      return { ok: r.ok, dir, message: r.message };
+    };
+    // The customer cabinet is on the server: the same calls go there.
+    const cab = (name, ...args) => remote.call('cabinet', name, ...args);
+    let seenMsgs = null;
+    const cabinet = {
+      view: async () => { const v = await cab('view'); return v && v.ok === false && v.offline ? { allowed: false, offline: true } : v; },
+      async sync() {
+        const r = await cab('sync');
+        const v = await cab('view');
+        // New messages of customers → a Windows notification, as the local cabinet does.
+        if (v?.allowed && Array.isArray(v.messages)) {
+          const ids = new Set(v.messages.map(m => m.id));
+          if (seenMsgs) {
+            const fresh = v.messages.filter(m => !seenMsgs.has(m.id) && !m.read);
+            if (fresh.length) window.PultQuiet.send(fresh.length === 1 ? `${fresh[0].projectName}: ${String(fresh[0].text || '').slice(0, 120)}` : `От заказчиков: ${fresh.length} новых сообщения`);
+          }
+          seenMsgs = ids;
+        }
+        onCabinet?.();
+        return r;
+      },
+      publish: id => cab('publish', id), unpublish: id => cab('unpublish', id), customers: () => cab('customers'),
+      customerCreate: c => cab('customerCreate', c), customerUpdate: (id, p) => cab('customerUpdate', id, p), customerDelete: id => cab('customerDelete', id),
+      read: async (ids, isRead) => { const r = await cab('read', ids, isRead); onCabinet?.(); return r; },
+      configure: async () => ({ ok: false, message: 'Кабинет работает на Сервере Пульта — настраивать ничего не нужно.' }),
+      localStart: async () => ({ ok: false, message: 'Кабинет работает на Сервере Пульта.' }), localStop: async () => ({ ok: true }),
+      open: async projectId => { const v = await cab('view'); const url = v?.publicUrl; if (!url) return { ok: false, message: 'Адрес кабинета не задан на сервере.' }; await invoke('open_url', { url: projectId ? `${url}/p/${encodeURIComponent(projectId)}` : url }); return { ok: true }; },
+      model: () => null, canUse: u => !!u && !window.Access.isSpecialist(u),
+    };
+    remote.start();
+    const ctx = {
+      core, chats, files, cabinet, store, settings, remote, flush: async () => ({ ok: true }),
+      get warning() { return authLost ? `Сервер Пульта: ${authLost}` : null; },
+      status: () => ({ ...remote.status(), login: srv.login, authLost }),
+    };
+    return ctx;
+  }
+  const APP_VERSION = '4.6.0';
+  // Sign in / join / move the base (no ctx yet, or switching from the local file).
+  const server = {
+    async signIn({ url, login, password, code }) {
+      const u = window.RemoteSignIn.normalize(url);
+      if (!u) return { ok: false, message: 'Адрес сервера не похож на адрес сайта.' };
+      const hi = await window.RemoteSignIn.hello(u);
+      if (!hi.ok) return hi;
+      const device = `Пульт ${APP_VERSION} (Windows)`;
+      const r = code ? await window.RemoteSignIn.join(u, code, login, password, device) : await window.RemoteSignIn.login(u, login, password, device);
+      if (!r?.ok) return r;
+      return { ok: true, server: { url: u, login: r.login || login, token: await protect(r.token) }, me: r.me };
+    },
+    // The GIP moves the base: the whole file, the journal, then every attached file by its id.
+    async moveBase({ url, code, login, password }, local, progress = () => {}) {
+      const u = window.RemoteSignIn.normalize(url);
+      if (!u) return { ok: false, message: 'Адрес сервера не похож на адрес сайта.' };
+      const hi = await window.RemoteSignIn.hello(u);
+      if (!hi.ok) return hi;
+      if (!hi.setup) return { ok: false, message: 'На этом сервере база уже есть — войдите своим логином («Подключиться»).' };
+      const me = local.core.currentUser();
+      if (!window.Access.isGip(me)) return { ok: false, message: 'Переносит базу ГИП: выберите себя пользователем.' };
+      progress('Отправляю базу…');
+      let journal = '';
+      try { journal = (await invoke('journal_read', { since: '', limit: 1000000 })).reverse().map(e => JSON.stringify(e)).join('\n'); } catch { journal = ''; }
+      const r = await window.RemoteSignIn.setup(u, { code, login, password, userId: me.id, data: { version: 1, ...local.store.data }, journal, device: `Пульт ${APP_VERSION} (Windows)` });
+      if (!r?.ok) return r;
+      // Files: what this computer has goes up under the same ids.
+      const remote = window.createRemote({ url: u, token: r.token, storage: null });
+      const dirs = await invoke('known_dirs'), io = tauriIo(dirs);
+      const view = local.core.userView();
+      let sent = 0, missing = 0;
+      for (const p of view.projects) {
+        for (const f of fileRefs({ ...view, projects: [p] }, p.id)) {
+          const src = io.join(dirs.userData, 'attachments', p.id.replace(/[^A-Za-z0-9_-]/g, ''), f.id.replace(/[^A-Za-z0-9_-]/g, ''));
+          if (!(await io.exists(src))) { missing++; continue; }
+          progress(`Файлы: ${sent + 1}…`);
+          try { await remote.upload(p.id, f.name || 'файл', f.type || '', new Uint8Array(await io.readFile(src)), f.id); sent++; } catch { missing++; }
+        }
+      }
+      return { ok: true, server: { url: u, login, token: await protect(r.token) }, count: r.count, files: sent, missing };
+    },
+  };
+
   // The report, template and import code written for Node, loaded in the window (see prepare-ui.js).
   function reportCode() {
     const m = id => window.NodeModules.load(id);
@@ -206,5 +427,5 @@
     return io;
   }
 
-  window.TauriCore = { init };
+  window.TauriCore = { init, server };
 })();
