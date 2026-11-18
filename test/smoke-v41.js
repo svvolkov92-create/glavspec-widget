@@ -42,17 +42,17 @@ app.on('browser-window-created', (_e, win) => {
 
       await js(`window.api.write([{ type: 'set', col: 'tasks', id: 'v41-as', data: { projectId: 'demo-p1', kind: 'assign', parentId: 'demo-t1', sections: ['ЭОМ'], title: 'Нагрузки для ОВ', status: 'in_progress', start: '${new Date().toISOString().slice(0, 10)}', finish: '${new Date(Date.now() + 9 * 864e5).toISOString().slice(0, 10)}', contractorId: 'demo-c1', createdAt: new Date().toISOString() } }], { action: 'test' })`); await wait(500);
 
-      await step('23: delete button readable in «Тандем»', async () => {
+      await step('23 → 4.3: project to the trash at once, undo plate readable in «Тандем»', async () => {
         await js(`window.api.setTheme('tandem')`); await wait(300);
         await click('[data-act="tab"][data-id="projects"]'); await wait(300);
         await js(`document.querySelector('[data-act="project-back"]')?.click()`); await wait(150);
         await click('[data-act="open-project"][data-id="demo-p2"]'); await wait(400);
-        await click('[data-act="ask-delete"]'); await wait(200);
-        const c = await js(`(() => { const b = document.querySelector('[data-act="do-delete"]'); const s = getComputedStyle(b); return s.backgroundColor + '|' + s.color + '|' + b.textContent; })()`);
-        const [bg, fg, txt] = c.split('|');
-        check('confirm button: red background, white text, «В корзину»', bg !== fg && /179, 38, 30/.test(bg) && txt.includes('В корзину'), c);
+        await click('[data-act="ask-delete"]'); await wait(400);
+        const c = await js(`(() => { const t = document.querySelector('#toast'), b = t.querySelector('button'); const s = getComputedStyle(b), ts = getComputedStyle(t); return ts.backgroundColor + '|' + s.color + '|' + b.textContent + '|' + t.hidden; })()`);
+        const [bg, fg, txt, hidden] = c.split('|');
+        check('undo plate: readable «Отменить»', hidden === 'false' && bg !== fg && txt.includes('Отменить'), c);
         await shot('41-01-delete');
-        await click('[data-act="cancel-delete"]'); await wait(150);
+        await click('#toast button'); await wait(400);
       });
 
       await step('16: project «Заказчик» and «ГИП»', async () => {

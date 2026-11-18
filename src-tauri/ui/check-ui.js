@@ -343,6 +343,44 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     }
     await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-ird.png', fullPage: false }).catch(() => {});
   }
+  // 4.3: no silent click in dialogs (45), undo instead of «are you sure?» (46), card drafts (47).
+  {
+    const actClick = (act, extra = {}) => js(([a, x]) => { const b = document.createElement('button'); b.dataset.act = a; Object.assign(b.dataset, x); document.body.append(b); b.click(); b.remove(); }, [act, extra]);
+    await js(() => document.querySelector('[data-act="tab"][data-id="tasks"]').click()); await wait(300);
+    const tid = await js(() => document.querySelector('#app [data-act="open-task"][data-id]')?.dataset.id);
+    // 47: an edit kept after «Выйти без сохранения» is offered when the card is opened again.
+    await actClick('open-task', { id: tid }); await wait(400);
+    await js(() => { const i = document.querySelector('#dform [name="finish"]'); i.value = '2027-03-15'; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); }); await wait(700);
+    check('4.3: a card edit is kept as a draft', await js(id => !!JSON.parse(localStorage.getItem('glavspec.taskDrafts') || '{}')[id], tid));
+    await js(() => document.querySelector('#dform [data-act="discard"]').click()); await wait(300);
+    await actClick('open-task', { id: tid }); await wait(400);
+    check('4.3: reopened card offers «Восстановить несохранённое?»', await js(() => { const b = document.querySelector('[data-act="draft-restore"]'); return !!b && b.offsetParent !== null && /Плановый финиш/.test(document.querySelector('.draft-offer').textContent); }), await js(() => document.querySelector('#confirm-slot')?.textContent.slice(0, 160)));
+    await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-draft.png' }).catch(() => {});
+    await js(() => document.querySelector('[data-act="draft-restore"]').click()); await wait(300);
+    check('4.3: «Восстановить» puts the edit back', await js(() => document.querySelector('#dform [name="finish"]').value) === '2027-03-15' && await js(() => !document.querySelector('#shift-box').hidden));
+    await js(() => document.querySelector('#dform [data-act="discard"]').click()); await wait(300);
+    await actClick('open-task', { id: tid }); await wait(400);
+    await js(() => document.querySelector('[data-act="draft-drop"]').click()); await wait(200);
+    check('4.3: «Удалить черновик» forgets it', await js(id => !JSON.parse(localStorage.getItem('glavspec.taskDrafts') || '{}')[id], tid) && await js(() => !document.querySelector('[data-act="draft-restore"]')));
+    // 46: «В корзину» acts at once and offers «Отменить» for 10 s; «Отменить» brings the card back.
+    await js(() => document.querySelector('#dform [data-act="ask-delete"]').click()); await wait(600);
+    check('4.3: card goes to the trash without a confirmation', !!disk.data.tasks[tid].deletedAt && await js(() => !document.querySelector('#dform')));
+    const tst = await js(() => { const t = document.querySelector('#toast'); return { shown: !t.hidden, text: t.textContent, bar: !!t.querySelector('.toast-left'), dur: t.querySelector('.toast-left')?.style.animationDuration }; });
+    check('4.3: undo plate with a 10 s bar', tst.shown && /Отменить/.test(tst.text) && tst.bar && tst.dur === '10000ms', JSON.stringify(tst));
+    await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-undo.png' }).catch(() => {});
+    await js(() => document.querySelector('#toast button').click()); await wait(600);
+    check('4.3: «Отменить» restores the card', !disk.data.tasks[tid].deletedAt, JSON.stringify(disk.data.tasks[tid].deletedAt));
+    // 45: an empty required field in a dialog is explained, highlighted and focused.
+    await js(() => { window.__askP = null; });
+    await actClick('preset-save'); await wait(300);
+    const has = await js(() => !!document.querySelector('.modal #m-text'));
+    if (has) {
+      await js(() => document.querySelector('.modal button[type="submit"]').click()); await wait(200);
+      const m = await js(() => ({ err: document.querySelector('.modal #m-err')?.textContent, hidden: document.querySelector('.modal #m-err')?.hidden, bad: document.querySelector('.modal #m-text').classList.contains('field-bad'), focus: document.activeElement?.id }));
+      check('4.3: empty dialog field — message, highlight, cursor', m.err && !m.hidden && m.bad && m.focus === 'm-text', JSON.stringify(m));
+      await js(() => document.querySelector('.modal [data-m="cancel"]').click());
+    } else check('4.3: save-preset dialog opens', false);
+  }
   // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
   const w0 = await js(() => window.__win);
   check('window shown at its saved place', w0.visible && w0.calls.includes('show') && w0.x === 200 && w0.width === 1200, JSON.stringify(w0));

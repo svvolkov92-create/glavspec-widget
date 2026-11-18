@@ -208,6 +208,7 @@ const plural = (n, one, few, many) => {
 };
 const days = n => `${n}\u00a0${plural(Math.abs(n), 'день', 'дня', 'дней')}`;
 
+const TOAST_UNDO_MS = 10000;
 function toast(msg, bad = false, action = null) {
   const el = $('#toast');
   el.replaceChildren();
@@ -221,12 +222,25 @@ function toast(msg, bad = false, action = null) {
     btn.addEventListener('click', () => { el.hidden = true; action.run(); });
     el.append(btn);
   }
-  el.className = 'toast' + (bad ? ' bad' : ''); el.hidden = false;
-  // Short for plain notes; longer when there is an «Отменить» button or an error. Hovering keeps it open.
-  const ms = bad ? 7000 : action ? 5000 : 1800;
+  // Short for plain notes; an error stays 7 s; a note with «Отменить» stays 10 s (backlog 46) with a bar
+  // running down, so it is clear how long the undo is offered. Hovering keeps it open.
+  const ms = bad ? 7000 : action ? TOAST_UNDO_MS : 1800;
+  if (action && !bad) {
+    const bar = document.createElement('i');
+    bar.className = 'toast-left';
+    bar.style.animationDuration = ms + 'ms';
+    el.append(bar);
+  }
+  el.className = 'toast' + (bad ? ' bad' : '') + (action ? ' has-act' : ''); el.hidden = false;
   clearTimeout(toast._t); toast._t = setTimeout(() => { el.hidden = true; }, ms);
-  el.onmouseenter = () => clearTimeout(toast._t);
-  el.onmouseleave = () => { toast._t = setTimeout(() => { el.hidden = true; }, 1500); };
+  el.onmouseenter = () => { clearTimeout(toast._t); el.classList.add('held'); };
+  el.onmouseleave = () => {
+    el.classList.remove('held');
+    const bar = el.querySelector('.toast-left');
+    // The bar starts again for the shorter time left after hovering.
+    if (bar) { bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; bar.style.animationDuration = '3000ms'; }
+    toast._t = setTimeout(() => { el.hidden = true; }, action ? 3000 : 1500);
+  };
 }
 
 /* ---------- data ---------- */
@@ -446,7 +460,7 @@ function askShiftReason(t, from, to, followers = null) {
       e.preventDefault();
       e.stopPropagation();
       const reason = root.querySelector('#m-reason').value;
-      if (!reason) { root.querySelector('#m-err').hidden = false; return; }
+      if (!reason) return modalErr(root, '#m-err', 'Выберите причину переноса.', '#m-reason');
       close({ reason, note: root.querySelector('#m-note').value.trim(), follow: !!root.querySelector('#m-follow')?.checked });
     });
   });
@@ -1431,7 +1445,7 @@ function openAssignBoard(pid) {
       <div class="ab-tasks">${groups.map((g, gi) => `<div class="ab-group"><div class="ab-gh" data-drop="g:${gi}">${esc(g.title)} <span class="hint">${g.tasks.length} · сюда — всю группу</span></div>
         ${g.tasks.map(t => { const n = nowOf(t), u = state.users.get(n.ownerId), c = n.contractorId && state.contractors.get(n.contractorId), ch = pending.has(t.id);
           return `<div class="ab-task${ch ? ' changed' : ''}${misfit(t) ? ' misfit' : ''}" data-drop="t:${esc(t.id)}"><span class="ab-name">${esc(label(t))}</span><span class="ab-who">${u ? `<span class="pt-ava sm">${esc(initials(u.name))}</span>${esc(u.name)}` : '<span class="hint">не назначен</span>'}${c ? ` <span class="hint">· ${esc(c.name)}</span>` : ''}${misfit(t) ? ' <span class="chip tone-bad" title="Нет нужного направления">не по профилю</span>' : ''}</span>${ch ? `<button class="btn ghostbtn sm" type="button" data-m="undo" data-id="${esc(t.id)}" title="Вернуть как было">↺</button>` : ''}</div>`; }).join('')}</div>`).join('')}</div></div>
-      <div class="modal-f">${bad.length ? `<label class="chk ab-ok"><input type="checkbox" id="ab-force"> Назначить не по профилю (${bad.length})</label>` : ''}<button class="btn primary" type="button" data-m="save"${changed ? '' : ' disabled'}>Сохранить${changed ? ` (${changed})` : ''}</button><button class="btn" type="button" data-m="close">Отмена</button></div></div>`;
+      <div class="modal-f">${bad.length ? `<label class="chk ab-ok"><input type="checkbox" id="ab-force"> Назначить не по профилю (${bad.length})</label>` : ''}<button class="btn primary" type="button" data-m="save"${changed ? '' : ' disabled title="Изменений пока нет — перетащите человека на карточку"'}>Сохранить${changed ? ` (${changed})` : ''}</button><button class="btn" type="button" data-m="close">Отмена</button></div></div>`;
   };
   const give = (t, kind, id) => {
     const cur = pending.get(t.id) || {};
@@ -2217,9 +2231,9 @@ function askReassign(t, kind, fromId, toId = '') {
     root.querySelector('form').addEventListener('submit', e => {
       e.preventDefault(); e.stopPropagation();
       const err = root.querySelector('#m-err');
-      if (!sel.value) { err.textContent = 'Выберите, кому передать.'; err.hidden = false; return; }
+      if (!sel.value) return modalErr(root, '#m-err', 'Выберите, кому передать.', 'select');
       const bad = misfitText(t, kind, sel.value);
-      if (bad && !root.querySelector('#m-force').checked) { err.textContent = 'Отметьте «Всё равно назначить» или выберите другого.'; err.hidden = false; return; }
+      if (bad && !root.querySelector('#m-force').checked) return modalErr(root, '#m-err', 'Отметьте «Всё равно назначить» или выберите другого.', '#m-force');
       close({ toId: sel.value, forced: !!bad });
     });
   });
@@ -2474,10 +2488,10 @@ function askDept(dept = null, parentId = '') {
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const name = q('#org-name').value.trim(), headId = q('#org-head').value, parent = q('#org-parent').value;
-    const err = t => { q('#org-err').textContent = t; q('#org-err').hidden = !t; };
-    if (!name) return err('Укажите название отдела.');
+    const err = (t, f) => modalErr(root, '#org-err', t, f);
+    if (!name) return err('Укажите название отдела.', '#org-name');
     // No loops: the parent may not be inside this department.
-    for (let x = parent; x; x = state.depts.get(x)?.parentId) if (x === d.id) return err('Отдел не может входить сам в себя или в свой подотдел.');
+    for (let x = parent; x; x = state.depts.get(x)?.parentId) if (x === d.id) return err('Отдел не может входить сам в себя или в свой подотдел.', '#org-parent');
     const id = dept?.id || newId();
     const chosen = new Set([...root.querySelectorAll('.org-mem input:checked')].map(i => i.value));
     if (headId) chosen.add(headId);
@@ -3301,7 +3315,7 @@ function askCustomer(p) {
     q('form').addEventListener('submit', async e => {
       e.preventDefault(); e.stopPropagation();
       const title = q('#aq-title').value.trim(), kind = root.querySelector('input[name="aq-kind"]:checked').value, due = q('#aq-due').value, why = q('#aq-why').value.trim();
-      if (!title) { q('#aq-err').textContent = 'Напишите, что нужно.'; return; }
+      if (!title) return modalErr(root, '#aq-err', 'Напишите, что нужно.', '#aq-title');
       const lbl = kinds.find(k => k[0] === kind)[1];
       const reqTitle = kind === 'decision' || kind === 'doc' || new RegExp('^' + lbl, 'i').test(title) ? title : `${lbl}: ${title}`;
       const requests = [...(p.requests || [])], ird = [...(p.ird || [])];
@@ -3333,19 +3347,36 @@ function askNote(title, label, value = '') {
     root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); close(root.querySelector('#n-text').value.trim()); });
   });
 }
+// Backlog 45 for dialogs: a stopped submit shows its reason in the dialog, highlights the field it is about,
+// scrolls to it and puts the cursor there. `msg` empty clears the error.
+function modalErr(root, errSel, msg, fieldSel = '') {
+  const err = root.querySelector(errSel);
+  if (err) { err.textContent = msg; err.hidden = !msg; err.setAttribute('role', 'alert'); }
+  if (!msg) { root.querySelectorAll('.field-bad').forEach(x => x.classList.remove('field-bad')); return false; }
+  const f = fieldSel && root.querySelector(fieldSel);
+  if (f) {
+    f.classList.add('field-bad');
+    const off = () => f.classList.remove('field-bad');
+    f.addEventListener('input', off, { once: true }); f.addEventListener('change', off, { once: true });
+    f.scrollIntoView({ block: 'center' });
+    f.focus?.({ preventScroll: true });
+  } else err?.scrollIntoView({ block: 'nearest' });
+  return false;
+}
 function askText(title, label, placeholder = '') {
   return new Promise(resolve => {
     const root = document.createElement('div');
     root.className = 'modal-back';
     root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate><h2 id="mtitle">${esc(title)}</h2>
       <div class="f"><label class="req" for="m-text">${esc(label)}</label><input id="m-text" maxlength="40" placeholder="${esc(placeholder)}"></div>
+      <div class="err" id="m-err" hidden></div>
       <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
     document.body.append(root);
     const close = v => { root.remove(); resolve(v); };
     root.querySelector('#m-text').focus();
     root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
     root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
-    root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const v = root.querySelector('#m-text').value.trim(); if (v) close(v); });
+    root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const v = root.querySelector('#m-text').value.trim(); if (v) close(v); else modalErr(root, '#m-err', 'Заполните поле «' + label + '».', '#m-text'); });
   });
 }
 
@@ -3430,12 +3461,12 @@ function openCounter(f) {
 function bulkBar() {
   const ids = [...state.bulk].filter(id => state.tasks.has(id)), n = ids.length;
   const owners = A.assignableOwners(state.me, liveUsers()).sort(byName);
-  const dis = n ? '' : ' disabled';
+  const dis = n ? '' : ' disabled title="Сначала отметьте карточки галочками в таблице"';
   return `<div class="bulk-bar"><b>Выбрано: ${n}</b>
     <span class="bulk-g"><select id="bulk-owner"${dis}><option value="">— ответственный —</option>${owners.map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select><button class="btn sm" type="button" data-act="bulk-owner"${dis}>Назначить</button></span>
     <span class="bulk-g"><select id="bulk-contr"${dis}><option value="">— подрядчик —</option><option value="__none">снять подрядчика</option>${contractorsArr().map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select><button class="btn sm" type="button" data-act="bulk-contr"${dis}>Назначить</button></span>
     <span class="bulk-g">Сдвинуть сроки на <input id="bulk-days" type="number" value="7" step="1" min="-365" max="365"${dis}> дн. <button class="btn sm" type="button" data-act="bulk-shift"${dis}>Сдвинуть</button></span>
-    <span class="bulk-g"><button class="btn sm" type="button" data-act="bulk-start"${dis} title="Только не начатые и приостановленные">В работу</button><button class="btn danger sm" type="button" data-act="bulk-trash"${dis}>В корзину</button></span>
+    <span class="bulk-g"><button class="btn sm" type="button" data-act="bulk-start"${dis || ' title="Только не начатые и приостановленные"'}>В работу</button><button class="btn danger sm" type="button" data-act="bulk-trash"${dis}>В корзину</button></span>
     ${n ? '<button class="btn ghostbtn sm" type="button" data-act="bulk-clear">Снять выбор</button>' : '<span class="hint">Отметьте карточки галочками в таблице.</span>'}</div>`;
 }
 async function bulkDo(kind) {
@@ -3476,7 +3507,6 @@ async function bulkDo(kind) {
     ops = ok.map(t => op.update('tasks', t.id, { status: 'in_progress', history: [...(t.history || []), { ...stamp, type: 'status', from: t.status, to: 'in_progress', note: 'массово' }] }));
     msg = `В работу: ${ok.length}${ok.length < list.length ? ` (остальные не трогали: ${list.length - ok.length})` : ''}`;
   } else if (kind === 'trash') {
-    if (!(await confirmBox(`Переместить в корзину карточки (${list.length})? 30 дней их можно восстановить.`, 'В корзину'))) return;
     ops = list.map(t => op.update('tasks', t.id, { deletedAt: now.toISOString() }));
     msg = `В корзину: ${list.length}`;
   }
@@ -3625,6 +3655,7 @@ function formSnapshot() {
 function markClean() { state.dirtyBase = formSnapshot(); }
 // ✕, Esc and the backdrop ask before dropping unsaved edits; «Отмена» discards on purpose.
 function requestClose() {
+  flushTaskDraft();
   if (state.dirtyBase && formSnapshot() !== state.dirtyBase) {
     $('#confirm-slot').innerHTML = `<div class="drawer-f"><div class="confirm warnc">Есть несохранённые изменения.
       <span class="confirm-acts"><button class="btn primary sm" data-act="save-close" type="button">Сохранить</button>
@@ -3633,6 +3664,91 @@ function requestClose() {
     return;
   }
   closeDrawer();
+}
+
+/* ---------- 47: the card's unsaved edits survive closing ---------- */
+// While a card is edited, what differs from the opened state is kept on this computer (only changed fields,
+// so a later save by someone else is not overwritten with stale values). The next time the card is opened:
+// «Восстановить несохранённое?». Saving the card drops its draft; drafts older than a week are forgotten.
+const DRAFT_DAYS = 7, DRAFT_MAX = 20;
+let taskDrafts = loadLocal('taskDrafts', {}), draftTimer = null;
+const draftKeyOf = d => (d?.kind === 'task' ? d.id || 'new' : '');
+function snapFields(snap) { const [f, d] = JSON.parse(snap); const m = {}; for (const [k, v] of f) if (!(k in m)) m[k] = v; return [m, d]; }
+function taskDraftNow() {
+  const key = draftKeyOf(state.drawer), cur = formSnapshot();
+  if (!key || !state.dirtyBase || !cur) return null;
+  if (cur === state.dirtyBase) return { key, draft: null };
+  const [base, baseD] = snapFields(state.dirtyBase), [now, nowD] = snapFields(cur);
+  const fields = {};
+  for (const [k, v] of Object.entries(now)) if (base[k] !== v) fields[k] = v;
+  const draftChanged = JSON.stringify(baseD) !== JSON.stringify(nowD);
+  if (!Object.keys(fields).length && !draftChanged) return { key, draft: null };
+  return { key, draft: { at: new Date().toISOString(), fields, ...(draftChanged ? { draft: nowD } : {}) } };
+}
+function saveTaskDrafts() {
+  const cut = Date.now() - DRAFT_DAYS * 864e5;
+  const list = Object.entries(taskDrafts).filter(([, d]) => Date.parse(d.at) > cut).sort((a, b) => b[1].at.localeCompare(a[1].at)).slice(0, DRAFT_MAX);
+  taskDrafts = Object.fromEntries(list);
+  saveLocal('taskDrafts', taskDrafts);
+}
+function flushTaskDraft() {
+  clearTimeout(draftTimer); draftTimer = null;
+  const r = taskDraftNow();
+  if (!r) return;
+  if (r.draft) taskDrafts[r.key] = r.draft; else delete taskDrafts[r.key];
+  saveTaskDrafts();
+}
+function dropTaskDraft(key) { clearTimeout(draftTimer); draftTimer = null; if (key && taskDrafts[key]) { delete taskDrafts[key]; saveTaskDrafts(); } }
+function scheduleTaskDraft(e) {
+  if (state.drawer?.kind !== 'task' || !e.target.closest?.('#dform') || e.target.closest('[data-transient]')) return;
+  clearTimeout(draftTimer); draftTimer = setTimeout(flushTaskDraft, 500);
+}
+document.addEventListener('input', scheduleTaskDraft);
+document.addEventListener('change', scheduleTaskDraft);
+window.addEventListener('pagehide', () => { if (draftTimer) flushTaskDraft(); });
+const fieldLabel = name => {
+  const el = $(`#dform [name="${name}"]`), box = el?.closest('.f, .exec-pick');
+  const l = (el?.id && $(`#dform label[for="${el.id}"]`)) || box?.querySelector('label, .lbl');
+  return (l?.firstChild?.textContent || l?.textContent || name).trim().replace(/[,:]$/, '');
+};
+// Called at the end of openTask: offer the kept edits if they still change something.
+function offerTaskDraft() {
+  const key = draftKeyOf(state.drawer), d = taskDrafts[key];
+  if (!d) return;
+  const [now] = snapFields(formSnapshot());
+  const names = Object.keys(d.fields).filter(k => k in now && now[k] !== d.fields[k]);
+  if (!names.length && !d.draft) { dropTaskDraft(key); return; }
+  const what = [...new Set(names.map(fieldLabel))];
+  const list = what.slice(0, 3).join(', ') + (what.length > 3 ? ` и ещё ${what.length - 3}` : '') || 'сроки, этапы оплаты или связи';
+  const at = new Date(d.at);
+  $('#confirm-slot').innerHTML = `<div class="drawer-f"><div class="confirm warnc draft-offer">Восстановить несохранённое от ${fmtDate(d.at.slice(0, 10))}, ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}? <span class="hint">${esc(list)}</span>
+    <span class="confirm-acts"><button class="btn primary sm" data-act="draft-restore" type="button">Восстановить</button>
+    <button class="btn sm" data-act="draft-drop" type="button">Удалить черновик</button></span></div></div>`;
+}
+function restoreTaskDraft() {
+  const key = draftKeyOf(state.drawer), d = taskDrafts[key];
+  $('#confirm-slot').innerHTML = '';
+  if (!d) return;
+  const fire = el => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };
+  const put = (name, v, events) => {
+    const m = /^(exec|coexec)Ref$/.exec(name);
+    if (m) return epSet(m[1], v);
+    const el = $(`#dform [name="${name}"]`);
+    if (!el || el.disabled) return;
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+    if (events) fire(el);
+  };
+  // The project first: it redraws the section field; then the section; then the rest, twice, so fields drawn
+  // by an earlier change get their values too.
+  const order = Object.keys(d.fields).sort((a, b) => (a === 'projectId' ? -1 : b === 'projectId' ? 1 : 0));
+  for (const k of order) put(k, d.fields[k], true);
+  for (const k of order) put(k, d.fields[k], false);
+  if (d.draft) {
+    state.draft = { ...state.draft, ...clone(d.draft) };
+    renderMilestones(); renderDeps(); renderPlanRows(); renderPlanPreview(); renderRevisions();
+  }
+  onMarksChanged(); updateShiftBox(); syncReady(); execPickersRefresh();
+  toast('Несохранённые изменения восстановлены — проверьте и сохраните');
 }
 
 // Drawer width is dragged by its left edge and remembered; «⤢» stretches it over the whole window.
@@ -3871,9 +3987,9 @@ async function submitUser() {
   const { id } = state.drawer;
   const role = id === state.me.id ? state.me.role : val('role');
   const data = { name: val('name'), role, directions: $$('input[name="dir"]:checked').map(i => i.value), phone: val('phone'), email: val('email'), messenger: val('messenger'), birthday: isDate(val('birthday')) ? val('birthday') : '' };
-  if (!data.name) return formError('Укажите имя сотрудника.');
-  if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.');
-  if (!A.ROLES[role]) return formError('Выберите роль.');
+  if (!data.name) return formError('Укажите имя сотрудника.', '', 'name');
+  if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.', '', 'email');
+  if (!A.ROLES[role]) return formError('Выберите роль.', '', 'role');
   data.chiefId = role === 'specialist' ? val('chiefId') : '';
   data.canSeeBudget = role === 'chief' && checked('canSeeBudget');
   if (role === 'gip') data.directions = [];
@@ -4211,7 +4327,7 @@ function openAbsences(uid) {
   root.querySelector('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const bad = rows.find(a => !isDate(a.from) || !isDate(a.to) || a.to < a.from);
-    if (bad) { const er = root.querySelector('#m-err'); er.textContent = 'Проверьте даты: «по» не раньше «с».'; er.hidden = false; return; }
+    if (bad) { const i = rows.indexOf(bad); return modalErr(root, '#m-err', 'Проверьте даты: «по» не раньше «с».', `.abs-row[data-i="${i}"] [data-k="${isDate(bad.from) ? 'to' : 'from'}"]`); }
     const list = rows.map(a => ({ id: a.id || newId(), kind: a.kind, from: a.from, to: a.to, note: (a.note || '').trim() })).sort((a, b) => a.from.localeCompare(b.from));
     if (await write(op.update('users', uid, { absences: list }), `Отсутствия сохранены: ${u.name}`)) close();
   });
@@ -4786,6 +4902,7 @@ function openTask(id, preset = {}, tab = 'main') {
   updateShiftBox();
   syncReady();
   markClean();
+  offerTaskDraft();
   if (isNew) $('#t-project')?.focus();
 }
 
@@ -4978,6 +5095,7 @@ async function submitTask(quick = null, { stay = false } = {}) {
   }
   const ok = await write(ops.length > 1 ? ops : taskOp, old ? (quick ? QUICK[quick].okMsg : 'Карточка сохранена') : 'Карточка добавлена');
   if (!ok) return false;
+  dropTaskDraft(old ? id : 'new');
   if (quick === 'accept' && old) celebrateAccept(id);
   if (old && quick) focusAfterQuick(id, quick);
   if (quick || stay) { await refresh(); openTask(savedId, {}, tab); } else closeDrawer();
@@ -5364,7 +5482,7 @@ function renderComposition() {
   const srcTag = src => src === 'gost' ? '<span class="src gost" title="Обозначение есть в таблице В.1 ГОСТ Р 21.101-2026">ГОСТ</span>' : '<span class="src" title="Принято на практике, в таблице ГОСТ Р 21.101-2026 не найдено">практика</span>';
 
   box.innerHTML = `<div class="cust-top"><span class="hint">База ПД: ${esc(Composition.BASES[comp.base]?.label || '')}. Обозначения — от шифра проекта${code ? ` «${esc(code)}»` : ' (шифр не задан — впишите на вкладке «Основное»)'}.</span><span class="spacer"></span>
-      <button class="btn" type="button" data-act="comp-export" data-format="sp">Состав ПД → Word</button><button class="btn" type="button" data-act="comp-export" data-format="vok"${rdRows.size ? '' : ' disabled'}>ВОК → Word</button><button class="btn ghostbtn" type="button" data-act="comp-export" data-format="xlsx">Excel</button></div>
+      <button class="btn" type="button" data-act="comp-export" data-format="sp">Состав ПД → Word</button><button class="btn" type="button" data-act="comp-export" data-format="vok"${rdRows.size ? '' : ' disabled title="В составе РД пока нет разделов — добавьте их ниже"'}>ВОК → Word</button><button class="btn ghostbtn" type="button" data-act="comp-export" data-format="xlsx">Excel</button></div>
     <div class="comp-opts">
       <label>Нумерация томов ПД <select data-copt="numbering.pd">${Object.entries(Composition.NUMBERING.pd).map(([k, l]) => `<option value="${k}"${Composition.numberingOf(comp).pd === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
       <label>РД <select data-copt="numbering.rd">${Object.entries(Composition.NUMBERING.rd).map(([k, l]) => `<option value="${k}"${Composition.numberingOf(comp).rd === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
@@ -5545,9 +5663,9 @@ function askTimeline(p) {
     q('[data-ph$=".start"]')?.focus();
     q('form').addEventListener('submit', async e => {
       e.preventDefault(); e.stopPropagation();
-      const err = t => { q('#tq-err').textContent = t; q('#tq-err').hidden = !t; };
+      const err = (t, f) => modalErr(root, '#tq-err', t, f);
       for (const x of phases) delete x.auto;
-      for (const x of phases) if (isDate(x.start) && isDate(x.finish) && x.finish < x.start) return err(`${L.phaseLabel(x.key)}: окончание раньше начала.`);
+      for (const [i, x] of phases.entries()) if (isDate(x.start) && isDate(x.finish) && x.finish < x.start) return err(`${L.phaseLabel(x.key)}: окончание раньше начала.`, `[data-ph="${i}.finish"]`);
       // A non-GIP never sees «Договор»: it is kept as stored.
       if (!gip) { const c = (p.phases || []).find(x => x.key === 'contract'); const i = phases.findIndex(x => x.key === 'contract'); if (i >= 0) phases[i] = c ? { ...c } : phases[i]; }
       const old = new Map(ms.map(m => [m.id, m]));
@@ -5754,7 +5872,7 @@ async function submitSimple(keepOpen = false) {
   let ok = false;
   if (kind === 'project') {
     const data = { name: val('name'), code: val('code'), client: val('client'), gipId: state.users.has(val('gipId')) ? val('gipId') : '', status: L.PROJECT_STATUSES[val('status')] ? val('status') : '', folder: val('folder'), note: val('note') };
-    if (!data.name) return formError('Укажите название объекта.');
+    if (!data.name) return formError('Укажите название объекта.', 'main', 'name');
     if (id) {
       if (projectDraftData().error) { const e = projectDraftData(); return formError(e.error, e.tab); }
       // Every section of the composition is a task: missing ones are made (or linked) in the same batch.
@@ -5777,8 +5895,8 @@ async function submitSimple(keepOpen = false) {
     }
   } else if (kind === 'contractor') {
     const data = { name: val('name'), specialty: val('specialty'), phone: val('phone'), email: val('email'), messenger: val('messenger'), requisites: val('requisites'), note: val('note') };
-    if (!data.name) return formError('Укажите ФИО или название исполнителя.');
-    if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.');
+    if (!data.name) return formError('Укажите ФИО или название исполнителя.', '', 'name');
+    if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.', '', 'email');
     ok = id ? await write(op.update('contractors', id, data), 'Исполнитель сохранён')
       : await write(op.set('contractors', newId(), { ...data, ...created, createdBy: state.me?.id || '' }), 'Исполнитель добавлен');
   }
@@ -5805,9 +5923,11 @@ function askDelete() {
     if (n) { blocked = true; text = `На подрядчике карточек: ${n}. Сначала переназначьте их или снимите исполнителя.`; }
     else text = 'Переместить исполнителя в корзину?';
   }
+  // 46: the trash can be undone (10 s plate, Ctrl+Z, the trash itself) — no «are you sure?» before it.
+  // Only a removal that cannot happen yet is explained here.
+  if (!blocked) return doDelete();
   $('#confirm-slot').innerHTML = `<div class="drawer-f"><div class="confirm">${esc(text)}
-    <span class="confirm-acts">${blocked ? '' : '<button class="btn danger solid sm" data-act="do-delete" type="button">В корзину</button>'}
-    <button class="btn sm" data-act="cancel-delete" type="button">${blocked ? 'Понятно' : 'Отмена'}</button></span></div></div>`;
+    <span class="confirm-acts"><button class="btn sm" data-act="cancel-delete" type="button">Понятно</button></span></div></div>`;
 }
 async function doDelete() {
   const { kind, id } = state.drawer;
@@ -5819,9 +5939,10 @@ async function doDelete() {
     ops.push(op.update('projects', id, { deletedAt: at }));
   } else if (kind === 'user') ops = [op.update('users', id, { deletedAt: at })];
   else ops = [op.update('contractors', id, { deletedAt: at })];
-  if (await write(ops)) {
+  const what = kind === 'task' ? 'Карточка' : kind === 'project' ? 'Проект' : kind === 'user' ? 'Сотрудник' : 'Исполнитель';
+  if (await write(ops, null, { undoLabel: `${what} — в корзину` })) {
     closeDrawer();
-    toast('Перемещено в корзину', false, { label: 'Отменить', run: () => restoreItem(kind === 'task' ? 'tasks' : kind + 's', id) });
+    toast(kind === 'user' ? 'Сотрудник удалён из команды' : `${what}${kind === 'project' && ops.length > 1 ? ` и карточки (${ops.length - 1})` : ''} — в корзине`, false, { label: 'Отменить', run: () => restoreItem(kind === 'task' ? 'tasks' : kind + 's', id) });
   }
 }
 
@@ -6717,7 +6838,9 @@ document.addEventListener('click', e => {
     case 'pick-folder': pickFolder(); break;
     case 'dtab': setDrawerTab(id); break;
     case 'request-close': requestClose(); break;
-    case 'discard': closeDrawer(); break;
+    case 'discard': flushTaskDraft(); closeDrawer(); break;
+    case 'draft-restore': restoreTaskDraft(); break;
+    case 'draft-drop': dropTaskDraft(draftKeyOf(state.drawer)); $('#confirm-slot').innerHTML = ''; break;
     case 'save-close': $('#dform').requestSubmit(); break;
     case 'save-stay': saveStay(); break;
     case 'ask-delete': askDelete(); break;

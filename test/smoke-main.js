@@ -324,7 +324,7 @@ app.on('browser-window-created', (_e, win) => {
       // Trash: delete → restore
       await step('trash', async () => {
         await click('tr.row[data-id="demo-t7"]'); await wait(300);
-        await click('[data-act="ask-delete"]'); await click('[data-act="do-delete"]'); await wait(400);
+        await click('[data-act="ask-delete"]'); await wait(400); // 4.3: no confirmation, an undo plate instead
         check('soft deleted', !!data().tasks['demo-t7'].deletedAt);
         await click('[data-act="open-trash"]'); await wait(200);
         await shot('10-trash');

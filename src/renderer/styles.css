@@ -102,6 +102,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance }
 .btn.ghostbtn:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent) }
 .btn.sm { padding: 3px 8px; font-size: 12px }
 .btn:disabled { opacity: .5; cursor: not-allowed }
+.btn:disabled[title] { cursor: help } /* 45: an inactive button says why in its tooltip */
 
 /* flex column, not grid: in a fixed-height scroller, auto grid rows shrink panels whose overflow is hidden */
 main { flex: 1; overflow-y: auto; padding: 14px 14px 28px; display: flex; flex-direction: column; gap: 16px; min-height: 0 }
@@ -283,6 +284,11 @@ td.num { white-space: nowrap }
 .toast button { appearance: none; border: 1px solid currentColor; background: none; color: inherit; border-radius: 5px; padding: 2px 10px; cursor: pointer; font-weight: 600 }
 .toast { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 6px; z-index: 60; font-size: 13px; max-width: calc(100% - 32px); text-shadow: none }
 .toast.bad { background: var(--bad); color: #fff }
+/* 46: the undo offer runs down along the bottom edge; hovering pauses it */
+.toast.has-act { position: fixed; overflow: hidden }
+.toast-left { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--accent, #F26A1F); transform-origin: left; animation: toast-left linear forwards }
+.toast.held .toast-left { animation-play-state: paused }
+@keyframes toast-left { from { transform: scaleX(1) } to { transform: scaleX(0) } }
 .foot { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px }
 
 @media (max-width: 640px) {
@@ -743,6 +749,8 @@ option.misfit { color: #b42318 }
 /* toasts: bottom-right corner, out of the way of the data */
 .toast { left: auto; right: 18px; bottom: 18px; transform: none; max-width: min(460px, calc(100% - 36px)); box-shadow: var(--shadow) }
 .nav-bottom .toast { bottom: 84px }
+/* 46: with a card open the plate would cover its footer buttons for 10 s — show it at the top instead */
+body:has(#dform) .toast { bottom: auto; top: 62px }
 /* sticky table header in the long «Все карточки» list */
 .tablewrap.tall { max-height: calc(100vh - 250px); overflow: auto }
 .tablewrap.tall thead th { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--surface) calc(max(var(--alpha), .92) * 100%), transparent) } /* sticky over scrolled rows: never too clear */
