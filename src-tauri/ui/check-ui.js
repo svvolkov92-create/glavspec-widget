@@ -402,6 +402,13 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
         if (sm.exec) { await js(() => document.querySelector('[data-act="smart-exec"]').click()); await wait(200); }
         check('4.3: suggested executor is set with one click', !sm.exec || await js(() => !!document.querySelector('#dform input[name="execRef"]').value), JSON.stringify(sm));
         await js(() => document.querySelector('#dform [data-act="discard"]').click()); await wait(200);
+        // A stage already over: the dates stay as they were, the card can be saved.
+        await js(id => window.api.write([{ type: 'update', col: 'projects', id, data: { phases: [{ key: 'p', start: '2025-01-10', finish: '2025-03-01', done: '' }] } }], { action: 'Сроки' }), pid); await wait(400);
+        await actClick('new-task', { project: pid }); await wait(400);
+        await js(() => { const d = document.querySelector('#t-doc'); const o = [...d.options].find(x => x.value.startsWith('pd:') && !x.disabled); d.value = o.value; d.dispatchEvent(new Event('change', { bubbles: true })); }); await wait(300);
+        const past = await js(() => ({ start: document.querySelector('#t-start').value, finish: document.querySelector('#t-finish').value }));
+        check('4.3: a stage already over does not give a finish before the start', !past.finish || past.finish >= past.start, JSON.stringify(past));
+        await js(() => document.querySelector('#dform [data-act="discard"]').click()); await wait(200);
       } else check('4.3: demo project with composition for smart defaults', false);
     }
     // 55: while a focus runs, notifications are held and handed back at its end.

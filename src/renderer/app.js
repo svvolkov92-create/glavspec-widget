@@ -4158,6 +4158,7 @@ function onMarksChanged() {
 // Dates: a ПД section takes the project's «Стадия П», a РД section «Стадия Р» — while the dates were not typed by hand.
 // Executor: the best fit by section and load (the picker's own order) is offered with one click, never set silently.
 function smartDefaults() {
+  const box_hide = () => { const b = $('#smart-hint'); if (b) b.hidden = true; };
   if (state.drawer?.kind !== 'task' || state.drawer.id) return;
   const p = state.projects.get($('#t-project')?.value || ''), ref = $('#t-doc')?.value || '';
   const key = ref.startsWith('pd:') ? 'p' : ref.startsWith('rd:') ? 'r' : '';
@@ -4167,6 +4168,8 @@ function smartDefaults() {
   if (ph && st && fin && !st.dataset.typed && !fin.dataset.typed && (isDate(ph.start) || isDate(ph.finish))) {
     const start = isDate(ph.start) ? (ph.start > state.today ? ph.start : state.today) : st.value;
     const finish = isDate(ph.finish) ? ph.finish : fin.value;
+    // A stage already over gives nothing to take: the card would finish before it starts.
+    if (finish && start && finish < start) { box_hide(); return; }
     if (st.value !== start || fin.value !== finish) { st.value = start; fin.value = finish; updateShiftBox(); }
     notes.push(`Сроки — из этапа «${L.phaseLabel(key)}» проекта${isDate(ph.finish) ? ` (до ${fmtDate(ph.finish)})` : ''}.`);
   }
@@ -4859,19 +4862,22 @@ let tour = null;
 function tourDoneFor(id) { return !!loadLocal('tourDone', {})[id]; }
 function tourMarkDone() { const d = loadLocal('tourDone', {}); d[state.me.id] = new Date().toISOString(); saveLocal('tourDone', d); }
 function maybeStartTour() {
-  if (tour || SOLO || state.win.compact || !state.me || isEmpty() || tourDoneFor(state.me.id)) return;
+  if (tour || SOLO || state.win.compact || !state.me || isEmpty() || tourDoneFor(state.me.id) || loadLocal('tourOff', false)) return;
   clearTimeout(maybeStartTour._t);
-  maybeStartTour._t = setTimeout(() => { if (!state.drawer && !document.querySelector('.modal-back, .palette-back') && !tourDoneFor(state.me.id)) startTour(); }, 900);
+  maybeStartTour._t = setTimeout(() => { if (!state.drawer && !document.querySelector('.modal-back, .palette-back') && !tourDoneFor(state.me.id) && !loadLocal('tourOff', false)) startTour(); }, 900);
 }
 function startTour() {
-  tour = { i: 0, steps: tourSteps() };
+  tour = { i: 0, steps: tourSteps(), tab: state.tab };
   drawTour();
 }
 function endTour() {
   document.querySelector('.tour')?.remove();
   document.querySelector('.tour-on')?.classList.remove('tour-on');
+  const back = tour?.tab;
   if (tour) tourMarkDone();
   tour = null;
+  // The hints may switch to «Мой день»: the tab the person had comes back.
+  if (back && state.tab !== back) { state.tab = back; renderNow(); }
 }
 function drawTour() {
   document.querySelector('.tour')?.remove();

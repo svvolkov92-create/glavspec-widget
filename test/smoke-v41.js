@@ -53,6 +53,7 @@ app.on('browser-window-created', (_e, win) => {
         check('undo plate: readable «Отменить»', hidden === 'false' && bg !== fg && txt.includes('Отменить'), c);
         await shot('41-01-delete');
         await click('#toast button'); await wait(400);
+        await click('[data-act="open-project"][data-id="demo-p2"]'); await wait(400); // step 16 works in this card
       });
 
       await step('16: project «Заказчик» and «ГИП»', async () => {
