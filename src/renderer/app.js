@@ -707,7 +707,7 @@ function moveCol(id, dir) {
   setColPrefs({ order });
 }
 
-function taskTable(list, { showProject = true, showContractor = true, empty = 'Карточек пока нет.', tall = false, limitKey = 'table', select = false } = {}) {
+function taskTable(list, { showProject = true, showContractor = true, empty = 'Карточек пока нет.', emptyActs = '', tall = false, limitKey = 'table', select = false } = {}) {
   list = sortTasks(list.slice());
   const showMoney = canMoney(), edit = canEditFields(), showOwner = !isSpec();
   const cols = colOrder().filter(c => !colPrefs.hidden.includes(c.id) || c.fixed)
@@ -734,7 +734,7 @@ function taskTable(list, { showProject = true, showContractor = true, empty = '�
   const allOn = pick && shown.length && shown.every(t => state.bulk.has(t.id));
   const head = `<tr>${pick ? `<th class="bulk-c"><input type="checkbox" data-act="bulk-all" aria-label="Выбрать все показанные"${allOn ? ' checked' : ''} data-ids="${esc(shown.map(t => t.id).join(' '))}"></th>` : ''}${cols.map(c => HEAD[c.id]().replace('<th', `<th draggable="true" data-col="${c.id}"`)).join('')}</tr>`;
   const rows = list.length ? shown.map(t => `<tr class="row${pick && state.bulk.has(t.id) ? ' picked' : ''}" data-act="open-task" data-id="${esc(t.id)}">${pick ? `<td class="bulk-c"><input type="checkbox" data-act="bulk-pick" data-id="${esc(t.id)}"${state.bulk.has(t.id) ? ' checked' : ''} aria-label="Выбрать"></td>` : ''}${cols.map(c => CELL[c.id](t)).join('')}</tr>`).join('')
-    : `<tr class="empty-row"><td colspan="${cols.length + (pick ? 1 : 0)}">${esc(empty)}</td></tr>`;
+    : `<tr class="empty-row"><td colspan="${cols.length + (pick ? 1 : 0)}">${esc(empty)}${emptyActs ? ` <span class="empty-acts">${emptyActs}</span>` : ''}</td></tr>`;
   const more = moreBtn(limitKey, list.length, shown.length, tall ? 300 : 100);
   return `<div class="tablewrap${tall ? ' tall' : ''}"><table><thead>${head}</thead><tbody>${rows}</tbody></table>${more ? `<div class="more-row">${more}</div>` : ''}</div>`;
 }
@@ -942,6 +942,14 @@ document.addEventListener('keydown', e => {
 }, true);
 
 /* ---------- views ---------- */
+// 54: an empty list says what to do next — reset the filters, or create the first card.
+function tasksEmpty() {
+  const base = { tall: true, limitKey: 'tasks', select: canEditFields() };
+  if (!sameFilters(state.filters, EMPTY_FILTERS)) return { ...base, empty: 'Под фильтр ничего не попало.', emptyActs: '<button class="btn sm" type="button" data-act="preset-reset">Сбросить фильтры</button>' };
+  const can = A.canCreateTasks(state.me);
+  return { ...base, empty: can ? 'Карточек пока нет. Создайте первую или загрузите список из Excel.' : 'Вам пока не назначено ни одной карточки.',
+    emptyActs: can ? '<button class="btn primary sm" type="button" data-act="new-task">+ Карточка</button><button class="btn sm" type="button" data-act="import">Импорт из Excel</button>' : '' };
+}
 function emptyState() {
   return `<section class="empty">
     <h2>Здесь пока пусто</h2>
@@ -1301,6 +1309,7 @@ function assignsOf(t) {
 }
 
 function openProjectPage(id) {
+  noteRecent('project', id);
   if (SOLO) { if (id !== SOLO.id) api.windowMain?.({ kind: 'project', id }); return; } // other projects open in the main window
   docTabAdd(id);
   state.openProjectId = id;
@@ -1808,7 +1817,7 @@ function msgNotify() {
   if (!me) return;
   const hits = chatsAll().flatMap(c => msgMentions(c).map(m => ({ c, m }))).sort((a, b) => b.m.ts.localeCompare(a.m.ts));
   const top = hits[0]?.m.ts || '';
-  if (mentionSeenTs !== null && top > mentionSeenTs && !(msg.mode !== 'pill' && msg.chatId === hits[0].c.id)) toast(`@ ${hits[0].m.user} — «${chatTitle(hits[0].c)}»: ${hits[0].m.text.slice(0, 90)}`);
+  if (mentionSeenTs !== null && top > mentionSeenTs && !focus && !(msg.mode !== 'pill' && msg.chatId === hits[0].c.id)) toast(`@ ${hits[0].m.user} — «${chatTitle(hits[0].c)}»: ${hits[0].m.text.slice(0, 90)}`);
   mentionSeenTs = top > (mentionSeenTs || '') ? top : (mentionSeenTs ?? top);
 }
 
@@ -3363,6 +3372,8 @@ function modalErr(root, errSel, msg, fieldSel = '') {
   } else err?.scrollIntoView({ block: 'nearest' });
   return false;
 }
+// The same outside dialogs: an error plate plus the highlighted field.
+function pageErr(msg, fieldSel) { toast(msg, true); return modalErr(document, '#page-err-none', msg, fieldSel); }
 function askText(title, label, placeholder = '') {
   return new Promise(resolve => {
     const root = document.createElement('div');
@@ -3476,19 +3487,19 @@ async function bulkDo(kind) {
   let ops = [], msg = '';
   if (kind === 'owner') {
     const uid = $('#bulk-owner').value, u = state.users.get(uid);
-    if (!u) return toast('Выберите ответственного.');
+    if (!u) return pageErr('Выберите ответственного.', '#bulk-owner');
     const misfit = list.filter(t => A.profileGaps(u, t).length);
     if (misfit.length && !(await confirmBox(`${u.name} не по профилю для: ${misfit.map(marksText).join(', ')}. Всё равно назначить?`, 'Назначить'))) return;
     ops = list.map(t => op.update('tasks', t.id, { ownerId: uid, coOwnerIds: (t.coOwnerIds || []).filter(x => x !== uid), profileOk: misfit.includes(t) }));
     msg = `${u.name}: назначено карточек ${list.length}`;
   } else if (kind === 'contr') {
     const cid = $('#bulk-contr').value;
-    if (!cid) return toast('Выберите подрядчика.');
+    if (!cid) return pageErr('Выберите подрядчика.', '#bulk-contr');
     ops = list.map(t => op.update('tasks', t.id, { contractorId: cid === '__none' ? '' : cid }));
     msg = cid === '__none' ? `Подрядчик снят: ${list.length}` : `${state.contractors.get(cid)?.name}: карточек ${list.length}`;
   } else if (kind === 'shift') {
     const d = Math.round(Number($('#bulk-days').value));
-    if (!d || Math.abs(d) > 365) return toast('Укажите сдвиг в днях, например 7 или −3.');
+    if (!d || Math.abs(d) > 365) return pageErr('Укажите сдвиг в днях, например 7 или −3.', '#bulk-days');
     const dated = list.filter(t => isDate(t.finish) || isDate(t.start));
     if (!dated.length) return toast('У выбранных карточек нет сроков.');
     const first = dated.find(t => isDate(t.finish));
@@ -3542,7 +3553,7 @@ function viewTasks() {
     </div>
     <section class="panel"><div class="panel-h"><h3>Карточки</h3><span class="meta">${tt.count}${canMoney() ? ` · бюджет ${money(tt.budget)} · оплачено ${money(tt.paid)} · остаток ${money(tt.rest)}` : ''}</span><span class="spacer"></span>${canEditFields() ? `<button class="btn ghostbtn sm${state.bulk ? ' on' : ''}" type="button" data-act="bulk-toggle" title="Отметить несколько карточек и изменить их разом">${state.bulk ? 'Готово' : 'Выбрать несколько'}</button>` : ''}${colsMenu()}</div>
     ${state.bulk ? bulkBar() : ''}
-    ${taskTable(list, { empty: 'Под фильтр ничего не попало.', tall: true, limitKey: 'tasks', select: canEditFields() })}</section>`;
+    ${taskTable(list, list.length ? { tall: true, limitKey: 'tasks', select: canEditFields() } : tasksEmpty())}</section>`;
 }
 
 // Compact widget: one line per card, grouped by what to do; the header says how many wait for you.
@@ -3627,6 +3638,8 @@ function renderNow() {
   const active = document.activeElement?.id, caret = document.activeElement?.selectionStart;
   if (SOLO?.kind === 'tray') { app.innerHTML = viewTrayPanel(); return; }
   if (!SOLO && state.me) api.setBadge?.(badgeCount()); // 4.1.1 (34): the number over the taskbar icon
+  if (!SOLO && state.me) needsMeNotify();
+  if (!SOLO && state.me && !tour) maybeStartTour();
   if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
   if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
   const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
@@ -4139,7 +4152,43 @@ function onMarksChanged() {
   execPickersRefresh();
   updateOwnerWarn();
   applyMarksFilter();
+  smartDefaults();
 }
+/* ---------- 50: a new card suggests its dates and executor ---------- */
+// Dates: a ПД section takes the project's «Стадия П», a РД section «Стадия Р» — while the dates were not typed by hand.
+// Executor: the best fit by section and load (the picker's own order) is offered with one click, never set silently.
+function smartDefaults() {
+  if (state.drawer?.kind !== 'task' || state.drawer.id) return;
+  const p = state.projects.get($('#t-project')?.value || ''), ref = $('#t-doc')?.value || '';
+  const key = ref.startsWith('pd:') ? 'p' : ref.startsWith('rd:') ? 'r' : '';
+  const ph = key && (p?.phases || []).find(x => x.key === key);
+  const st = $('#t-start'), fin = $('#t-finish');
+  const notes = [];
+  if (ph && st && fin && !st.dataset.typed && !fin.dataset.typed && (isDate(ph.start) || isDate(ph.finish))) {
+    const start = isDate(ph.start) ? (ph.start > state.today ? ph.start : state.today) : st.value;
+    const finish = isDate(ph.finish) ? ph.finish : fin.value;
+    if (st.value !== start || fin.value !== finish) { st.value = start; fin.value = finish; updateShiftBox(); }
+    notes.push(`Сроки — из этапа «${L.phaseLabel(key)}» проекта${isDate(ph.finish) ? ` (до ${fmtDate(ph.finish)})` : ''}.`);
+  }
+  const execBox = $('#dform .exec-pick[data-pick="exec"]'), marks = selectedMarks();
+  let pick = null;
+  if (execBox && !execBox.querySelector('input[type="hidden"]').value && marks.length) {
+    // Someone whose own direction it is first; otherwise any fitting one — but not the GIP, who «fits» everything.
+    const cands = execCandidates(marks, true);
+    pick = cands.find(x => x.own) || cands.find(x => x.fit && !A.isGip(refUser(x.ref))) || null;
+  }
+  let box = $('#smart-hint');
+  if (!box) {
+    const anchor = $('#t-finish')?.closest('.f');
+    if (!anchor) return;
+    anchor.insertAdjacentHTML('afterend', '<div class="f wide smart-hint" id="smart-hint" hidden></div>');
+    box = $('#smart-hint');
+  }
+  const pickHtml = pick ? `<span>Подходит по разделу: <b>${esc(pick.name)}</b>${pick.n ? ` · в работе ${pick.n}` : ' · сейчас свободен'}</span> <button class="btn sm" type="button" data-act="smart-exec" data-ref="${esc(pick.ref)}">Назначить исполнителем</button>` : '';
+  box.innerHTML = notes.map(n => `<span>${esc(n)}</span>`).join('') + pickHtml;
+  box.hidden = !notes.length && !pick;
+}
+document.addEventListener('input', e => { if (e.target.id === 't-start' || e.target.id === 't-finish') e.target.dataset.typed = '1'; });
 // Warns in the card when the chosen person has no direction for some of the marks.
 /* ---------- 4.1: «Кто делает» — responsible in the team, executor (staff or outside), one optional co-executor ----------
    Stored: ownerId; contractorId (an outside executor) or execUserId (a staff one); coExecRef 'u:<id>' | 'c:<id>'.
@@ -4774,6 +4823,7 @@ async function sendMessage(via) {
 /* ---------- 4.1: focus on a task — «Начать работу» starts a timer; the time is kept on the card ---------- */
 // One focus per computer user: { taskId, since }. Stopped by «Пауза», «Сдал на проверку», another focus or ✕.
 let focus = loadLocal('focus', null);
+if (focus) setTimeout(() => api.setQuiet?.(true), 0); // a focus kept from the last run keeps «Не беспокоить»
 const fmtSpent = min => (min >= 60 ? `${Math.floor(min / 60)} ч ${String(min % 60).padStart(2, '0')} мин` : `${min} мин`);
 const spentOf = (t, userId = null) => (Array.isArray(t?.timeLog) ? t.timeLog : []).filter(x => !userId || x.userId === userId)
   .reduce((a, x) => a + Math.max(0, Math.round((Date.parse(x.to) - Date.parse(x.from)) / 60000)), 0);
@@ -4784,16 +4834,112 @@ function focusBtn(t) {
 }
 // The card stays as it is (unsaved edits too): only its focus button is redrawn.
 function refreshFocusSlot() { const slot = $('#focus-slot'), t = state.drawer?.kind === 'task' && state.tasks.get(state.drawer.id); if (slot && t) slot.outerHTML = focusBtn(t); }
+/* ---------- 56: a short introduction by role, once ---------- */
+// 4–5 hints over the real interface the first time a person opens Пульт with data; «Знакомство с Пультом»
+// in the menu shows it again. A hint whose element is not on the screen is skipped.
+function tourSteps() {
+  const me = state.me, gip = A.isGip(me), chief = A.isChief(me);
+  const search = { sel: '[data-act="open-search"]', title: 'Поиск — Ctrl+K', text: A.canCreateTasks(me) ? 'Ищет проекты, карточки и людей. Начните с «+», чтобы сразу завести карточку: «+ ЭОМ Корпус 3 до 15.12 @Орлов».' : 'Ищет проекты, карточки и людей. Недавно открытое — первым.' };
+  const msgs = { sel: '[data-act="msg-open"]', title: 'Сообщения', text: 'Чаты проектов, личные и групповые. Сразу уведомляем только о том, где нужны вы.' };
+  if (gip) return [
+    { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'С него удобно начинать: что ждёт вашей проверки, что просрочено, кто остался без работы.' },
+    { sel: '[data-act="review-queue"]', tab: 'day', title: 'Очередь проверки', text: 'Карточки «на проверке» подряд: «Принять» или «Вернуть с замечанием», клавиши A и R.' },
+    { sel: '#tabs [data-id="projects"]', title: 'Проекты', text: 'Страница проекта: сроки этапов, состав, исходные данные и письма. В Ганте — критический путь.' },
+    search, msgs];
+  if (chief) return [
+    { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'Ваша группа: что ждёт проверки, что горит, кто свободен.' },
+    { sel: '#tabs [data-id="kanban"]', title: 'Канбан', text: 'Перетаскивайте карточки между статусами; «Вид карточек» — что показывать на карточке.' },
+    search, msgs];
+  return [
+    { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'Ваши карточки на сегодня. «Начать» — и карточка в работе.' },
+    { sel: '#tabs [data-id="tasks"]', title: 'Все карточки', text: 'В карточке — «Начать работу», готовность и «Сдать на проверку». Несохранённое не потеряется: предложим восстановить.' },
+    search, msgs];
+}
+let tour = null;
+function tourDoneFor(id) { return !!loadLocal('tourDone', {})[id]; }
+function tourMarkDone() { const d = loadLocal('tourDone', {}); d[state.me.id] = new Date().toISOString(); saveLocal('tourDone', d); }
+function maybeStartTour() {
+  if (tour || SOLO || state.win.compact || !state.me || isEmpty() || tourDoneFor(state.me.id)) return;
+  clearTimeout(maybeStartTour._t);
+  maybeStartTour._t = setTimeout(() => { if (!state.drawer && !document.querySelector('.modal-back, .palette-back') && !tourDoneFor(state.me.id)) startTour(); }, 900);
+}
+function startTour() {
+  tour = { i: 0, steps: tourSteps() };
+  drawTour();
+}
+function endTour() {
+  document.querySelector('.tour')?.remove();
+  document.querySelector('.tour-on')?.classList.remove('tour-on');
+  if (tour) tourMarkDone();
+  tour = null;
+}
+function drawTour() {
+  document.querySelector('.tour')?.remove();
+  document.querySelector('.tour-on')?.classList.remove('tour-on');
+  if (!tour) return;
+  let st, el;
+  while (tour.i < tour.steps.length) {
+    st = tour.steps[tour.i];
+    if (st.tab && state.tab !== st.tab) { state.tab = st.tab; renderNow(); }
+    el = document.querySelector(st.sel);
+    if (el && el.offsetParent !== null) break;
+    tour.i++;
+  }
+  if (tour.i >= tour.steps.length) return endTour();
+  const n = tour.steps.length, last = tour.i === n - 1;
+  el.classList.add('tour-on');
+  el.scrollIntoView({ block: 'nearest' });
+  const box = document.createElement('div');
+  box.className = 'tour'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Знакомство с Пультом');
+  box.innerHTML = `<div class="tour-n hint">${tour.i + 1} из ${n}</div><b>${esc(st.title)}</b><p>${esc(st.text)}</p>
+    <div class="tour-acts"><button class="btn primary sm" type="button" data-tour="next">${last ? 'Понятно' : 'Далее'}</button>${last ? '' : '<button class="btn ghostbtn sm" type="button" data-tour="skip">Пропустить</button>'}</div>`;
+  document.body.append(box);
+  const r = el.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight;
+  const below = r.bottom + 10 + h < window.innerHeight;
+  box.style.top = `${below ? r.bottom + 10 : Math.max(8, r.top - h - 10)}px`;
+  box.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+  box.querySelector('[data-tour="next"]').focus();
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest?.('[data-tour]');
+  if (!b) return;
+  if (b.dataset.tour === 'skip') endTour(); else { tour.i++; drawTour(); }
+});
+document.addEventListener('keydown', e => { if (tour && e.key === 'Escape') { e.stopPropagation(); endTour(); } }, true);
+window.addEventListener('resize', () => { if (tour) drawTour(); });
+
+/* ---------- 55: notifications without noise ---------- */
+// Right away (a Windows notification when the window is not in front) only what needs me: a card assigned to me,
+// returned, waiting for my review, a message addressed to me. Everything else stays in the morning digest.
+// While a focus runs, notifications are held and shown together when it ends.
+let needSeen = loadLocal('needSeen', '');
+function needsMeNotify() {
+  const me = state.me.id;
+  const fresh = tasksArr().filter(t => unread(t) && t.notify[me] > needSeen);
+  const top = fresh.reduce((m, t) => (t.notify[me] > m ? t.notify[me] : m), needSeen);
+  // The first run on this computer only takes the mark: no burst about everything unread so far.
+  if (!needSeen) { needSeen = top || new Date().toISOString(); saveLocal('needSeen', needSeen); return; }
+  if (!fresh.length) return;
+  needSeen = top; saveLocal('needSeen', needSeen);
+  const why = t => (t.status === 'review' ? 'ждёт вашей проверки' : t.status === 'revision' ? 'вернули на доработку'
+    : (t.comments || []).at(-1)?.ts === t.notify[me] ? 'новое сообщение' : 'назначено вам');
+  const one = t => `${marksText(t)} · ${projectOf(t)?.name || ''}: ${why(t)}`;
+  api.notifyMe?.(fresh.length === 1 ? one(fresh[0]) : `Нужно ваше внимание (${fresh.length}): ${fresh.slice(0, 3).map(one).join('; ')}${fresh.length > 3 ? '…' : ''}`);
+}
+function focusQuiet(on) {
+  const held = api.setQuiet?.(on) || [];
+  if (!on && held.length) toast(`Пока шёл фокус: ${held.length} ${plural(held.length, 'уведомление', 'уведомления', 'уведомлений')} — ${held.at(-1).slice(0, 120)}`);
+}
 async function focusStart(id) {
   if (focus?.taskId === id) return;
   if (focus) await focusStop({ quiet: true });
   focus = { taskId: id, since: new Date().toISOString() };
-  saveLocal('focus', focus); renderFocus();
+  saveLocal('focus', focus); renderFocus(); focusQuiet(true);
 }
 // Writes the stretch to the card (≥ 1 min). quiet: no toast (another focus starts or the card is handed in).
 async function focusStop({ quiet = false } = {}) {
   if (!focus) return;
-  const f = focus; focus = null; saveLocal('focus', null); renderFocus();
+  const f = focus; focus = null; saveLocal('focus', null); renderFocus(); focusQuiet(false);
   const t = state.tasks.get(f.taskId), to = new Date().toISOString();
   const min = Math.round((Date.parse(to) - Date.parse(f.since)) / 60000);
   if (!t || min < 1 || !state.me) return;
@@ -4857,6 +5003,7 @@ function openTask(id, preset = {}, tab = 'main') {
   if (tab === 'msg') tab = 'talk'; // the message composer lives inside «Обсуждение» since 2.5
   const saved = id ? state.tasks.get(id) : null;
   if (id && !saved) return toast('Карточка не найдена — возможно, её удалили.', true);
+  noteRecent('task', id);
   const t = saved || { status: 'not_started', projectId: preset.projectId || (state.tab === 'tasks' ? state.filters.project : '') || '', start: todayStr(), ...(preset.draft || {}) };
   const isNew = !saved;
   state.drawer = { kind: 'task', id, tab, coInit: [...(t.coOwnerIds || [])] };
@@ -5840,6 +5987,7 @@ function kindSwitch(current) {
 function openContractor(id) {
   const c = id ? state.contractors.get(id) : {};
   if (!c) return toast('Исполнитель не найден.', true);
+  noteRecent('contractor', id);
   state.drawer = { kind: 'contractor', id };
   drawerShell({
     title: id ? 'Подрядчик' : 'Новый подрядчик',
@@ -6298,6 +6446,25 @@ function renderJournal() {
 }
 
 /* ---------- quick search (Ctrl+K) ---------- */
+/* ---------- 52: recently opened projects, cards and contractors come first in Ctrl+K ---------- */
+const RECENT_MAX = 12;
+let recents = loadLocal('recents', []);
+function noteRecent(kind, id) {
+  if (!id) return;
+  recents = [{ kind, id }, ...recents.filter(r => !(r.kind === kind && r.id === id))].slice(0, RECENT_MAX);
+  saveLocal('recents', recents);
+}
+const recentRank = it => { const i = recents.findIndex(r => r.kind === it.kind && r.id === it.id); return i < 0 ? RECENT_MAX : i; };
+// With an empty query: the recent items that still exist, newest first.
+function recentItems() {
+  const out = [];
+  for (const r of recents) {
+    if (r.kind === 'task') { const t = state.tasks.get(r.id); if (t) out.push({ kind: 'task', id: t.id, title: marksText(t), sub: `${projectOf(t)?.name || '—'} · ${executorOf(t)?.name || 'нет исполнителя'} · ${timing(t).text}` }); }
+    else if (r.kind === 'project') { const p = state.projects.get(r.id); if (p) out.push({ kind: 'project', id: p.id, title: p.name, sub: `проект${p.code ? ' · ' + p.code : ''}${p.archived ? ' · в архиве' : ''}` }); }
+    else if (r.kind === 'contractor') { const c = state.contractors.get(r.id); if (c) out.push({ kind: 'contractor', id: c.id, title: c.name, sub: `подрядчик${c.specialty ? ' · ' + c.specialty : ''}` }); }
+  }
+  return out;
+}
 function searchAll(query) {
   const words = query.toLowerCase().replace(/ё/g, 'е').split(/\s+/).filter(Boolean);
   if (!words.length) return [];
@@ -6315,7 +6482,7 @@ function searchAll(query) {
   for (const c of state.contractors.values()) {
     if (match(norm([c.name, c.specialty, c.phone, c.email, c.messenger].join(' ')))) out.push({ kind: 'contractor', id: c.id, rank: 2, title: c.name, sub: `подрядчик${c.specialty ? ' · ' + c.specialty : ''}` });
   }
-  return out.sort((a, b) => a.archived - b.archived || a.rank - b.rank).slice(0, 14);
+  return out.sort((a, b) => a.archived - b.archived || recentRank(a) - recentRank(b) || a.rank - b.rank).slice(0, 14);
 }
 // Quick entry: «+ ЭОМ Корпус 3 до 15.12 @Орлов уточнение» in the search box. Marks are known codes, the project is
 // matched by name or code, «до дд.мм[.гггг]» is the finish, «@фамилия» the responsible; the rest is the title.
@@ -6387,11 +6554,12 @@ function openPalette() {
         ${q.problems.length ? `<div class="hint pal-warn">${esc(q.problems.join('; '))} — Enter откроет карточку, чтобы дописать</div>` : '<div class="hint pal-warn">Enter — создать сразу, Shift+Enter — открыть карточку</div>'}`;
       return;
     }
-    items = searchAll(input.value);
+    const empty = !input.value.trim();
+    items = empty ? recentItems() : searchAll(input.value);
     sel = Math.min(sel, Math.max(0, items.length - 1));
-    list.innerHTML = items.length ? items.map((it, i) => `<div class="pal-item ${i === sel ? 'sel' : ''}" role="option" aria-selected="${i === sel}" data-i="${i}">
-        <span class="pal-kind">${kindLabel[it.kind]}</span><span class="pal-t">${esc(it.title)}</span><span class="pal-s hint">${esc(it.sub)}</span></div>`).join('')
-      : `<div class="none">${input.value.trim() ? 'Ничего не найдено.' : 'Начните вводить — например «СКУД» или фамилию исполнителя.'}</div>`;
+    list.innerHTML = (empty && items.length ? '<div class="pal-h hint">Недавние</div>' : '') + (items.length ? items.map((it, i) => `<div class="pal-item ${i === sel ? 'sel' : ''}" role="option" aria-selected="${i === sel}" data-i="${i}">
+        <span class="pal-kind">${kindLabel[it.kind]}</span><span class="pal-t">${esc(it.title)}</span><span class="pal-s hint">${esc(it.sub)}${!empty && recentRank(it) < RECENT_MAX ? ' · недавно' : ''}</span></div>`).join('')
+      : `<div class="none">${input.value.trim() ? 'Ничего не найдено.' : 'Начните вводить — например «СКУД» или фамилию исполнителя.'}</div>`);
     list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
   };
   const close = () => root.remove();
@@ -6723,6 +6891,7 @@ document.addEventListener('click', e => {
     case 'weekly': setFileMenu(false); openWeekly(); break;
     case 'usage': setFileMenu(false); openUsage(); break;
     case 'help': setFileMenu(false); openHelp(); break;
+    case 'tour': setFileMenu(false); endTour(); startTour(); break;
     case 'org-fold': { const id = el.dataset.id; if (el.dataset.open === 'true') { orgOpen.delete(id); orgOpen.add('x:' + id); } else { orgOpen.add(id); orgOpen.delete('x:' + id); } saveLocal('orgOpen', [...orgOpen]); renderNow(); break; }
     case 'org-people': orgToggle('p:' + el.dataset.id); break;
     case 'org-add': askDept(null, el.dataset.parent || ''); break;
@@ -6840,6 +7009,7 @@ document.addEventListener('click', e => {
     case 'request-close': requestClose(); break;
     case 'discard': flushTaskDraft(); closeDrawer(); break;
     case 'draft-restore': restoreTaskDraft(); break;
+    case 'smart-exec': epSet('exec', el.dataset.ref); execPickersRefresh(); smartDefaults(); scheduleTaskDraft({ target: el }); break;
     case 'draft-drop': dropTaskDraft(draftKeyOf(state.drawer)); $('#confirm-slot').innerHTML = ''; break;
     case 'save-close': $('#dform').requestSubmit(); break;
     case 'save-stay': saveStay(); break;

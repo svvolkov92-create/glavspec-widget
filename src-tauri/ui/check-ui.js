@@ -98,6 +98,16 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await js(() => window.api.switchUser('u-gip')); await wait(300);
   check('user switch saved', disk.settings.userId === 'u-gip');
   await p.click('[data-act="seed-demo"]'); await wait(1200);
+  // 56: with data, the first start shows the introduction for the role (GIP: from «Мой день»).
+  {
+    const t1 = await js(() => ({ on: !!document.querySelector('.tour'), title: document.querySelector('.tour b')?.textContent, n: document.querySelector('.tour-n')?.textContent, ring: document.querySelector('.tour-on')?.dataset.id }));
+    check('4.3: introduction by role on the first start', t1.on && t1.title === 'Мой день' && /из 5/.test(t1.n) && t1.ring === 'day', JSON.stringify(t1));
+    await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-tour.png' }).catch(() => {});
+    await js(() => document.querySelector('[data-tour="next"]').click()); await wait(200);
+    check('4.3: «Далее» moves to the review queue', await js(() => document.querySelector('.tour b')?.textContent) === 'Очередь проверки');
+    await js(() => document.querySelector('[data-tour="skip"]').click()); await wait(200);
+    check('4.3: «Пропустить» ends it and it does not come back', await js(() => !document.querySelector('.tour') && !document.querySelector('.tour-on') && !!JSON.parse(localStorage.getItem('glavspec.tourDone') || '{}')['u-gip']));
+  }
   check('samples written to disk', Object.keys(disk.data.tasks).length >= 5 && Object.keys(disk.data.projects).length >= 2, `${Object.keys(disk.data.tasks).length} tasks`);
   check('journal written', disk.journal.length >= 5 && disk.journal[0].action === 'Примеры добавлены', disk.journal.length + ' ' + disk.journal[0]?.action);
   const tid = Object.keys(disk.data.tasks)[0];
@@ -370,6 +380,41 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-undo.png' }).catch(() => {});
     await js(() => document.querySelector('#toast button').click()); await wait(600);
     check('4.3: «Отменить» restores the card', !disk.data.tasks[tid].deletedAt, JSON.stringify(disk.data.tasks[tid].deletedAt));
+    // 52: Ctrl+K with an empty query lists what was opened recently, the card just opened first.
+    await js(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true }))); await wait(200);
+    const pal = await js(() => ({ h: document.querySelector('.pal-h')?.textContent, first: document.querySelector('.pal-item .pal-kind')?.textContent, n: document.querySelectorAll('.pal-item').length }));
+    check('4.3: Ctrl+K shows «Недавние», the last opened card first', pal.h === 'Недавние' && pal.first === 'карточка' && pal.n >= 1, JSON.stringify(pal));
+    await js(() => document.querySelector('#pal-q').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    // 54: an empty list after filtering offers «Сбросить фильтры».
+    await js(() => { const q = document.querySelector('#f-q'); q.value = 'zzzz-нет-такого'; q.dispatchEvent(new Event('input', { bubbles: true })); }); await wait(500);
+    check('4.3: empty filtered list offers «Сбросить фильтры»', await js(() => !!document.querySelector('.empty-row [data-act="preset-reset"]')));
+    await js(() => document.querySelector('.empty-row [data-act="preset-reset"]').click()); await wait(300);
+    check('4.3: «Сбросить фильтры» brings the cards back', await js(() => document.querySelectorAll('#app tr.row[data-act="open-task"]').length > 0));
+    // 50: a new card for a ПД section takes the dates of «Стадия П» and suggests an executor.
+    {
+      const pid = Object.keys(disk.data.projects).find(id => { const x = disk.data.projects[id]; return !x.deletedAt && !x.archived; });
+      if (pid) {
+        await js(id => window.api.write([{ type: 'update', col: 'projects', id, data: { composition: window.Composition.fromBase('nonprod'), phases: [{ key: 'p', start: '2026-12-01', finish: '2027-02-26', done: '' }] } }], { action: 'Сроки' }), pid); await wait(400);
+        await actClick('new-task', { project: pid }); await wait(400);
+        const ok = await js(() => { const d = document.querySelector('#t-doc'); const o = d && [...d.options].find(x => x.value.startsWith('pd:') && !x.disabled); if (!o) return false; d.value = o.value; d.dispatchEvent(new Event('change', { bubbles: true })); return true; }); await wait(300);
+        const sm = await js(() => ({ start: document.querySelector('#t-start').value, finish: document.querySelector('#t-finish').value, hint: document.querySelector('#smart-hint')?.textContent || '', exec: !!document.querySelector('[data-act="smart-exec"]') }));
+        check('4.3: new ПД card takes «Стадия П» dates', ok && sm.start === '2026-12-01' && sm.finish === '2027-02-26' && /Стадия П/.test(sm.hint), JSON.stringify(sm));
+        if (sm.exec) { await js(() => document.querySelector('[data-act="smart-exec"]').click()); await wait(200); }
+        check('4.3: suggested executor is set with one click', !sm.exec || await js(() => !!document.querySelector('#dform input[name="execRef"]').value), JSON.stringify(sm));
+        await js(() => document.querySelector('#dform [data-act="discard"]').click()); await wait(200);
+      } else check('4.3: demo project with composition for smart defaults', false);
+    }
+    // 55: while a focus runs, notifications are held and handed back at its end.
+    {
+      const before = sysCalls.filter(c => c.startsWith('notify:')).length;
+      await js(() => window.api.setQuiet(true));
+      await js(() => window.PultQuiet.send('проба'));
+      const held = sysCalls.filter(c => c.startsWith('notify:')).length === before;
+      const back = await js(() => window.api.setQuiet(false));
+      check('4.3: «Не беспокоить» holds notifications and returns them', held && back.length === 1 && back[0] === 'проба', JSON.stringify(back));
+      await js(() => window.PultQuiet.send('после'));
+      check('4.3: after the focus notifications go out again', sysCalls.includes('notify:после'));
+    }
     // 45: an empty required field in a dialog is explained, highlighted and focused.
     await js(() => { window.__askP = null; });
     await actClick('preset-save'); await wait(300);

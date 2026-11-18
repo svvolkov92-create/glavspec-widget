@@ -4,6 +4,8 @@
 // Loaded after logic.js, access.js and composition.js; started by tauri-api.js on the first call.
 (function () {
   const { invoke } = window.__TAURI__.core;
+  // 55: «Не беспокоить» while a focus runs — Windows notifications are held and handed back to the window when it ends.
+  window.PultQuiet = { on: false, held: [], send(text) { if (this.on) { this.held.push(text); return Promise.resolve(false); } return invoke('notify', { body: text }).catch(() => false); } };
   const SC = window.StoreCore, L = window.Logic;
 
   // Same defaults as `new Settings(…)` in src/main.js.
@@ -96,7 +98,7 @@
     const dirs = await invoke('known_dirs');
     const files = window.createFiles({
       store, journal, settings, A: window.Access, L, Composition: window.Composition, StoreError: SC.StoreError, Buffer: window.Buffer,
-      io: tauriIo(dirs), appVersion: '4.2.0', R: reportCode(),
+      io: tauriIo(dirs), appVersion: '4.3.0', R: reportCode(),
       currentUser: () => core.currentUser(), userView: () => core.userView(), changed: () => onChanged(),
     });
     const cabinetRules = await cabinetOf({ store, settings, files, core, dirs, onCabinet: () => onCabinet?.() });
@@ -151,7 +153,7 @@
       store, settings, A: window.Access, L: window.Logic, cabinet, files, keyStore, local,
       R: { pageModel, normalizeUrl, isLocalHost, KINDS },
       currentUser: () => core.currentUser(), userView: () => core.userView(),
-      notify: text => invoke('notify', { body: text }).catch(() => {}), openExternal: url => invoke('open_url', { url }).catch(e => console.error(e)),
+      notify: text => window.PultQuiet.send(text), openExternal: url => invoke('open_url', { url }).catch(e => console.error(e)),
       changed: () => onCabinet(),
     });
     const view = rules.view;

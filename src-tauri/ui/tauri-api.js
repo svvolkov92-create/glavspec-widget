@@ -203,10 +203,10 @@
   /* ---------- morning digest in Windows notifications (once a day after the chosen hour) ---------- */
   async function morningDigest(force = false) {
     const s = ctx.settings, today = window.Logic.todayStr(), text = digestText();
-    if (force) return invoke('notify', { body: text || 'Всё по плану: просрочек, сдач в ближайшие дни, проверок и платежей нет.' }).catch(() => false);
+    if (force) return window.PultQuiet.send(text || 'Всё по плану: просрочек, сдач в ближайшие дни, проверок и платежей нет.');
     if (!s.get('notify') || s.get('lastDigest') === today || new Date().getHours() < s.get('notifyHour')) return false;
     s.set({ lastDigest: today });
-    return text ? invoke('notify', { body: text }).catch(() => false) : false;
+    return text ? window.PultQuiet.send(text) : false;
   }
   let digestStarted = false;
   function startDigest() {
@@ -322,6 +322,13 @@
       return true;
     } catch { return false; }
   };
+  // 55: right away only what needs this person — and only when the window is not in front (otherwise the window shows it).
+  known.notifyMe = async text => {
+    if (!window.PultQuiet) return false;
+    const inFront = await Promise.resolve().then(() => win.isFocused()).catch(() => false) && await Promise.resolve().then(() => win.isVisible()).catch(() => true);
+    return inFront ? false : window.PultQuiet.send(text);
+  };
+  known.setQuiet = on => { if (!window.PultQuiet) return []; window.PultQuiet.on = !!on; return on ? [] : window.PultQuiet.held.splice(0); };
   known.windowOpen = windows.windowOpen;
   known.onWindowMain = windows.onWindowMain;
 
