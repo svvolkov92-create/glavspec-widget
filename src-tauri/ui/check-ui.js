@@ -491,6 +491,80 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await js(() => document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', bubbles: true }))); await wait(100);
     check('4.4: releasing Alt hides them', await js(() => !document.body.classList.contains('alt-hints') && !document.querySelector('[data-alt-key]')));
   }
+  // 4.5: tabs for the whole program (13), two modes of the messages window and cards in chats (12), own pictures (14).
+  {
+    const st = () => js(() => window.AppBridge.state);
+    // 13
+    await js(() => { const t = document.querySelector('#tabs [data-id="tasks"]'); t.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })); }); await wait(400);
+    check('4.5: Ctrl+click on «Все карточки» opens it as a tab', await js(() => !!document.querySelector('.dtab.ws-tab.on[data-doc-id="tab:tasks"]')));
+    await js(() => { const q = document.querySelector('#f-q'); q.value = 'ЭОМ'; q.dispatchEvent(new Event('input', { bubbles: true })); }); await wait(500);
+    await js(() => document.querySelector('[data-act="ws-plus"]').click()); await wait(400);
+    const t2 = await js(() => ({ on: document.querySelector('.dtab.on')?.dataset.docId, q: document.querySelector('#f-q')?.value }));
+    check('4.5: «＋» opens the same section once more', t2.on === 'tab:tasks~2', JSON.stringify(t2));
+    await js(() => { const q = document.querySelector('#f-q'); q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true })); }); await wait(500);
+    await js(() => document.querySelector('[data-act="ws-open"][data-key="tab:tasks"]').click()); await wait(400);
+    check('4.5: each tab keeps its own filters', await js(() => document.querySelector('#f-q').value) === 'ЭОМ' && /фильтр/.test(await js(() => document.querySelector('[data-doc-id="tab:tasks"]').textContent)));
+    await js(() => document.querySelector('[data-act="ws-open"][data-key="tab:tasks~2"]').click()); await wait(400);
+    check('4.5: the second one has none', await js(() => document.querySelector('#f-q').value) === '');
+    await js(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', ctrlKey: true, bubbles: true }))); await wait(300);
+    check('4.5: Ctrl+Tab goes to the next tab', await js(() => document.querySelector('.dtab.on')?.dataset.docId) !== 'tab:tasks~2');
+    await js(() => document.querySelector('[data-act="ws-open"][data-key="tab:tasks~2"]').click()); await wait(300);
+    await js(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', ctrlKey: true, bubbles: true }))); await wait(300);
+    check('4.5: Ctrl+W closes it', await js(() => !document.querySelector('[data-doc-id="tab:tasks~2"]')));
+    await js(() => document.querySelector('[data-act="dtab-close"][data-id="tab:tasks"]')?.click()); await wait(300);
+    await js(() => { const q = document.querySelector('#f-q'); if (q) { q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true })); } }); await wait(300);
+    // 12
+    const chat = await js(() => { const me = window.AppBridge.state.me.id, other = [...window.AppBridge.state.users.values()].find(u => u.id !== me && !u.deletedAt).id; return window.api.chatCreate({ title: 'Проверка 4.5', members: [other] }); });
+    await wait(300);
+    const cid = chat?.id || await js(() => Object.values(window.AppBridge.state.chats || {}).find?.(c => c.title === 'Проверка 4.5')?.id);
+    const chatId = cid || Object.keys(disk.data.chats || {}).find(k => disk.data.chats[k].title === 'Проверка 4.5');
+    await js(() => document.querySelector('[data-act="msg-open"]').click()); await wait(300);
+    await js(id => { const b = document.createElement('button'); b.dataset.act = 'msg-chat'; b.dataset.id = id; document.body.append(b); b.click(); b.remove(); }, chatId); await wait(400);
+    check('4.5: chat opened in the side window', await js(() => !!document.querySelector('.msg-panel.side #msg-text')));
+    await p.mouse.click(300, 600); await wait(400);
+    check('4.5: not pinned — a click outside folds it to the right', await js(() => !document.querySelector('.msg-panel.side') && !!document.querySelector('.msg-fab')));
+    await js(() => document.querySelector('[data-act="msg-open"]').click()); await wait(300);
+    await js(id => { const b = document.createElement('button'); b.dataset.act = 'msg-chat'; b.dataset.id = id; document.body.append(b); b.click(); b.remove(); }, chatId); await wait(300);
+    await js(() => document.querySelector('[data-act="msg-stick"]').click()); await wait(300);
+    await p.mouse.click(300, 600); await wait(400);
+    check('4.5: pinned — stays after a click outside', await js(() => !!document.querySelector('.msg-panel.side #msg-text') && !!document.querySelector('.msg-stick.on')));
+    // drag a Kanban card into the chat
+    await js(() => document.querySelector('#tabs [data-id="kanban"]').click()); await wait(500);
+    const kid = await js(() => document.querySelector('[data-kb-id]')?.dataset.kbId);
+    await js(() => {
+      const card = document.querySelector('[data-kb-id]'), panel = document.querySelector('.msg-panel'), dt = new DataTransfer();
+      card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+      panel.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      panel.querySelector('#msg-text').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      card.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    }); await wait(200);
+    check('4.5: a Kanban card dropped into the chat goes into the message', await js(() => document.querySelector('#msg-text').value).then(v => v.includes(`[[task:${kid}]]`)));
+    await js(() => document.querySelector('.msg-panel [data-act="mc-send"]').click()); await wait(800);
+    const chip = await js(() => { const b = document.querySelector('.msg-panel .msg-card[data-act="open-task"]'); return b && { id: b.dataset.id, text: b.textContent }; });
+    check('4.5: the reader sees the card and opens it with a click', !!chip && chip.id === kid, JSON.stringify(chip));
+    if (chip) { await js(() => document.querySelector('.msg-panel .msg-card[data-act="open-task"]').click()); await wait(400); }
+    check('4.5: …the card opens', await js(k => window.AppBridge.state.drawer?.kind === 'task' && window.AppBridge.state.drawer.id === k, kid));
+    await js(() => document.querySelector('#dform [data-act="discard"]')?.click()); await wait(200);
+    // «Во вкладку» for the chat
+    await js(() => document.querySelector('[data-act="ws-chat"]')?.click()); await wait(300);
+    check('4.5: a chat can sit in the tab strip', await js(id => !!document.querySelector(`.dtab.ws-chat[data-doc-id="chat:${id}"]`), chatId));
+    await js(id => document.querySelector(`[data-act="dtab-close"][data-id="chat:${id}"]`)?.click(), chatId); await wait(200);
+    await js(() => document.querySelector('[data-act="msg-stick"]').click()); await js(() => document.querySelector('[data-act="msg-close"]')?.click()); await wait(200);
+    // 14
+    const png = await js(() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); g.fillStyle = '#F26A1F'; g.fillRect(0, 0, 64, 64); return c.toDataURL('image/png'); });
+    const pid = await js(() => [...window.AppBridge.state.projects.values()].find(p => !p.archived && !p.deletedAt).id);
+    await js(([id, icon]) => window.api.write([{ type: 'update', col: 'projects', id, data: { icon } }], { action: 'Значок' }), [pid, png]); await wait(400);
+    await js(id => { const b = document.createElement('button'); b.dataset.act = 'project-page'; b.dataset.id = id; document.body.append(b); b.click(); b.remove(); }, pid); await wait(400);
+    check('4.5: the project picture shows on its tab and page', await js(id => !!document.querySelector(`.dtab[data-doc-id="${id}"] img.own-ic`) && !!document.querySelector('#app h2')?.previousElementSibling?.matches('img.own-ic'), pid));
+    const bad = await js(id => window.api.chatUpdate(id, { icon: 'data:text/html;base64,PHNjcmlwdD4=' }), chatId);
+    check('4.5: a chat picture must be an image', bad && bad.ok === false, JSON.stringify(bad));
+    const good = await js(([id, icon]) => window.api.chatUpdate(id, { icon }), [chatId, png]); await wait(300);
+    await js(() => document.querySelector('[data-act="msg-open"]').click()); await wait(300);
+    await js(() => document.querySelector('.msg-panel [data-act="msg-back"]')?.click()); await wait(300);
+    check('4.5: the group chat shows its picture in the list', good?.ok && await js(id => !!document.querySelector(`.mc-item[data-id="${id}"] .mc-ic.pic img`), chatId), JSON.stringify(good) + ' ' + await js(id => document.querySelector(`.mc-item[data-id="${id}"]`)?.outerHTML.slice(0, 300) + ' | icon:' + String(window.AppBridge.state.chats?.get?.(id)?.icon || '').slice(0, 30), chatId));
+    await js(() => document.querySelector('[data-act="msg-close"]')?.click()); await wait(200);
+    await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-45.png' }).catch(() => {});
+  }
   // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
   const w0 = await js(() => window.__win);
   check('window shown at its saved place', w0.visible && w0.calls.includes('show') && w0.x === 200 && w0.width === 1200, JSON.stringify(w0));

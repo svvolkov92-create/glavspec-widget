@@ -111,13 +111,21 @@
     return { ok: true, id };
   }
 
+  const ICON_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, ICON_MAX = 60000;
   function update(chatId, input) {
     const me = currentUser(), chat = store.data.chats[chatId];
     if (!me || !chat || chat.kind !== 'group' || !chat.members.includes(me.id)) return { ok: false, message: 'Чат не найден.' };
     if (chat.createdBy !== me.id && !A.isGip(me)) return { ok: false, message: 'Название и участников меняет автор чата.' };
     const title = String(input?.title ?? chat.title).trim().slice(0, 80) || chat.title;
     const members = input?.members ? liveMemberIds(input.members, me.id) : chat.members;
-    store.apply({ type: 'update', col: 'chats', id: chatId, data: { title, members } });
+    const data = { title, members };
+    // 4.5 (14): the chat's own picture — a small image (data URL), '' removes it.
+    if (input && 'icon' in input) {
+      const icon = String(input.icon || '');
+      if (icon && !(ICON_RE.test(icon) && icon.length <= ICON_MAX)) return { ok: false, message: 'Значок — картинка до 60 КБ.' };
+      data.icon = icon;
+    }
+    store.apply({ type: 'update', col: 'chats', id: chatId, data });
     changed();
     return { ok: true };
   }

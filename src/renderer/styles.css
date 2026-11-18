@@ -1850,3 +1850,24 @@ body.solo-tray main { padding: 0 }
 body.alt-hints [data-alt-key] { position: relative }
 body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: absolute; bottom: 1px; right: 1px; z-index: 90; font: 600 10.5px/1 var(--f-mono); padding: 3px 5px; border-radius: 4px; background: #1A1A1A; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); white-space: nowrap; pointer-events: none }
 .pal-quick #pal-q { border-left: 3px solid #F26A1F }
+/* 4.5 (12): a pinned messages window, cards in chats */
+.msg-stick.on { color: #F26A1F; background: color-mix(in srgb, #F26A1F 12%, transparent) }
+.msg-panel.drop-card { outline: 2px dashed #F26A1F; outline-offset: -6px }
+.msg-card { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: 2px 0; padding: 3px 8px; border: 1px solid var(--line); border-left: 3px solid #F26A1F; border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; vertical-align: middle }
+.msg-card svg { width: 14px; height: 14px; flex: none }
+.msg-card span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.msg-card.off { cursor: default; color: var(--muted); border-left-color: var(--line) }
+/* 4.5 (14): own pictures */
+.own-ic { display: inline-block; width: 18px; height: 18px; object-fit: cover; border-radius: 4px; vertical-align: middle; flex: none }
+.own-ic.big { width: 32px; height: 32px; border-radius: 6px }
+.mc-ic.pic { padding: 0; overflow: hidden; background: none }
+.mc-ic.pic .own-ic { width: 100%; height: 100%; border-radius: inherit }
+.pcard-open { display: flex; align-items: center; gap: 8px }
+.dt-open .own-ic { width: 16px; height: 16px; margin-right: 4px }
+.icon-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.lbl-t { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px }
+/* 4.5 (13): the strip for the whole program */
+.doc-tabs .ws-plus { flex: none; min-width: 32px; padding: 0 10px; justify-content: center; font-size: 16px }
+.dtab.ws-tab .dt-open svg, .dtab.ws-chat .mc-ic { margin-right: 4px }
+.dtab .dt-open .hint { margin-left: 4px; font-weight: 400 }
+.dtab.ws-chat .mc-ic { width: 18px; height: 18px; font-size: 10px }

@@ -1205,7 +1205,7 @@ function projectPanel(p, list) {
   const now = L.projectNow(p, state.today);
   return `<section class="panel pcard ${p.archived ? 'archived' : ''}" id="p-${esc(p.id)}">
     <div class="panel-h">
-      <button class="pcard-open" type="button" data-act="project-page" data-id="${esc(p.id)}"><h3>${esc(p.name)}</h3></button>
+      <button class="pcard-open" type="button" data-act="project-page" data-id="${esc(p.id)}">${projIcon(p)}<h3>${esc(p.name)}</h3></button>
       ${p.archived ? '<span class="chip tone-idle">в архиве</span>' : projectStageChip(p)}
       ${p.code ? `<span class="pcode mono">${esc(p.code)}</span>` : ''}
       ${p.client ? `<span class="meta">${esc(p.client)}</span>` : ''}
@@ -1331,7 +1331,7 @@ const canDetach = () => !SOLO && typeof api.windowOpen === 'function';
 // Projects opened in the main window stay as tabs above the page, like in a browser: × closes, the middle mouse
 // button too, dragging a tab out of the window (or ⧉) moves the project into its own window.
 const DOC_TABS_MAX = 12;
-let docTabs = (v => (Array.isArray(v) ? v.filter(x => typeof x === 'string').slice(-DOC_TABS_MAX) : []))(loadLocal('docTabs', []));
+let docTabs = (v => (Array.isArray(v) ? v.filter(x => typeof x === 'string' && x).slice(-DOC_TABS_MAX) : []))(loadLocal('docTabs', []));
 const saveDocTabs = () => saveLocal('docTabs', docTabs);
 function docTabAdd(id) {
   if (docTabs.includes(id)) return;
@@ -1344,18 +1344,88 @@ function docTabClose(id) {
   if (i < 0) return;
   docTabs.splice(i, 1);
   saveDocTabs();
-  if (state.openProjectId === id) state.openProjectId = docTabs[Math.min(i, docTabs.length - 1)] || null;
-  render();
+  delete wsFilters[id]; if (wsActive === id) wsActive = ''; saveWs();
+  if (state.openProjectId === id) { const next = docTabs.slice(0, i + 1).reverse().find(k => wsKind(k) === 'project') || docTabs.find(k => wsKind(k) === 'project'); state.openProjectId = next || null; }
+  render(); renderMsg();
+}
+/* ---------- 13: tabs like a browser's, for the whole program ---------- */
+// The strip holds projects (plain id, as before), sections «tab:<section>» (several of one section: «tab:tasks~2»,
+// each with its own filters) and chats «chat:<id>». Middle click or Ctrl+click on a section opens it as a tab;
+// «＋» opens the current view once more; Ctrl+Tab / Ctrl+Shift+Tab go round, Ctrl+W closes.
+const wsKind = k => (k.startsWith('tab:') ? 'tab' : k.startsWith('chat:') ? 'chat' : 'project');
+const wsSection = k => k.slice(4).split('~')[0];
+let wsActive = loadLocal('wsActive', '');
+let wsFilters = loadLocal('wsFilters', {});
+const saveWs = () => { saveLocal('wsActive', wsActive); saveLocal('wsFilters', wsFilters); };
+// Which strip tab the screen shows now.
+function wsCurrent() {
+  if (state.tab === 'projects' && state.openProjectId && docTabs.includes(state.openProjectId)) return state.openProjectId;
+  if (wsActive && wsKind(wsActive) === 'tab' && docTabs.includes(wsActive) && wsSection(wsActive) === state.tab && !(state.tab === 'projects' && state.openProjectId)) return wsActive;
+  return '';
+}
+function wsRemember() {
+  const cur = wsCurrent();
+  if (cur && wsKind(cur) === 'tab') wsFilters[cur] = { ...state.filters };
+}
+function wsOpen(key) {
+  if (!docTabs.includes(key)) return;
+  wsRemember();
+  const k = wsKind(key);
+  if (k === 'chat') { msgOpen(key.slice(5)); return; }
+  scrollPos[state.tab] = $('#app').scrollTop;
+  if (k === 'project') { openProjectPage(key); wsActive = key; saveWs(); return; }
+  const sec = wsSection(key);
+  if (!visibleTabs().some(t => t.id === sec)) return toast('Этот раздел вам сейчас недоступен.', true);
+  state.tab = sec; saveLocal('tab', sec);
+  if (sec === 'projects') state.openProjectId = null;
+  if (wsFilters[key]) state.filters = { ...EMPTY_FILTERS, ...wsFilters[key] };
+  wsActive = key; saveWs();
+  renderNow(); restoreScroll();
+}
+function wsAddSection(sec, focus = true) {
+  if (!visibleTabs().some(t => t.id === sec)) return;
+  wsRemember();
+  let key = `tab:${sec}`, n = 1;
+  while (docTabs.includes(key)) key = `tab:${sec}~${++n}`;
+  docTabs.push(key);
+  if (docTabs.length > DOC_TABS_MAX) docTabs.splice(docTabs.findIndex(x => x !== key && x !== wsCurrent()), 1);
+  wsFilters[key] = sec === state.tab ? { ...state.filters } : { ...EMPTY_FILTERS };
+  saveDocTabs(); saveWs();
+  if (focus) wsOpen(key); else render();
+}
+function wsAddChat(chatId) {
+  const key = `chat:${chatId}`;
+  if (!docTabs.includes(key)) { docTabs.push(key); if (docTabs.length > DOC_TABS_MAX) docTabs.shift(); saveDocTabs(); }
+  render(); renderMsg();
+  toast('Чат — во вкладке сверху');
+}
+function wsCycle(dir) {
+  if (!docTabs.length) return;
+  const cur = wsCurrent() || (msg.mode !== 'pill' && msg.chatId ? `chat:${msg.chatId}` : '');
+  const i = docTabs.indexOf(cur);
+  wsOpen(docTabs[(i + dir + docTabs.length) % docTabs.length]);
+}
+function wsLabel(key) {
+  const k = wsKind(key);
+  if (k === 'project') { const p = state.projects.get(key); return p && !p.deletedAt ? { ico: projIcon(p), code: p.code, name: p.name, title: p.name } : null; }
+  if (k === 'chat') { const id = key.slice(5), c = chatById(id); return c ? { ico: chatIcon(c), name: chatTitle(c), title: `Чат: ${chatTitle(c)}` } : null; }
+  const sec = wsSection(key), t = TABS.find(x => x.id === sec);
+  if (!t || !visibleTabs().some(x => x.id === sec)) return null;
+  const f = wsFilters[key], nf = f ? Object.entries(f).filter(([fk, v]) => v && v !== EMPTY_FILTERS[fk]).length : 0;
+  return { ico: icon(sec), name: t.label, extra: nf ? `<span class="hint">· фильтр ${nf}</span>` : '', title: `${t.label}${nf ? ' — со своими фильтрами' : ''}` };
 }
 function docTabsHtml() {
-  if (SOLO) return '';
-  const tabs = docTabs.map(id => state.projects.get(id)).filter(p => p && !p.deletedAt);
+  if (SOLO || state.win.compact) return '';
+  const tabs = docTabs.map(k => [k, wsLabel(k)]).filter(([, l]) => l);
   if (!tabs.length) return '';
-  const dt = canDetach();
-  return `<div class="doc-tabs" role="tablist" aria-label="Открытые проекты"><button class="dtab home${state.openProjectId ? '' : ' on'}" type="button" role="tab" aria-selected="${!state.openProjectId}" data-act="project-back">${icon('projects')}<span>Все проекты</span></button>${tabs.map(p => {
-    const on = state.openProjectId === p.id;
-    return `<div class="dtab${on ? ' on' : ''}" role="tab" aria-selected="${on}" draggable="true" data-doc="project" data-doc-id="${esc(p.id)}" title="${esc(p.name)}${dt ? ' — перетащите за пределы окна, чтобы открыть отдельно' : ''}"><button class="dt-open" type="button" data-act="project-page" data-id="${esc(p.id)}">${p.code ? `<span class="mono">${esc(p.code)}</span>` : ''}<span class="dt-name">${esc(p.name)}</span></button>${dt ? `<button class="dt-btn" type="button" data-act="win-detach" data-kind="project" data-id="${esc(p.id)}" title="Открыть в отдельном окне" aria-label="Открыть в отдельном окне">${icon('detach')}</button>` : ''}<button class="dt-btn" type="button" data-act="dtab-close" data-id="${esc(p.id)}" title="Закрыть вкладку (средняя кнопка мыши)" aria-label="Закрыть вкладку">×</button></div>`;
-  }).join('')}</div>`;
+  const dt = canDetach(), cur = wsCurrent(), chatOn = msg.mode !== 'pill' && msg.chatId ? `chat:${msg.chatId}` : '';
+  const home = state.tab === 'projects' ? `<button class="dtab home${state.openProjectId ? '' : ' on'}" type="button" role="tab" aria-selected="${!state.openProjectId}" data-act="project-back">${icon('projects')}<span>Все проекты</span></button>` : '';
+  return `<div class="doc-tabs" role="tablist" aria-label="Открытые вкладки">${home}${tabs.map(([k, l]) => {
+    const kind = wsKind(k), on = k === cur || k === chatOn, id = kind === 'chat' ? k.slice(5) : k;
+    const open = kind === 'project' ? `data-act="project-page" data-id="${esc(k)}"` : `data-act="ws-open" data-key="${esc(k)}"`;
+    const det = dt && kind !== 'tab' ? `<button class="dt-btn" type="button" data-act="win-detach" data-kind="${kind}" data-id="${esc(id)}" title="Открыть в отдельном окне" aria-label="Открыть в отдельном окне">${icon('detach')}</button>` : '';
+    return `<div class="dtab${on ? ' on' : ''} ws-${kind}" role="tab" aria-selected="${on}" draggable="true" data-doc="${kind}" data-doc-id="${esc(k)}" title="${esc(l.title)}${dt && kind !== 'tab' ? ' — перетащите за пределы окна, чтобы открыть отдельно' : ''}"><button class="dt-open" type="button" ${open}>${l.ico || ''}${l.code ? `<span class="mono">${esc(l.code)}</span>` : ''}<span class="dt-name">${esc(l.name)}</span>${l.extra || ''}</button>${det}<button class="dt-btn" type="button" data-act="dtab-close" data-id="${esc(k)}" title="Закрыть вкладку (средняя кнопка мыши, Ctrl+W)" aria-label="Закрыть вкладку">×</button></div>`;
+  }).join('')}<button class="dtab ws-plus" type="button" data-act="ws-plus" title="Открыть этот раздел ещё одной вкладкой — со своими фильтрами (или щёлкните по разделу средней кнопкой мыши)" aria-label="Новая вкладка">＋</button></div>`;
 }
 const threadTitle = key => msgThreads().find(t => t.key === key)?.title || 'Чат';
 // Moves a project or a chat into its own window; `at` — the screen point where a dragged tab was dropped.
@@ -1385,13 +1455,13 @@ document.addEventListener('dragstart', e => {
   e.dataTransfer.setData('text/plain', el.title || el.textContent.trim());
 });
 document.addEventListener('dragover', e => {
-  if (docDrag?.kind !== 'project') return;
+  if (!docDrag || !docTabs.includes(docDrag.id)) return;
   const t = e.target.closest?.('.dtab[data-doc]');
   if (t && t.dataset.docId !== docDrag.id) e.preventDefault();
 });
 document.addEventListener('drop', e => {
   const d = docDrag, t = e.target.closest?.('.dtab[data-doc]');
-  if (d?.kind !== 'project' || !t || t.dataset.docId === d.id) return;
+  if (!d || !docTabs.includes(d.id) || !t || t.dataset.docId === d.id) return;
   e.preventDefault();
   docTabs = docTabs.filter(x => x !== d.id);
   docTabs.splice(docTabs.indexOf(t.dataset.docId), 0, d.id);
@@ -1403,14 +1473,18 @@ document.addEventListener('dragend', e => {
   docDrag = null;
   if (!d) return;
   const outside = e.clientX < 0 || e.clientY < 0 || e.clientX > window.innerWidth || e.clientY > window.innerHeight;
-  if (outside && e.dataTransfer?.dropEffect === 'none') detachDoc(d.kind, d.id, { x: e.screenX, y: e.screenY });
+  const stripId = docTabs.includes(d.id) ? (d.kind === 'chat' ? d.id.slice(5) : d.id) : d.id;
+  if (outside && e.dataTransfer?.dropEffect === 'none' && d.kind !== 'tab') { if (d.kind === 'chat' && docTabs.includes(d.id)) { docTabs = docTabs.filter(x => x !== d.id); saveDocTabs(); } detachDoc(d.kind, stripId, { x: e.screenX, y: e.screenY }); }
 });
 document.addEventListener('auxclick', e => {
-  const t = e.button === 1 && e.target.closest?.('.dtab[data-doc]');
-  if (!t) return;
-  e.preventDefault();
-  docTabClose(t.dataset.docId);
+  if (e.button !== 1) return;
+  const t = e.target.closest?.('.dtab[data-doc]');
+  if (t) { e.preventDefault(); docTabClose(t.dataset.docId); return; }
+  // 13: middle click on a section opens it as a tab.
+  const s = e.target.closest?.('#tabs .tab[data-id]');
+  if (s) { e.preventDefault(); wsAddSection(s.dataset.id); }
 });
+document.addEventListener('mousedown', e => { if (e.button === 1 && e.target.closest?.('#tabs .tab[data-id], .dtab[data-doc]')) e.preventDefault(); }); // no autoscroll
 /* ---------- assigning people by drag and drop (3.6) ---------- */
 // People of the project (participants the current user may assign, plus contractors) on the left; sections of the
 // composition on the right, grouped like the project page. Drop a person on a section — or on a group heading to
@@ -1522,7 +1596,7 @@ function forecastTile(tasks, tile) {
 /* ---------- messenger (3.8): a dock at the bottom right, a side panel and a window with every chat ----------
    Project chats (GIP and participants, made with the first message), personal chats and group chats without a
    project. «@Фамилия» marks a colleague: their mention counter lights up separately. Written only by main. */
-const msg = { mode: 'pill', chatId: '', filter: 'all', drafts: {}, newKind: '', newPick: new Set(), newTitle: '', ac: null, info: false };
+const msg = { mode: 'pill', chatId: '', filter: 'all', drafts: {}, newKind: '', newPick: new Set(), newTitle: '', ac: null, info: false, stick: !!loadLocal('msgStick', false) };
 const projectChatId = pid => ('p_' + pid).slice(0, 64);
 const surnameOf = name => String(name || '').replace(/^Пример:\s*/, '').split(/\s+/)[0] || '';
 // Chats this user sees: every project chat they may write in (even without messages yet) and their own chats.
@@ -1601,12 +1675,76 @@ function msgTogglePin(key) {
 const timeOf = ts => (ts.slice(0, 10) === state.today ? ts.slice(11, 16) : fmtDate(ts.slice(0, 10)).slice(0, 5));
 // Local time of an ISO stamp (messages are stored in UTC).
 const localTs = ts => { const d = new Date(ts); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
-const chatIcon = c => (c.kind === 'project' ? '<span class="mc-ic proj">#</span>' : c.kind === 'direct' ? `<span class="mc-ic ava">${esc(initials(chatTitle(c)))}</span>` : '<span class="mc-ic grp">⁂</span>');
+/* ---------- 14: own pictures for projects and chats ---------- */
+// Any picture becomes a 64×64 square (cropped to the middle) PNG kept with the project or the chat, so everyone
+// sees the same one. A project chat shows its project's picture.
+const ICON_OK = v => typeof v === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(v) && v.length <= 60000;
+const imgIcon = (src, cls = '') => `<img class="own-ic ${cls}" src="${esc(src)}" alt="">`;
+function pickIcon() {
+  return new Promise(resolve => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml';
+    inp.onchange = () => {
+      const f = inp.files?.[0];
+      if (!f) return resolve(null);
+      if (f.size > 15 * 1024 * 1024) { toast('Картинка больше 15 МБ — выберите поменьше.', true); return resolve(null); }
+      const url = URL.createObjectURL(f), img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas'); c.width = c.height = 64;
+        const s = Math.min(img.naturalWidth, img.naturalHeight) || 1;
+        c.getContext('2d').drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, 64, 64);
+        URL.revokeObjectURL(url);
+        let out = c.toDataURL('image/png');
+        if (out.length > 60000) out = c.toDataURL('image/jpeg', 0.85);
+        resolve(ICON_OK(out) ? out : null);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); toast('Это не картинка, которую можно прочитать.', true); resolve(null); };
+      img.src = url;
+    };
+    inp.click();
+  });
+}
+const projIcon = p => (ICON_OK(p?.icon) ? imgIcon(p.icon, 'proj-ic') : '');
+async function setChatIcon(id, pick) {
+  const icon = pick ? await pickIcon() : '';
+  if (icon === null) return;
+  const r = await api.chatUpdate(id, { icon });
+  if (!r?.ok) return toast(r?.message || 'Не удалось сохранить значок.', true);
+  toast(icon ? 'Значок чата обновлён' : 'Значок чата убран');
+  await refresh();
+}
+// In the project card: the picture goes into the form, saved with «Сохранить» like the other fields.
+async function setProjectIconField(pick) {
+  const icon = pick ? await pickIcon() : '';
+  if (icon === null) return;
+  const inp = $('#dform [name="icon"]');
+  if (!inp) return;
+  inp.value = icon; inp.dispatchEvent(new Event('input', { bubbles: true }));
+  const box = $('#pr-icon-box'); if (box) box.innerHTML = icon ? imgIcon(icon, 'proj-ic big') : '<span class="hint">нет</span>';
+  $('[data-act="proj-icon-clear"]')?.toggleAttribute('hidden', !icon);
+}
+const chatIcon = c => {
+  const own = c.kind === 'project' ? state.projects.get(c.projectId)?.icon : c.icon;
+  if (ICON_OK(own)) return `<span class="mc-ic pic">${imgIcon(own)}</span>`;
+  return c.kind === 'project' ? '<span class="mc-ic proj">#</span>' : c.kind === 'direct' ? `<span class="mc-ic ava">${esc(initials(chatTitle(c)))}</span>` : '<span class="mc-ic grp">⁂</span>';
+};
 // Text with @mentions highlighted (mine stronger).
-function msgText(t, c) {
+function msgText(t, c, preview = false) {
   const people = chatPeople(c), meSur = surnameOf(state.me?.name).toLowerCase();
-  return esc(t).replace(/@([\p{L}-]+)/gu, (all, w) => { const lw = w.toLowerCase(); const hit = lw === 'все' || people.some(u => surnameOf(u.name).toLowerCase() === lw);
-    return hit ? `<b class="mention${lw === meSur || lw === 'все' ? ' me' : ''}">${all}</b>` : all; });
+  return cardLinks(esc(t).replace(/@([\p{L}-]+)/gu, (all, w) => { const lw = w.toLowerCase(); const hit = lw === 'все' || people.some(u => surnameOf(u.name).toLowerCase() === lw);
+    return hit ? `<b class="mention${lw === meSur || lw === 'все' ? ' me' : ''}">${all}</b>` : all; }), preview);
+}
+// 12: a card dropped into a chat travels as «[[task:<id>]]»; the reader sees the card and opens it with a click.
+// Someone who may not see that card gets «карточка недоступна».
+const CARD_TOKEN = /\[\[task:([\w-]{1,64})\]\]/g;
+function cardLinks(html, preview = false) {
+  return html.replace(CARD_TOKEN, (all, id) => {
+    const t = state.tasks.get(id);
+    if (!t) return '<span class="msg-card off">карточка недоступна</span>';
+    const label = `${marksText(t)} · ${projectOf(t)?.name || ''}`;
+    return preview ? `<span class="msg-card">${esc(label)}</span>`
+      : `<button class="msg-card" type="button" data-act="open-task" data-id="${esc(id)}" title="Открыть карточку">${icon('tasks')}<span>${esc(label)}</span><span class="hint">${esc(STATUSES[t.status]?.label || '')}</span></button>`;
+  });
 }
 function msgListHtml() {
   const all = msgThreads(), pins = msgPins();
@@ -1616,7 +1754,7 @@ function msgListHtml() {
   const tabs = `<div class="mc-tabs" role="tablist">${sections.map(([k, l]) => { const n = count(k); return `<button class="mc-tab${msg.filter === k ? ' on' : ''}" type="button" role="tab" aria-selected="${msg.filter === k}" data-act="msg-filter" data-v="${k}">${l}${n ? `<i>${n}</i>` : ''}</button>`; }).join('')}</div>`;
   if (msg.filter === 'at') {
     const hits = chatsAll().flatMap(c => (c.messages || []).filter(m => (m.mentions || []).includes(state.me?.id)).map(m => ({ c, m }))).sort((a, b) => b.m.ts.localeCompare(a.m.ts)).slice(0, 60);
-    return tabs + `<div class="mc-list">${hits.map(({ c, m }) => `<button class="mc-item${m.ts > (c.seen?.[state.me.id] || '') ? ' unread' : ''}" type="button" data-act="msg-chat" data-id="${esc(c.id)}">${chatIcon(c)}<span class="mc-body"><span class="mc-top"><b>${esc(chatTitle(c))}</b><span class="hint">${timeOf(localTs(m.ts))}</span></span><span class="mc-prev">${esc(surnameOf(m.user))}: ${msgText(m.text.slice(0, 120), c)}</span></span></button>`).join('') || '<p class="hint mc-empty">Вас пока не упоминали.</p>'}</div>`;
+    return tabs + `<div class="mc-list">${hits.map(({ c, m }) => `<button class="mc-item${m.ts > (c.seen?.[state.me.id] || '') ? ' unread' : ''}" type="button" data-act="msg-chat" data-id="${esc(c.id)}">${chatIcon(c)}<span class="mc-body"><span class="mc-top"><b>${esc(chatTitle(c))}</b><span class="hint">${timeOf(localTs(m.ts))}</span></span><span class="mc-prev">${esc(surnameOf(m.user))}: ${msgText(m.text.slice(0, 120), c, true)}</span></span></button>`).join('') || '<p class="hint mc-empty">Вас пока не упоминали.</p>'}</div>`;
   }
   const list = all.filter(t => msg.filter === 'all' || t.sec === msg.filter)
     .sort((a, b) => (b.urgent && b.unread ? 1 : 0) - (a.urgent && a.unread ? 1 : 0) || b.last.localeCompare(a.last) || a.title.localeCompare(b.title, 'ru'));
@@ -1646,9 +1784,10 @@ function msgChatHtml(c) {
   const canEdit = c.kind === 'group' && (c.createdBy === me || A.isGip(state.me));
   const info = msg.info ? `<div class="mc-info">${people.map(u => `<span class="chip tone-idle">${esc(u.name)}${u.id === c.createdBy ? ' · автор' : ''}</span>`).join(' ')}
       ${canEdit ? `<div class="row-in"><select id="mc-add"><option value="">— добавить участника —</option>${liveUsers().filter(u => !people.includes(u)).sort(byName).map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select><button class="btn sm" type="button" data-act="msg-add-member">Добавить</button></div>` : ''}
+      ${canEdit ? `<div class="row-in"><span class="hint">Значок чата:</span><button class="btn sm" type="button" data-act="chat-icon" data-id="${esc(c.id)}">Выбрать картинку…</button>${ICON_OK(c.icon) ? `<button class="btn ghostbtn sm" type="button" data-act="chat-icon-clear" data-id="${esc(c.id)}">Убрать</button>` : ''}</div>` : ''}
       ${c.kind === 'group' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-leave">Выйти из чата</button>' : ''}${c.kind === 'project' ? `<button class="btn ghostbtn sm" type="button" data-act="project-page" data-id="${esc(c.projectId)}">Открыть проект</button><span class="hint">Участники проекта меняются на его странице.</span>` : ''}</div>` : '';
   return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку чатов">←</button>' : ''}${chatIcon(c)}<span class="mc-ht"><b>${esc(chatTitle(c))}</b><span class="hint">${sub}</span></span>
-      ${msgPinBtn(c.id)}${winBtn('chat', c.id)}<button class="btn ghostbtn sm" type="button" data-act="msg-info" aria-pressed="${msg.info}">Участники</button></div>${info}
+      ${msgPinBtn(c.id)}${winBtn('chat', c.id)}${SOLO || docTabs.includes('chat:' + c.id) ? '' : `<button class="btn ghostbtn sm" type="button" data-act="ws-chat" data-id="${esc(c.id)}" title="Положить чат во вкладки сверху — рядом с проектами и разделами">Во вкладку</button>`}<button class="btn ghostbtn sm" type="button" data-act="msg-info" aria-pressed="${msg.info}">Участники</button></div>${info}
     <div class="mc-msgs" id="mc-msgs">${rows || `<p class="hint mc-empty">Напишите первое сообщение. «@» и фамилия — упомянуть коллегу${c.kind !== 'direct' ? ', «@все» — всех' : ''}.</p>`}</div>
     <div class="mc-compose"><div class="mc-ac" id="mc-ac" hidden></div><textarea id="msg-text" rows="2" maxlength="2000" placeholder="Сообщение… Enter — отправить, Shift+Enter — новая строка, @ — упомянуть">${esc(msg.drafts[c.id] || '')}</textarea><button class="btn primary sm" type="button" data-act="mc-send">Отправить</button></div></div>`;
 }
@@ -1662,7 +1801,7 @@ function msgTaskHtml(t) {
     const out = c.userId === me, editing = out && msg.edit?.mid === c.id;
     return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${c.kind === 'submit' ? ' submit' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(c.user || '—')}</b> <span class="hint">${lt.slice(11, 16)}${c.editedAt ? ' · изменено' : ''}</span>${c.kind === 'submit' ? ' <span class="chip tone-review">сдал на проверку</span>' : ''}${out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
       ? `<div class="msg-edit"><textarea id="mc-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(msg.edit.text)}</textarea><div class="row-in"><button class="btn primary sm" type="button" data-act="mc-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="mc-edit-cancel">Отмена</button></div></div>`
-      : `<div class="chat-text">${esc(c.text)}</div>`}${thankBtn(t, c)}</div>`;
+      : `<div class="chat-text">${cardLinks(esc(c.text))}</div>`}${thankBtn(t, c)}</div>`;
   }).join('');
   return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку">←</button>' : ''}<span class="mc-ic task">✎</span><span class="mc-ht"><b>${esc(marksText(t) || t.title || 'Карточка')}</b><span class="hint">обсуждение карточки · ${esc(projectOf(t)?.name || '')}</span></span>
       ${msgPinBtn('t:' + t.id)}${winBtn('chat', 't:' + t.id)}<button class="btn ghostbtn sm" type="button" data-act="open-task" data-id="${esc(t.id)}">Открыть карточку</button></div>
@@ -1703,6 +1842,7 @@ function renderMsg() {
   const pill = `<button class="msg-fab${t.n ? ' has' : ''}" type="button" data-act="msg-open" title="Сообщения: чаты проектов, личные и групповые">${icon('chat')}<span>Сообщения</span>${t.n ? `<i class="mc-n">${t.n}</i>` : ''}${t.at ? `<i class="mc-at" title="Вас упомянули">@${t.at}</i>` : ''}</button>`;
   if (msg.mode === 'pill') { root.innerHTML = pill; return; }
   const head = `<div class="mp-head"><b>Сообщения</b><span class="spacer"></span><button class="btn sm" type="button" data-act="msg-new">+ Новый чат</button>
+    <button class="btn ghostbtn sm msg-stick${msg.stick ? ' on' : ''}" type="button" data-act="msg-stick" aria-pressed="${!!msg.stick}" title="${msg.stick ? 'Окно закреплено: остаётся, пока не закроете. В чат можно перетащить карточку. Нажмите, чтобы открепить' : 'Закрепить окно: не будет сворачиваться при щелчке мимо, в чат можно перетащить карточку'}">${icon('pin')}</button>
     <button class="btn ghostbtn sm" type="button" data-act="msg-size" title="${msg.mode === 'full' ? 'Свернуть в боковую панель' : 'Открыть окно со всеми чатами'}">${msg.mode === 'full' ? '⇲' : '⤢'}</button><button class="btn ghostbtn sm" type="button" data-act="msg-close" aria-label="Свернуть">✕</button></div>`;
   const right = msg.chatId === 'new' ? msgNewHtml() : c ? msgChatHtml(c) : th?.type === 'task' ? msgTaskHtml(th.t) : th?.type === 'cust' ? msgCustHtml(th.pid, th.list) : msg.mode === 'solo' ? '<div class="mc-chat"><p class="hint mc-empty">Разговор недоступен: его удалили или вы больше в нём не участвуете. Это окно можно закрыть.</p></div>' : '<div class="mc-chat"><p class="hint mc-empty">Выберите разговор слева или создайте новый чат.</p></div>';
   const body = msg.mode === 'full' ? `<div class="mp-full"><div class="mp-left">${msgListHtml()}</div><div class="mp-right">${right}</div></div>` : (msg.chatId ? right : msgListHtml());
@@ -1717,6 +1857,50 @@ function renderMsg() {
   if (c) msgSeenLater(c);
   if (th?.type === 'task' && unread(th.t)) api.taskSeen(th.t.id);
   if (th?.type === 'cust') { const ids = th.list.filter(m => !m.read).map(m => m.id); if (ids.length) api.cabinetRead?.(ids); }
+}
+/* ---------- 12: two modes of the messages window ---------- */
+// Not pinned: a click anywhere outside folds it to the right (back to the «Сообщения» button).
+// Pinned: it stays until closed, and a card dragged from the Kanban, a table or «Люди» into the chat is attached.
+document.addEventListener('mousedown', e => {
+  if (msg.stick || msg.mode !== 'side' || SOLO) return;
+  if (e.target.closest?.('#msg-root, .modal-back, .palette-back, .menu, #toast, .tour, .drawer, #drawer-root')) return;
+  msgClose();
+}, true);
+let msgDragTask = '';
+document.addEventListener('dragstart', e => {
+  const el = e.target.closest?.('[data-kb-id], .ctask[data-move][data-id], tr.row[data-act="open-task"][data-id]');
+  msgDragTask = el ? (el.dataset.kbId || el.dataset.id || '') : '';
+  if (msgDragTask && el.matches('tr.row')) { e.dataTransfer.setData('text/plain', msgDragTask); e.dataTransfer.effectAllowed = 'copyMove'; }
+});
+document.addEventListener('dragend', () => { msgDragTask = ''; document.querySelector('.msg-panel.drop-card')?.classList.remove('drop-card'); });
+// Table rows become draggable while the messages window is open (otherwise text in them stays selectable).
+document.addEventListener('mousedown', e => {
+  const row = e.target.closest?.('tr.row[data-act="open-task"][data-id]');
+  if (row) row.draggable = msg.mode !== 'pill' && !!msg.chatId && msg.chatId !== 'new';
+}, true);
+const msgCanTakeCard = () => msgDragTask && msg.mode !== 'pill' && msg.chatId && msg.chatId !== 'new' && !!document.getElementById('msg-text');
+document.addEventListener('dragover', e => {
+  if (!msgCanTakeCard() || !e.target.closest?.('.msg-panel')) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+  e.target.closest('.msg-panel').classList.add('drop-card');
+});
+document.addEventListener('dragleave', e => { if (e.target.classList?.contains('msg-panel')) e.target.classList.remove('drop-card'); });
+document.addEventListener('drop', e => {
+  if (!msgCanTakeCard() || !e.target.closest?.('.msg-panel')) return;
+  e.preventDefault(); e.stopPropagation();
+  e.target.closest('.msg-panel').classList.remove('drop-card');
+  msgAttachCard(msgDragTask);
+  msgDragTask = '';
+}, true);
+function msgAttachCard(id) {
+  const ta = document.getElementById('msg-text');
+  if (!ta || !state.tasks.has(id)) return;
+  const tok = `[[task:${id}]]`, at = ta.selectionStart ?? ta.value.length;
+  const before = ta.value.slice(0, at), after = ta.value.slice(at);
+  ta.value = `${before}${before && !/\s$/.test(before) ? ' ' : ''}${tok} ${after}`.slice(0, 2000);
+  msg.drafts[msg.chatId] = ta.value;
+  ta.focus();
+  toast(`Карточка «${marksText(state.tasks.get(id))}» в сообщении — нажмите «Отправить»`);
 }
 function msgSeenLater(c) {
   if (msg.mark?.id !== c.id) msg.mark = { id: c.id, since: c.seen?.[state.me?.id] || '' };
@@ -1932,7 +2116,7 @@ function viewProjectPage(p) {
       ${inTasks.length ? `<span class="hint">Работают в задачах, но не в участниках: ${inTasks.map(id => esc(state.users.get(id).name)).join(', ')}</span><button class="btn ghostbtn sm" type="button" data-act="member-add-tasks">Добавить их</button>` : ''}</div>` : ''}</section>`;
 
   const head = `<div class="pt-top">${SOLO ? '' : '<button class="btn ghostbtn sm" type="button" data-act="project-back">← Все проекты</button>'}
-    <h2>${esc(p.name)}</h2>${p.archived ? '<span class="chip tone-idle">в архиве</span>' : projectStageChip(p)}${code ? `<span class="pcode mono">${esc(code)}</span>` : ''}${p.client ? `<span class="meta">${esc(p.client)}</span>` : ''}${projectGip(p) ? `<span class="meta">ГИП: ${esc(projectGip(p).name)}</span>` : ''}
+    ${projIcon(p).replace('proj-ic', 'proj-ic big')}<h2>${esc(p.name)}</h2>${p.archived ? '<span class="chip tone-idle">в архиве</span>' : projectStageChip(p)}${code ? `<span class="pcode mono">${esc(code)}</span>` : ''}${p.client ? `<span class="meta">${esc(p.client)}</span>` : ''}${projectGip(p) ? `<span class="meta">ГИП: ${esc(projectGip(p).name)}</span>` : ''}
     <span class="spacer"></span>${winBtn('project', p.id)}
     ${p.folder ? `<button class="btn ghostbtn sm" data-act="open-folder" data-id="${esc(p.id)}" type="button" title="${esc(p.folder)}">Папка проекта</button>` : ''}
     <button class="btn ghostbtn sm" type="button" data-act="techcard" title="Этапы, волны, задания смежникам">Техкарта</button>
@@ -2133,7 +2317,7 @@ function viewProjects() {
   if (isEmpty()) return emptyState();
   if (state.openProjectId) {
     const op = state.projects.get(state.openProjectId);
-    if (op && !op.deletedAt) return docTabsHtml() + viewProjectPage(op);
+    if (op && !op.deletedAt) return viewProjectPage(op);
     if (SOLO) return '<section class="empty"><h2>Проект недоступен</h2><p class="hint">Его удалили или у вас больше нет к нему доступа. Это окно можно закрыть.</p></section>';
     state.openProjectId = null;
   }
@@ -2147,10 +2331,10 @@ function viewProjects() {
   const stageBar = `<div class="filters one-row stage-bar"><span class="hint">Стадия:</span><span class="seg"><button class="btn sm ${stage ? '' : 'on'}" type="button" data-act="pstage" data-v="">Все ${projects.length}</button>${Object.entries(L.PROJECT_STATUSES).filter(([k]) => stageCount(k)).map(([k, s]) => `<button class="btn sm ${stage === k ? 'on' : ''}" type="button" data-act="pstage" data-v="${k}">${esc(s.label)} ${stageCount(k)}</button>`).join('')}${stageCount('') && stageCount('') < projects.length ? `<button class="btn sm ${stage === '-' ? 'on' : ''}" type="button" data-act="pstage" data-v="-">Без стадии ${stageCount('')}</button>` : ''}</span></div>`;
   const shownProjects = stage ? projects.filter(p => (p.status || '') === (stage === '-' ? '' : stage)) : projects;
   const modeSeg = `<span class="seg proj-mode"><button class="btn sm ${projMode === 'list' ? 'on' : ''}" type="button" data-act="proj-mode" data-v="list">Список</button><button class="btn sm ${projMode === 'portfolio' ? 'on' : ''}" type="button" data-act="proj-mode" data-v="portfolio" title="Все проекты на одной шкале: этапы и загрузка мастерской">График портфеля</button></span>`;
-  if (projMode === 'portfolio') return docTabsHtml() + `<div class="proj-top">${modeSeg}${projects.some(p => p.status) ? stageBar : ''}</div>` + viewPortfolio(shownProjects);
+  if (projMode === 'portfolio') return `<div class="proj-top">${modeSeg}${projects.some(p => p.status) ? stageBar : ''}</div>` + viewPortfolio(shownProjects);
   const live = shownProjects.length ? shownProjects.map(p => projectPanel(p, all)).join('')
     : `<section class="empty"><h2>Активных проектов нет</h2><p class="hint">Заведите проект, затем добавьте в него карточки работ.</p><div class="acts"><button class="btn primary" data-act="new-project" type="button">Добавить проект</button></div></section>`;
-  return docTabsHtml() + `<div class="proj-top">${modeSeg}${projects.length && projects.some(p => p.status) ? stageBar : ''}</div>` + live
+  return `<div class="proj-top">${modeSeg}${projects.length && projects.some(p => p.status) ? stageBar : ''}</div>` + live
     + (orphans.length ? `<section class="panel"><div class="panel-h"><h3>Без проекта</h3></div>${taskTable(orphans, { showProject: false })}</section>` : '')
     + archToggle
     + (state.showArchive ? archived.map(p => projectPanel(p, all)).join('') : '');
@@ -3440,6 +3624,7 @@ function openUsage() {
 const HOTKEYS = [
   ['Общие', [['Ctrl+K или Ctrl+F', 'поиск по карточкам, проектам, людям'], ['Ctrl+N', 'новая карточка'], ['Ctrl+Z', 'отменить последнее действие'], ['Ctrl+J', 'журнал действий'],
     ['Alt+1…9', 'вкладки по порядку (зажмите Alt — подсказки на экране)'], ['F11 или двойной щелчок по заголовку', 'окно на весь экран / обратно'], ['Ctrl+Alt+G', 'сквозные клики вкл/выкл (работает и из других программ)'],
+    ['Ctrl+щелчок или средняя кнопка по разделу', 'открыть раздел вкладкой — со своими фильтрами'], ['Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+W', 'следующая / предыдущая вкладка, закрыть вкладку'],
     ['Ctrl+Alt+N', 'быстрая карточка из любой программы: «+ ЭОМ #шифр !15.12 @Орлов», Enter — и Пульт снова в трее'],
     ['Ctrl + = / − / 0', 'масштаб интерфейса'], ['F1 или ?', 'эта подсказка']]],
   ['Таблицы и списки', [['Двойной щелчок по ячейке', 'правка прямо в таблице: статус, подрядчик, даты, бюджет'], ['Щелчок по заголовку столбца', 'сортировка'],
@@ -3644,7 +3829,7 @@ function renderNow() {
   if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
   if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
   const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
-  app.innerHTML = view() + footer();
+  app.innerHTML = docTabsHtml() + view() + footer();
   renderMsg(); msgNotify(); renderFocus();
   if (active === 'f-q') { const el = $('#f-q'); el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* not a text input any more */ } }
   if (state.tab === 'gantt') drawGanttLinks();
@@ -5957,6 +6142,9 @@ function openProject(id, tab = 'main') {
       <div class="f"><label for="pr-code">Шифр</label><input id="pr-code" name="code" value="${esc(p.code || '')}" placeholder="0425-24" maxlength="40"></div>
       <div class="f"><label for="pr-client">Заказчик</label><input id="pr-client" name="client" value="${esc(p.client || '')}" placeholder="ООО «…»" maxlength="160"></div>
       <div class="f"><label for="pr-gip">ГИП</label><select id="pr-gip" name="gipId">${gipOptions(id ? p.gipId : (A.isGip(state.me) ? state.me.id : ''))}</select></div>
+      <div class="f"><span class="lbl-t">Значок проекта</span><div class="icon-pick"><span id="pr-icon-box">${projIcon(p) ? imgIcon(p.icon, 'proj-ic big') : '<span class="hint">нет</span>'}</span>
+        <input type="hidden" name="icon" value="${esc(ICON_OK(p.icon) ? p.icon : '')}"><button class="btn sm" type="button" data-act="proj-icon">Выбрать картинку…</button><button class="btn ghostbtn sm" type="button" data-act="proj-icon-clear"${ICON_OK(p.icon) ? '' : ' hidden'}>Убрать</button></div>
+        <span class="hint">Видна на вкладке проекта, в списке и в чате проекта.</span></div>
       <div class="f"><label for="pr-status">Стадия проекта</label><select id="pr-status" name="status"><option value="">— не задана —</option>${Object.entries(L.PROJECT_STATUSES).map(([k, s]) => `<option value="${k}"${p.status === k ? ' selected' : ''}>${esc(s.label)}</option>`).join('')}</select></div>
       ${id ? '' : '<label class="chk f wide gen-chk"><input type="checkbox" id="pr-gen" data-transient checked> Сразу открыть генератор состава: проектная документация по ПП РФ № 87 и рабочая документация</label>'}
       <details class="f wide more"${more ? ' open' : ''}><summary>Дополнительно: папка проекта, примечание</summary><div class="fgrid">
@@ -6026,7 +6214,7 @@ async function submitSimple(keepOpen = false) {
   const created = { createdAt: new Date().toISOString() };
   let ok = false;
   if (kind === 'project') {
-    const data = { name: val('name'), code: val('code'), client: val('client'), gipId: state.users.has(val('gipId')) ? val('gipId') : '', status: L.PROJECT_STATUSES[val('status')] ? val('status') : '', folder: val('folder'), note: val('note') };
+    const data = { name: val('name'), code: val('code'), client: val('client'), gipId: state.users.has(val('gipId')) ? val('gipId') : '', status: L.PROJECT_STATUSES[val('status')] ? val('status') : '', folder: val('folder'), note: val('note'), icon: ICON_OK(val('icon')) ? val('icon') : '' };
     if (!data.name) return formError('Укажите название объекта.', 'main', 'name');
     if (id) {
       if (projectDraftData().error) { const e = projectDraftData(); return formError(e.error, e.tab); }
@@ -6906,7 +7094,7 @@ document.addEventListener('click', e => {
     case 'pstage': state.projectStage = el.dataset.v; renderNow(); break;
     case 'export': exportReport(el.dataset.format); break;
     case 'import': startImport(); break;
-    case 'tab': if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); break;
+    case 'tab': if (e.ctrlKey) { wsAddSection(id); break; } wsRemember(); wsActive = ''; saveWs(); if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); break;
     case 'sort': toggleSort(el.dataset.key); break;
     case 'g-scale': zoomGantt(Number(el.dataset.days) / state.gantt.days, dayNum(state.today) >= dayNum(state.gantt.from) && dayNum(state.today) <= dayNum(state.gantt.from) + state.gantt.days ? (dayNum(state.today) - dayNum(state.gantt.from)) / state.gantt.days : 0.5); break;
     case 'g-zoom': zoomGantt(el.dataset.dir === 'in' ? 0.7 : 1 / 0.7); break;
@@ -7016,6 +7204,9 @@ document.addEventListener('click', e => {
     case 'open-project': openProject(id); break;
     case 'project-page': openProjectPage(id); break;
     case 'dtab-close': docTabClose(id); break;
+    case 'ws-open': wsOpen(el.dataset.key); break;
+    case 'ws-plus': if (state.tab === 'projects' && state.openProjectId) toast('Проект уже во вкладке — откройте другой раздел и нажмите «＋», или щёлкните по разделу средней кнопкой мыши.'); else wsAddSection(state.tab); break;
+    case 'ws-chat': wsAddChat(id); break;
     case 'win-detach': detachDoc(el.dataset.kind, id); break;
     case 'win-dock': api.windowDock?.(SOLO); break;
     case 'project-back': state.openProjectId = null; render(); break;
@@ -7023,6 +7214,7 @@ document.addEventListener('click', e => {
     case 'msg-open': msgOpen(); break;
     case 'msg-close': msgClose(); break;
     case 'msg-size': msg.mode = msg.mode === 'full' ? 'side' : 'full'; renderMsg(); break;
+    case 'msg-stick': msg.stick = !msg.stick; saveLocal('msgStick', msg.stick); renderMsg(); toast(msg.stick ? 'Окно сообщений закреплено — перетащите карточку в чат, чтобы отправить её' : 'Окно сообщений свернётся при щелчке мимо'); break;
     case 'msg-chat': msgOpen(id); break;
     case 'msg-back': msg.chatId = ''; renderMsg(); break;
     case 'msg-filter': msg.filter = el.dataset.v; renderMsg(); break;
@@ -7033,6 +7225,8 @@ document.addEventListener('click', e => {
     case 'mc-edit-save': mcEditSave(); break;
     case 'mc-edit-cancel': mcEditCancel(); break;
     case 'msg-info': msg.info = !msg.info; renderMsg(); break;
+    case 'chat-icon': case 'chat-icon-clear': setChatIcon(id, act === 'chat-icon'); break;
+    case 'proj-icon': case 'proj-icon-clear': setProjectIconField(act === 'proj-icon'); break;
     case 'msg-project': msgOpen(projectChatId(id)); break;
     case 'msg-new': msg.chatId = 'new'; msg.newKind = 'direct'; if (msg.mode === 'pill') { msg.mode = 'side'; msg.enter = true; } renderMsg(); break;
     case 'msg-newkind': msg.newKind = el.dataset.v; renderMsg(); break;
@@ -7189,6 +7383,9 @@ document.addEventListener('keydown', e => {
   const ctrl = e.ctrlKey || e.metaKey;
   const code = e.code;
   if (ctrl && !e.altKey && (code === 'KeyK' || code === 'KeyF')) { e.preventDefault(); track('key:search'); openPalette(); return; }
+  // 13: the tab strip from the keyboard.
+  if (ctrl && !e.altKey && code === 'Tab' && docTabs.length && !state.win.compact && !SOLO) { e.preventDefault(); wsCycle(e.shiftKey ? -1 : 1); return; }
+  if (ctrl && !e.altKey && !e.shiftKey && code === 'KeyW' && !state.drawer && !SOLO) { const cur = wsCurrent() || (msg.mode !== 'pill' && msg.chatId && docTabs.includes('chat:' + msg.chatId) ? 'chat:' + msg.chatId : ''); if (cur) { e.preventDefault(); docTabClose(cur); } return; }
   if (e.altKey && !ctrl && (code === 'ArrowUp' || code === 'ArrowDown') && state.drawer?.kind === 'task' && !typing) { e.preventDefault(); stepTask(code === 'ArrowUp' ? -1 : 1); return; }
   if ((code === 'F1' || (e.key === '?' && !typing)) && !ctrl && !e.altKey) { e.preventDefault(); track('key:help'); openHelp(); return; }
   if (code === 'F11' && !ctrl && !e.altKey) { e.preventDefault(); api.setMaximized(!state.win.maximized); return; }
