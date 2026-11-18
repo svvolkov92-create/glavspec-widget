@@ -258,6 +258,7 @@
     openTaskFolder: async id => (await ready()).files.openTaskFolder(id),
     pickFolder: async current => (await ready()).files.pickFolder(current),
     openContact: async req => (await ready()).files.contactOpen(req),
+    mailOpen: async req => (await ready()).files.mailOpen(req),
     backupSave: async () => (await ready()).files.backupSave(),
     backupRestore: async () => { const c = await ready(); return saved(await c.files.backupRestore()); },
     autoBackupGet: async () => (await ready()).files.autoBackupGet(),

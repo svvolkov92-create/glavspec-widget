@@ -1771,3 +1771,51 @@ body.solo-tray main { padding: 0 }
 .tf-drop { border: 1.5px dashed var(--line); border-radius: 8px; padding: 10px 12px; color: var(--muted); font-size: 12.5px; text-align: center }
 .file-over .tf-drop, #tf-box.file-over .tf-drop { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text, var(--accent)) }
 .file-over:is([data-kb-id], .tl-bar) { outline: 2px dashed var(--accent); outline-offset: 2px }
+/* Source data in folders (4.1.1, item 60) */
+.ird { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; padding: 10px 12px 12px }
+@media (max-width: 760px) { .ird { grid-template-columns: 1fr } }
+.ird-folders { display: grid; align-content: start; border: 1px solid var(--line); border-radius: 8px; padding: 4px }
+.ird-f { appearance: none; border: 0; background: none; font: inherit; color: inherit; text-align: left; display: flex; gap: 6px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; min-width: 0 }
+.ird-f span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ird-f.on { background: var(--accent-soft); color: var(--accent-text, var(--accent)); font-weight: 600 }
+.ird-f:hover { background: color-mix(in srgb, var(--accent) 8%, transparent) }
+.ird-add { color: var(--accent-text, var(--accent)) }
+.ird-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); flex: none }
+.ird-files { border: 1px solid var(--line); border-radius: 8px; min-width: 0 }
+.ird-h { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line) }
+.ird-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap }
+.ird-row:last-of-type { border-bottom: 0 }
+.ird-ext { width: 34px; height: 38px; flex: none; display: grid; place-items: end center; padding-bottom: 4px; box-sizing: border-box; font: 800 9.5px/1 var(--f-ui); color: #fff; background: #6b6f78; border-radius: 3px }
+.ird-ext.e-pdf { background: #C8382E } .ird-ext.e-doc, .ird-ext.e-docx { background: #2B5CAB } .ird-ext.e-xls, .ird-ext.e-xlsx { background: #1E7A45 } .ird-ext.e-dwg { background: #2457A6 } .ird-ext.e-jpg, .ird-ext.e-png { background: #7A4FB0 }
+.ird-n { display: grid; min-width: 160px; flex: 1 }
+.ird-d { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted) }
+.ird-d input { width: 130px }
+.ird-empty, .ird-tip { padding: 10px 12px; margin: 0 }
+.ird.file-over .ird-files, .ird:has(.file-over) .ird-files { outline: 2px dashed var(--accent) }
+/* Letters (item 61) */
+.let { padding: 10px 12px 12px; display: grid; gap: 8px }
+.let-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+.let-t { width: 100%; border-collapse: collapse; font-size: 13px }
+.let-t th { text-align: left; font-size: 11.5px; color: var(--muted); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--line) }
+.let-t td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle }
+.let-acts { white-space: nowrap; text-align: right }
+.let-empty { margin: 4px 0 }
+.modal.let-modal { width: min(760px, 96vw) }
+.let-files .lbl { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px }
+#let-flist { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px }
+/* Analytics in «Сводка» (4.1.1, item 21) */
+.an-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; padding: 10px 12px 0 }
+.an-kpi { display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--surface) }
+:root[data-theme="tandem"] .an-kpi { border-radius: 0 }
+.an-kpi b { font-size: 24px; line-height: 1.15 }
+.an-kpi .kv-ok { color: var(--ok, #2E8B57) } .an-kpi .kv-warn { color: #9a5a00 } .an-kpi .kv-bad { color: var(--bad) }
+.an-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 10px 12px 12px }
+@media (max-width: 860px) { .an-cols { grid-template-columns: 1fr } }
+.an-cols h4 { margin: 4px 0 6px; font-size: 12.5px }
+.an-row { display: grid; grid-template-columns: minmax(120px, 1.2fr) 2fr 44px; gap: 8px; align-items: center; padding: 3px 0; font-size: 12.5px }
+.an-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.an-b { height: 10px; background: var(--sunk); border-radius: 5px; overflow: hidden }
+.an-b i { display: block; height: 100%; background: var(--accent); border-radius: 5px }
+.an-b i.an-ok { background: var(--ok, #2E8B57) } .an-b i.an-warn { background: #E0A100 } .an-b i.an-bad { background: var(--bad) }
+.an-v { text-align: right; color: var(--muted) }
+.ird-n .linkbtn { text-align: left; justify-self: start }

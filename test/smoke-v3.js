@@ -82,7 +82,7 @@ app.on('browser-window-created', (_e, win) => {
           a.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt })); })()`);
         await wait(200);
         const order = await js(`[...document.querySelectorAll('#tabs .tab')].map(t => t.dataset.id).join()`);
-        check('tab moved', order.startsWith('overview,tasks,projects'), order);
+        check('tab moved', order.replace(/^day,/, '').startsWith('overview,tasks,projects'), order); // «Мой день» (4.2) stays first
         check('order remembered', /tasks/.test(await js(`localStorage.getItem('glavspec.tabOrder')`)));
         await js(`localStorage.removeItem('glavspec.tabOrder')`);
       });

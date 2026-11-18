@@ -103,7 +103,7 @@ app.on('browser-window-created', (_e, win) => {
         await click('[data-act="tab"][data-id="projects"]'); await wait(200);
         await click(`[data-act="project-page"][data-id="${pid}"]`); await wait(400);
         check('folded summary line under sections', (await js(`document.querySelectorAll('.pt-asg-sum').length`)) >= 10);
-        check('«Прочие задачи» without assignments', (await js(`document.querySelectorAll('.pt-block:last-of-type tr.row').length`)) === 0);
+        check('«Прочие задачи» without assignments', (await js(`[...document.querySelectorAll('.pt-block:not(.pt-aux)')].at(-1).querySelectorAll('tr.row').length`)) === 0);
         const ar = tasksOf(pid).find(t => t.assignKey === 'pd:АР>КР');
         await click(`[data-act="fold"][data-key="pao:${ar.parentId}"]`); await wait(300);
         check('opened: outgoing under the source', await js(`!!document.querySelector('tr.pt-asg[data-id="${ar.id}"]') && /исх\\./.test(document.querySelector('tr.pt-asg[data-id="${ar.id}"]').textContent)`));
@@ -124,7 +124,7 @@ app.on('browser-window-created', (_e, win) => {
       });
 
       await step('task without a mark', async () => {
-        await click('.pt-block:last-of-type [data-act="new-task"]'); await wait(300);
+        await js(`[...document.querySelectorAll('.pt-block:not(.pt-aux)')].at(-1).querySelector('[data-act="new-task"]').click()`); await wait(300);
         check('single «Марка» field', await js(`!!document.querySelector('#t-marks-extra[list="marks-dl"]') && !document.querySelector('.mk-groups')`));
         await js(`document.querySelector('#dform').requestSubmit()`); await wait(400);
         check('no mark and no title → asks for one', /марку|уточнение/.test(await text('#form-err')), await text('#form-err'));

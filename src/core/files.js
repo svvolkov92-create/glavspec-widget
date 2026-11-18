@@ -220,6 +220,16 @@
     catch (e) { return { ok: false, message: `Не удалось открыть приложение: ${msgOf(e)}` }; }
   }
 
+  // 4.1.1 (item 61): a registered letter opened in the user's mail program (Outlook, Thunderbird…), ready to send.
+  async function mailOpen({ to, subject, text } = {}) {
+    const enc = v => encodeURIComponent(String(v || '')).replace(/%20/g, '%20');
+    const addr = String(to || '').trim().replace(/[\s,;]+/g, ',');
+    if (addr && !/^[^@\s]+@[^@\s]+(,[^@\s]+@[^@\s]+)*$/.test(addr)) return { ok: false, message: 'Адрес почты получателя выглядит неверно.' };
+    const url = `mailto:${addr}?subject=${enc(String(subject || '').slice(0, 300))}&body=${enc(String(text || '').slice(0, 6000))}`;
+    try { await io.openExternal(url); return { ok: true }; }
+    catch (e) { return { ok: false, message: `Не удалось открыть почтовую программу: ${msgOf(e)}` }; }
+  }
+
   /* ---------- backups ---------- */
   const noTools = () => !A.canUseDataTools(currentUser());
   async function backupSave() {
@@ -377,6 +387,6 @@
     }
   }
 
-  return { exportReport, customerPage, composition, docDefaults, openTemplates, openLast, openProjectFolder, openTaskFolder, pickFolder, contactOpen,
+  return { exportReport, customerPage, composition, docDefaults, openTemplates, openLast, openProjectFolder, openTaskFolder, pickFolder, contactOpen, mailOpen,
     backupSave, backupRestore, autoBackup, autoBackupGet, autoBackupSet, importPick, safeName, customerTeam, customerContact, attachAdd, attachBytes, attachOpen, attachmentBytes };
 });

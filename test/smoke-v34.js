@@ -40,7 +40,7 @@ app.on('browser-window-created', (_e, win) => {
         check('summary tiles', (await js(`document.querySelectorAll('.pt-kpi').length`)) >= 4);
         check('generator invitation', /Состав проекта ещё не сформирован/.test(await text('.pt-page')));
         const before = Object.values(data().tasks).filter(t => t.projectId === 'demo-p1').length;
-        check('existing cards under «Прочие задачи»', (await js(`document.querySelectorAll('.pt-block:last-of-type tr.row').length`)) === before, String(before));
+        check('existing cards under «Прочие задачи»', (await js(`[...document.querySelectorAll('.pt-block:not(.pt-aux)')].at(-1).querySelectorAll('tr.row').length`)) === before, String(before));
       });
 
       let tasksBefore = [];
@@ -67,7 +67,7 @@ app.on('browser-window-created', (_e, win) => {
       await step('page with groups', async () => {
         await js(`document.querySelector('[data-act="request-close"]')?.click()`); await wait(300);
         check('still on the project page', await js(`!!document.querySelector('.pt-page')`));
-        const blocks = await js(`[...document.querySelectorAll('.pt-block h3')].map(h => h.textContent).join('|')`);
+        const blocks = await js(`[...document.querySelectorAll('.pt-block:not(.pt-aux) h3')].map(h => h.textContent).join('|')`);
         check('blocks ПД, РД, прочие', blocks === 'Проектная документация|Рабочая документация|Прочие задачи', blocks);
         const pdTree = await js(`[...[...document.querySelectorAll('.pt-block')][0].querySelectorAll('tr')].map(r => r.textContent.replace(/\\s+/g, ' ')).join('\\n')`);
         check('nesting: Раздел 5 → Подраздел 1 → Книга 1/2', /Раздел 5[\s\S]*Подраздел 1[\s\S]*Книга 1[\s\S]*Книга 2[\s\S]*Подраздел 2/.test(pdTree));
@@ -79,7 +79,7 @@ app.on('browser-window-created', (_e, win) => {
         check('task opens from the tree', await js(`document.querySelector('#dform')?.dataset.kind === 'task' || !!document.querySelector('#dform [name="title"]')`));
         await js(`document.querySelector('[data-act="request-close"]')?.click()`); await wait(200);
         await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(150);
-        await click('.pt-block:last-of-type [data-act="new-task"]'); await wait(300);
+        await js(`[...document.querySelectorAll('.pt-block:not(.pt-aux)')].at(-1).querySelector('[data-act="new-task"]').click()`); await wait(300);
         check('«+ задача» in «Прочие задачи» opens a new task in this project', await js(`document.querySelector('#dform [name="projectId"]')?.value === 'demo-p1'`));
         await js(`document.querySelector('[data-act="request-close"]')?.click()`); await wait(200);
         await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(150);

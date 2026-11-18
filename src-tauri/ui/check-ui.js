@@ -324,6 +324,25 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     const tf = disk.data.tasks[kid]?.files || [];
     check('4.1.1: a dropped file is kept with the card and in the data folder', tf.length === 1 && tf[0].name === 'ТУ на водоснабжение.pdf' && tf[0].size === 6 && Object.keys(fsMem).some(k => k.endsWith('\\' + tf[0].id)), JSON.stringify(tf));
   }
+  // 4.1.1 (60): source data — a file dropped on a folder of the project page, ГПЗУ validity from the date of issue.
+  {
+    const pid = Object.keys(disk.data.projects).find(id => !disk.data.projects[id].archived && !disk.data.projects[id].deletedAt);
+    await js(id => { const b = document.createElement('button'); b.dataset.act = 'goto-project'; b.dataset.id = id; document.body.append(b); b.click(); b.remove(); }, pid); await wait(500);
+    await js(() => [...document.querySelectorAll('[data-act="ird-folder"]')].find(b => b.dataset.v === 'gpzu')?.click()); await wait(300);
+    await js(() => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([37, 80, 68, 70])], 'ГПЗУ RU27303000-0042.pdf', { type: 'application/pdf' }));
+      document.querySelector('.ird').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    }); await wait(800);
+    const f = (disk.data.projects[pid].irdFiles || [])[0];
+    check('4.1.1: a file dropped on «ГПЗУ» is kept in that folder', f && f.folder === 'gpzu' && f.name.startsWith('ГПЗУ'), JSON.stringify(f));
+    if (f) {
+      await js(fid => { const i = document.querySelector('[data-ird="issued"][data-fid="' + fid + '"]'); i.value = '2026-02-10'; i.dispatchEvent(new Event('change', { bubbles: true })); }, f.id); await wait(600);
+      const g = disk.data.projects[pid].irdFiles[0];
+      check('4.1.1: ГПЗУ valid 3 years from the date of issue', g.issued === '2026-02-10' && g.until === '2029-02-09', JSON.stringify(g));
+    }
+    await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-ird.png', fullPage: false }).catch(() => {});
+  }
   // System: the window starts hidden and is shown at its saved place; the tray menu; compact; levels; hide.
   const w0 = await js(() => window.__win);
   check('window shown at its saved place', w0.visible && w0.calls.includes('show') && w0.x === 200 && w0.width === 1200, JSON.stringify(w0));

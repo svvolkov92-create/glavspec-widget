@@ -166,6 +166,30 @@ app.on('browser-window-created', (_e, win) => {
         await click('[data-act="proj-mode"][data-v="list"]'); await wait(200);
       });
 
+
+      await step('61, 21: letters with through numbering, analytics', async () => {
+        await page('demo-p1'); await wait(300);
+        await click('[data-act="let-new"][data-v="out"]'); await wait(200);
+        const no = await js(`document.querySelector('#let-t').textContent`);
+        await js(`(() => { const s = document.querySelector('#let-tpl'); s.value = 'cover'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`); await wait(100);
+        const subj = await js(`document.querySelector('#let-subj').value`);
+        check('61: number given by itself, template fills subject', /№ 1/.test(no) && /О направлении документации по объекту/.test(subj), `${no} | ${subj}`);
+        await js(`document.querySelector('#let-email').value = 'orlov@example.ru'`);
+        await js(`document.querySelector('.let-modal').requestSubmit()`); await wait(500);
+        await click('[data-act="let-new"][data-v="out"]'); await wait(200);
+        const no2 = await js(`document.querySelector('#let-t').textContent`);
+        await setVal('#let-subj', 'График выдачи РД'); await js(`document.querySelector('.let-modal').requestSubmit()`); await wait(500);
+        await click('[data-act="let-new"][data-v="in"]'); await wait(200);
+        await setVal('#let-corr', 'Минстрой края'); await setVal('#let-subj', 'Замечания к ПД по ОВ'); await js(`document.querySelector('.let-modal').requestSubmit()`); await wait(500);
+        const L = data().projects['demo-p1'].letters || [];
+        check('61: Исх. 1, Исх. 2, Вх. 1 registered', /№ 2/.test(no2) && L.filter(l => l.dir === 'out').map(l => l.seq).sort().join() === '1,2' && L.some(l => l.dir === 'in' && l.seq === 1 && l.status === 'answer'), JSON.stringify(L.map(l => [l.dir, l.seq, l.status])));
+        check('61: «ждут ответа 1» in the block head', /ждут ответа 1/.test(await text('.pt-page')));
+        await shot('41-21-letters');
+        await click('[data-act="tab"][data-id="overview"]'); await wait(400);
+        check('21: analytics panel in «Сводка»', await js(`!!document.querySelector('.an .an-kpis') && document.querySelectorAll('.an-kpi').length === 4`));
+        await shot('41-22-analytics');
+      });
+
       await step('7, 8: Gantt — assignments hidden by default, no-executor icon', async () => {
         await click('[data-act="tab"][data-id="gantt"]'); await wait(400);
         check('assignment hidden', !(await js(`!!document.querySelector('[data-bar="v41-as"]')`)));
