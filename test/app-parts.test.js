@@ -5,9 +5,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { build } = require('../tools/build-app.js');
+const { isBuilt } = require('../tools/build-app.js');
 
 test('app.js is built from src/renderer/app/*.js', () => {
   const now = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'app.js'), 'utf8');
-  assert.ok(now === build(), 'src/renderer/app.js differs from its parts — edit the parts and run: node tools/build-app.js');
+  assert.ok(isBuilt(now), 'src/renderer/app.js differs from its parts — edit the parts and run: node tools/build-app.js');
 });

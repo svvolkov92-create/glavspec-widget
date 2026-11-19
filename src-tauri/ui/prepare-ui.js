@@ -10,7 +10,7 @@ const from = path.join(root, 'src', 'renderer');
 const to = path.join(root, 'build', 'tauri-ui');
 
 // app.js is built from its parts (src/renderer/app/*.js); a stale app.js would ship old code.
-if (fs.readFileSync(path.join(from, 'app.js'), 'utf8') !== require(path.join(root, 'tools', 'build-app.js')).build()) {
+if (!require(path.join(root, 'tools', 'build-app.js')).isBuilt(fs.readFileSync(path.join(from, 'app.js'), 'utf8'))) {
   throw new Error('src/renderer/app.js is not built from src/renderer/app/*.js — run: node tools/build-app.js');
 }
 fs.rmSync(to, { recursive: true, force: true });
