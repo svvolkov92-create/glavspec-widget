@@ -14,6 +14,8 @@ for d in core renderer report; do cp -r "src/$d" "$P/lib/$d"; done
 cp src/cabinet.js "$P/lib/"
 [ -f src/contact.js ] && cp src/contact.js "$P/lib/"
 rm -f "$P/lib/renderer/pp87.js"
+rm -rf "$P/lib/renderer/app" # the parts of app.js: already in app.js
+node tools/build-app.js --check
 sed "s/@VERSION@/$VERSION/" server/install.sh.in > "$OUT/install-pult-server.sh"
 tar -C "$STAGE" -czf - pult-server | base64 -w 76 >> "$OUT/install-pult-server.sh"
 chmod +x "$OUT/install-pult-server.sh"

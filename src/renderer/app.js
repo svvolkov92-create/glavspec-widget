@@ -1,5 +1,6 @@
 (() => {
 'use strict';
+// Built by tools/build-app.js from src/renderer/app/*.js — edit the parts, then run: node tools/build-app.js
 
 const L = window.Logic;
 const { STATUSES, ACTIVE, MARK_GROUPS, SHIFT_REASONS, PAY_TRIGGERS, normalizeMarks, splitMarks, sectionsOf, todayStr, isDate, dayNum, addDays,
@@ -53,18 +54,6 @@ const TABS = [
 ];
 // The user's own tab order (dragged on the panel or set in «Настройки»); new tabs join at their default place.
 let tabOrder = loadLocal('tabOrder', []);
-function orderedTabs() {
-  const known = TABS.map(x => x.id), order = tabOrder.filter(id => known.includes(id));
-  TABS.forEach((x, i) => { if (!order.includes(x.id)) order.splice(Math.min(i, order.length), 0, x.id); });
-  return order.map(id => TABS.find(x => x.id === id));
-}
-function setTabOrder(order) { tabOrder = order; saveLocal('tabOrder', order); renderNow(); if (document.querySelector('.settings-modal')) renderSettings(); }
-function moveTab(id, dir) {
-  const order = orderedTabs().map(x => x.id), i = order.indexOf(id), j = i + dir;
-  if (i < 0 || j < 0 || j >= order.length) return;
-  [order[i], order[j]] = [order[j], order[i]];
-  setTabOrder(order);
-}
 // Dragging a tab onto another one puts it in that place.
 let tabDrag = null;
 document.addEventListener('dragstart', e => {
@@ -329,6 +318,245 @@ async function undoLast() {
 }
 async function refresh() { try { const r = await api.getData(); state.remote = r.remote || null; setData(r.data); renderRemote(); } catch { /* the change event will follow */ } }
 
+
+/* ---------- buttons and links: data-act="name" → the handler its part registers with onAct ----------
+   Each part (src/renderer/app/NN-*.js) ends with onAct({ name: ({ e, el, id, act }) => … }): what its own
+   buttons do. 38-events.js finds the handler on a click. A name registered twice is a mistake, caught at start. */
+const ACTIONS = new Map();
+function onAct(handlers) {
+  for (const [name, fn] of Object.entries(handlers)) {
+    if (ACTIONS.has(name)) throw new Error(`data-act «${name}» registered twice`);
+    ACTIONS.set(name, fn);
+  }
+}
+// One row in an attention list; `side` overrides the default deadline text on the right.
+function attItem(t, side) {
+  const p = projectOf(t), c = executorOf(t), tm = timing(t);
+  const right = side ? side(t) : `<div class="due ${tm.cls}">${esc(tm.text)}</div><div class="num hint">${fmtDate(t.finish)}</div>`;
+  return `<div class="att-item" data-act="open-task" data-id="${esc(t.id)}" role="button" tabindex="0">
+    ${marksHtml(t)}
+    <span class="main">${unread(t) ? '<span class="new-dot" title="Новое для вас"></span>' : ''}${esc(p?.name || '—')}${t.title ? ' · ' + esc(t.title) : ''}</span>
+    <span class="side">${right}</span>
+    <span class="who">${ownerOf(t) ? `<span class="who-o" title="Ответственный в команде">${esc(ownerOf(t).name)}${coOwnersOf(t).length ? ' +' + coOwnersOf(t).length : ''}</span> · ` : ''}${c ? esc(c.name) + (c.phone ? ' · ' + esc(c.phone) : '') : 'исполнитель не назначен'}</span>
+  </div>`;
+}
+// One «Требует внимания» button instead of a row of counters; the list opens under it.
+function counters() {
+  if (!state.loaded || isEmpty()) return '';
+  const a = attention();
+  const items = [
+    ['new', tasksArr().filter(unread).length, 'work', 'Новое для вас', 'поручено, комментарии и сдачи, которые вы ещё не открыли'],
+    ['review', a.review.length, 'review', 'Ждут вашей проверки', 'сданы на проверку'],
+    ['overdue', a.overdue.length, 'bad', 'Срок сорван', 'финиш прошёл, работа не сдана'],
+    ['att:week', a.week.length, 'warn', 'Сдача в течение 7 дней', ''],
+    ['att:milestones', a.milestones.length, 'bad', 'Сорваны контрольные точки', ''],
+    ...(canMoney() ? [['att:pay', a.pay.length, 'work', 'Пора платить', 'подрядчикам по графику']] : []),
+  ].filter(x => x[1]);
+  const total = items.reduce((s, x) => s + x[1], 0);
+  const worst = items.some(x => x[2] === 'bad') ? 'bad' : items.length ? 'warn' : 'ok';
+  return `<button type="button" class="att-btn tone-${worst}" data-act="att-menu" aria-haspopup="menu" aria-expanded="${attOpen}" title="Что ждёт вашего решения">
+      ${total ? `Требует внимания <b class="num">${total}</b>` : 'Всё по плану'}<svg class="caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <div class="menu att-menu" role="menu"${attOpen ? '' : ' hidden'}>${items.length ? items.map(([f, n, tone, label, sub]) => `<button role="menuitem" type="button" class="ccount" data-act="counter" data-f="${f}"><span class="att-n tone-${tone} num">${n}</span><span><b>${label}</b>${sub ? `<small>${sub}</small>` : ''}</span></button>`).join('')
+      : '<div class="none">Просрочек, проверок и платежей нет.</div>'}</div>`;
+}
+function setAttMenu(open) { attOpen = open; const w = $('#att-wrap'); if (w) w.innerHTML = counters(); }
+function setCreateMenu(open) {
+  $('#create-menu').hidden = !open;
+  $('#btn-create').setAttribute('aria-expanded', String(open));
+}
+// The footer keeps only the search; journal, trash, data folder and help live in «Отчёты и данные».
+function footer() {
+  const hasDemo = !isSpec() && [...state.projects.values(), ...state.contractors.values(), ...state.tasks.values(), ...liveUsers()].some(x => x.demo);
+  return `<div class="foot">
+    ${tip('foot', 'Срок сорван — финиш прошёл, а работа не сдана на проверку и не принята. «Осталось» — в рабочих днях по производственному календарю.')}
+    <span class="spacer"></span>
+    <button class="btn ghostbtn sm" data-act="open-search" type="button" title="Ctrl+K — поиск · Ctrl+N — новая карточка · Ctrl+Z — отменить · Alt+1…7 — вкладки · двойной щелчок по ячейке — правка">Поиск Ctrl+K</button>
+    ${hasDemo ? '<button class="btn ghostbtn sm" data-act="clear-demo" type="button">Удалить примеры</button>' : ''}
+  </div>`;
+}
+function render() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; renderNow(); });
+}
+function renderNow() {
+  state.today = todayStr();
+  $('#att-wrap').innerHTML = counters();
+  const overdueCount = state.loaded ? attention().overdue.length : 0;
+  const title = !SOLO ? A.titleFor(state.me) : SOLO.kind === 'project' ? (state.projects.get(SOLO.id)?.name || 'Проект') : threadTitle(SOLO.id);
+  $('#app-title').textContent = title;
+  document.title = title;
+  $('#user-name').textContent = state.me ? `${state.me.name}${A.directionLabels(state.me).length ? ' · ' + A.directionLabels(state.me).join(', ') : ''}` : '—';
+  document.querySelectorAll('[data-role-hide]').forEach(el => { el.hidden = !roleAllows(el.dataset.roleHide); });
+  $('#tabs').innerHTML = visibleTabs().map(t => `<button class="tab" role="tab" type="button" draggable="true" data-act="tab" data-id="${t.id}" aria-selected="${state.tab === t.id}" title="${t.label} — перетащите, чтобы поменять порядок вкладок">${icon(t.id)}<span class="lbl">${t.label}</span>${
+    t.id === 'tasks' ? `<span class="cnt">${tasksArr().length}</span>` : t.id === 'overview' && overdueCount ? `<span class="cnt bad">${overdueCount}</span>` : ''}</button>`).join('');
+
+  const app = $('#app');
+  if (!state.loaded) { app.innerHTML = '<div class="hint">Загружаем данные…</div>'; return; }
+  const active = document.activeElement?.id, caret = document.activeElement?.selectionStart;
+  if (SOLO?.kind === 'tray') { app.innerHTML = viewTrayPanel(); return; }
+  if (!SOLO && state.me) api.setBadge?.(badgeCount()); // 4.1.1 (34): the number over the taskbar icon
+  if (!SOLO && state.me) needsMeNotify();
+  if (!SOLO && state.me && !tour) maybeStartTour();
+  if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
+  if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
+  const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
+  app.innerHTML = docTabsHtml() + view() + footer();
+  renderMsg(); msgNotify(); renderFocus();
+  if (active === 'f-q') { const el = $('#f-q'); el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* not a text input any more */ } }
+  if (state.tab === 'gantt') drawGanttLinks();
+  if (state.tab === 'kanban') fitKanban();
+  if (state.drawer?.kind === 'task' && state.drawer.id) { renderPayments(); renderPlanPreview(); renderTalk(); if (state.drawer.tab === 'log') loadTaskLog(state.drawer.id); }
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'att-menu': () => { setAttMenu(!attOpen); },
+  'create-menu': () => { setCreateMenu($('#create-menu').hidden); },
+  'att-go': ({ el }) => { state.tab = 'tasks'; state.filters.status = el.dataset.v; renderNow(); },
+});
+// Small modal with one text field; resolves to the text or null.
+// A longer note (up to 200 characters) in a small dialog; null when cancelled.
+// «Запросить у заказчика» from the project page: one request (and a row of source data unless it is a decision).
+function askCustomer(p) {
+  const kinds = [...IRD_KINDS, ['decision', 'Решение или ответ']];
+  return new Promise(resolve => {
+    const root = document.createElement('div');
+    root.className = 'modal-back';
+    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="aqt" novalidate><h2 id="aqt">Запросить у заказчика · ${esc(p.name)}</h2>
+      <p class="hint">Заказчик увидит запрос в «Нужно от вас» и в «Вопросах» и ответит прямо со страницы. ТУ, письма, согласования и документы попадут ещё и в «Исходные данные».</p>
+      <div class="f"><span class="lbl">Что запрашиваем</span><div class="aq-kinds" role="radiogroup">${kinds.map(([k, l], i) => `<label><input type="radio" name="aq-kind" value="${k}"${i === 0 ? ' checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div></div>
+      <div class="f"><label for="aq-title" class="req">Что нужно</label><input id="aq-title" maxlength="160" placeholder="ТУ на электроснабжение 630 кВт" list="aq-dl"><datalist id="aq-dl">${Techcard.SOURCE_DATA.map(([t]) => `<option value="${esc(t)}">`).join('')}</datalist></div>
+      <div class="fgrid"><div class="f"><label for="aq-due">Срок</label><input id="aq-due" type="date" value="${addDays(state.today, 10)}"></div>
+        <div class="f"><label for="aq-who">Кто готовит</label><input id="aq-who" value="Заказчик" maxlength="60"></div></div>
+      <div class="f"><label for="aq-why">Зачем (увидит заказчик)</label><input id="aq-why" maxlength="200" placeholder="Без них экспертиза не примет раздел ИОС1"></div>
+      <div class="f"><span class="lbl">Файлы для согласования</span><div class="aq-files" id="aq-files"></div>
+        <div class="row-in"><button class="btn sm" type="button" data-m="attach">Приложить файл…</button><span class="hint">Заказчик скачает их в кабинете и ответит «Согласовано» или «Есть замечания».</span></div></div>
+      <p class="neg" id="aq-err"></p>
+      <div class="modal-f"><button class="btn primary" type="submit">Запросить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
+    document.body.append(root);
+    const q = s => root.querySelector(s), close = v => { root.remove(); resolve(v); };
+    const files = [];
+    const drawFiles = () => { q('#aq-files').innerHTML = files.map((f, i) => `<span class="aq-file">${icon('file')}${esc(f.name)} <span class="hint">${fileSize(f.size)}</span><button type="button" class="linkbtn" data-m="unattach" data-i="${i}" aria-label="Убрать">✕</button></span>`).join(''); };
+    q('#aq-title').focus();
+    root.addEventListener('click', async e => {
+      if (e.target === root || e.target.dataset.m === 'cancel') return close(false);
+      const m = e.target.closest('[data-m]')?.dataset.m;
+      if (m === 'attach') { const r = await api.attachAdd(p.id); if (r?.ok) { files.push(r.file); drawFiles(); } else if (r && !r.canceled) q('#aq-err').textContent = r.message; }
+      if (m === 'unattach') { files.splice(Number(e.target.closest('[data-m]').dataset.i), 1); drawFiles(); }
+    });
+    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } });
+    root.addEventListener('change', e => { if (e.target.id === 'aq-title' && !root.querySelector('input[name="aq-kind"]:checked').dataset.touched) { const k = irdKindOf(e.target.value); root.querySelector(`input[name="aq-kind"][value="${k}"]`).checked = true; } if (e.target.name === 'aq-kind') e.target.dataset.touched = '1'; });
+    q('form').addEventListener('submit', async e => {
+      e.preventDefault(); e.stopPropagation();
+      const title = q('#aq-title').value.trim(), kind = root.querySelector('input[name="aq-kind"]:checked').value, due = q('#aq-due').value, why = q('#aq-why').value.trim();
+      if (!title) return modalErr(root, '#aq-err', 'Напишите, что нужно.', '#aq-title');
+      const lbl = kinds.find(k => k[0] === kind)[1];
+      const reqTitle = kind === 'decision' || kind === 'doc' || new RegExp('^' + lbl, 'i').test(title) ? title : `${lbl}: ${title}`;
+      const requests = [...(p.requests || [])], ird = [...(p.ird || [])];
+      const r = { id: newId(), title: reqTitle, due: isDate(due) ? due : '', why: why || (kind === 'decision' ? '' : IRD_WHY[kind]), done: false, irdId: '', ...(files.length ? { files } : {}) };
+      if (kind !== 'decision') {
+        const same = ird.find(x => x.title.trim().toLowerCase() === title.toLowerCase());
+        const row = same ? { ...same, status: ['accepted', 'done'].includes(same.status) ? same.status : 'wait', due: r.due || same.due } : { id: newId(), title, kind, who: q('#aq-who').value.trim() || 'Заказчик', status: 'wait', due: r.due, note: why };
+        if (same) ird[ird.indexOf(same)] = row; else ird.push(row);
+        r.irdId = row.id;
+      }
+      requests.push(r);
+      const ok = await write(op.update('projects', p.id, kind === 'decision' ? { requests } : { requests, ird }), `Запрос добавлен: ${reqTitle}${cab?.published?.[p.id] ? ' — отправляем в кабинет заказчика' : ''}`);
+      if (ok) { close(true); if (cab?.published?.[p.id]) api.cabinetSync(); } // republish right away, not in 2 minutes
+    });
+  });
+}
+function askNote(title, label, value = '') {
+  return new Promise(resolve => {
+    const root = document.createElement('div');
+    root.className = 'modal-back';
+    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="ntitle" novalidate><h2 id="ntitle">${esc(title)}</h2>
+      <div class="f"><label for="n-text">${esc(label)}</label><textarea id="n-text" rows="3" maxlength="200">${esc(value)}</textarea></div>
+      <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
+    document.body.append(root);
+    const close = v => { root.remove(); resolve(v); };
+    root.querySelector('#n-text').focus();
+    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
+    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
+    root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); close(root.querySelector('#n-text').value.trim()); });
+  });
+}
+// Backlog 45 for dialogs: a stopped submit shows its reason in the dialog, highlights the field it is about,
+// scrolls to it and puts the cursor there. `msg` empty clears the error.
+function modalErr(root, errSel, msg, fieldSel = '') {
+  const err = root.querySelector(errSel);
+  if (err) { err.textContent = msg; err.hidden = !msg; err.setAttribute('role', 'alert'); }
+  if (!msg) { root.querySelectorAll('.field-bad').forEach(x => x.classList.remove('field-bad')); return false; }
+  const f = fieldSel && root.querySelector(fieldSel);
+  if (f) {
+    f.classList.add('field-bad');
+    const off = () => f.classList.remove('field-bad');
+    f.addEventListener('input', off, { once: true }); f.addEventListener('change', off, { once: true });
+    f.scrollIntoView({ block: 'center' });
+    f.focus?.({ preventScroll: true });
+  } else err?.scrollIntoView({ block: 'nearest' });
+  return false;
+}
+// The same outside dialogs: an error plate plus the highlighted field.
+function pageErr(msg, fieldSel) { toast(msg, true); return modalErr(document, '#page-err-none', msg, fieldSel); }
+function askText(title, label, placeholder = '') {
+  return new Promise(resolve => {
+    const root = document.createElement('div');
+    root.className = 'modal-back';
+    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate><h2 id="mtitle">${esc(title)}</h2>
+      <div class="f"><label class="req" for="m-text">${esc(label)}</label><input id="m-text" maxlength="40" placeholder="${esc(placeholder)}"></div>
+      <div class="err" id="m-err" hidden></div>
+      <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
+    document.body.append(root);
+    const close = v => { root.remove(); resolve(v); };
+    root.querySelector('#m-text').focus();
+    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
+    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
+    root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const v = root.querySelector('#m-text').value.trim(); if (v) close(v); else modalErr(root, '#m-err', 'Заполните поле «' + label + '».', '#m-text'); });
+  });
+}
+function confirmBox(text, yes = 'Да', no = 'Отмена') {
+  return new Promise(resolve => {
+    const root = document.createElement('div');
+    root.className = 'modal-back';
+    root.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true"><p>${esc(text)}</p><div class="modal-f"><button class="btn danger solid" type="button" data-m="yes">${esc(yes)}</button><button class="btn" type="button" data-m="no">${esc(no)}</button></div></div>`;
+    document.body.append(root);
+    const close = r => { root.remove(); resolve(r); };
+    // Yes → true, the second button → false, dismissed (backdrop, Esc) → null.
+    root.addEventListener('click', e => { if (e.target === root) close(null); if (e.target.dataset.m === 'no') close(false); if (e.target.dataset.m === 'yes') close(true); });
+    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
+    root.querySelector('[data-m="no"]').focus();
+  });
+}
+async function askDocNames(format) {
+  const p = state.projects.get(state.drawer.id) || {};
+  const def = await api.docDefaults();
+  const saved = loadLocal('docNames', {});
+  const contact = p.contactId && state.users.get(p.contactId);
+  const gipUser = contact || (A.isGip(state.me) ? state.me : liveUsers().find(u => u.role === 'gip'));
+  const v = { customer: p.client || '', gip: saved.gip || gipUser?.name || '', developer: saved.developer || state.me?.name || '', director: saved.director || def.director || '', year: todayStr().slice(0, 4) };
+  return new Promise(resolve => {
+    const root = document.createElement('div');
+    root.className = 'modal-back';
+    const f = (k, label, hint = '') => `<div class="f"><label for="dn-${k}">${label}</label><input id="dn-${k}" value="${esc(v[k])}" maxlength="${k === 'customer' ? 300 : 60}">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
+    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="dntitle" novalidate><h2 id="dntitle">${format === 'vok' ? 'Ведомость основных комплектов (РД)' : 'Состав проектной документации'}</h2>
+      <p class="hint">Обложка, титульный лист и штампы — из шаблона офиса. Номера листов и «Листов» Word пересчитает сам при открытии.${def.own.includes(format) ? ' Используется ваш шаблон из папки шаблонов.' : ''}</p>
+      ${f('customer', 'Заказчик', 'На обложке: «Заказчик – …»')}${f('gip', 'Главный инженер проекта', 'Титульный лист; в штамп — фамилия')}${f('developer', 'Разработал', 'В штамп — фамилия')}${f('director', 'Генеральный директор')}${f('year', 'Год')}
+      <div class="modal-f"><button class="btn primary" type="submit">Сохранить файл…</button><button class="btn" type="button" data-m="cancel">Отмена</button><button class="linkbtn" type="button" data-m="tpl">Свои шаблоны…</button></div></form>`;
+    document.body.append(root);
+    const close = r => { root.remove(); resolve(r); };
+    root.querySelector('#dn-customer').focus();
+    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); if (e.target.dataset.m === 'tpl') api.openTemplates(); });
+    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
+    root.querySelector('form').addEventListener('submit', e => {
+      e.preventDefault(); e.stopPropagation();
+      const out = Object.fromEntries(Object.keys(v).map(k => [k, root.querySelector('#dn-' + k).value.trim()]));
+      saveLocal('docNames', { gip: out.gip, developer: out.developer, director: out.director });
+      close(out);
+    });
+  });
+}
 /* ---------- «Сервер Пульта»: the shared base ---------- */
 // With every change of the data the window asks where it stands with the server (a cheap local call).
 async function remoteStatus() {
@@ -778,6 +1006,46 @@ function colOrder() {
 }
 function setColPrefs(patch) { colPrefs = { ...colPrefs, ...patch }; saveLocal('cols', colPrefs); renderNow(); }
 
+function colsMenu() {
+  return `<div class="menu-wrap cols-wrap"><button class="btn ghostbtn sm" type="button" data-act="cols-pop" title="Какие столбцы показывать и в каком порядке. Порядок можно менять и перетаскиванием заголовков">⚙ Столбцы</button>
+    <div class="menu cols-menu"${colsOpen ? '' : ' hidden'}><p class="hint">Галка — показывать. Стрелки или перетаскивание заголовка таблицы — порядок.</p>${colRowsHtml()}</div></div>`;
+}
+function colRowsHtml() {
+  return `${colOrder().filter(c => (!c.money || canMoney()) && (c.id !== 'owner' || !isSpec())).map((c, i, all) => `<div class="cols-row">
+      <label class="chk"><input type="checkbox" data-act="col-toggle" data-id="${c.id}"${colPrefs.hidden.includes(c.id) ? '' : ' checked'}${c.fixed ? ' disabled' : ''}> ${c.label}${c.money ? ' <span class="hint">₽</span>' : ''}</label>
+      <span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="col-move" data-id="${c.id}" data-dir="-1"${i ? '' : ' disabled'} title="Выше">↑</button><button class="btn ghostbtn sm" type="button" data-act="col-move" data-id="${c.id}" data-dir="1"${i < all.length - 1 ? '' : ' disabled'} title="Ниже">↓</button></div>`).join('')}
+      <button class="btn ghostbtn sm" type="button" data-act="cols-reset">Как было</button>`;
+}
+function moveCol(id, dir) {
+  const order = colOrder().map(c => c.id), i = order.indexOf(id), j = i + dir;
+  if (i < 0 || j < 0 || j >= order.length) return;
+  [order[i], order[j]] = [order[j], order[i]];
+  setColPrefs({ order });
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'sort': ({ el }) => { toggleSort(el.dataset.key); },
+  'open-task': ({ e, el, id }) => {
+    closeCardMenu();
+    // On an editable table cell wait a moment: a second click turns this into inline editing.
+    if (el.matches('tr.row') && e.target.closest('td[data-edit]')) {
+      clearTimeout(openTimer);
+      openTimer = setTimeout(() => openTask(id), 260);
+      return;
+    }
+    if (state.win.compact) { api.setCompact(false); state.win.compact = false; }
+    openTask(id);
+  },
+  'col-move': ({ el }) => { moveCol(el.dataset.id, Number(el.dataset.dir)); },
+  'cols-reset': () => { setColPrefs({ order: COLS.map(c => c.id), hidden: [] }); },
+  'cm-quick': ({ el, act }) => { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); },
+  'cm-plus1': ({ el, act }) => { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); },
+  'cm-assign': ({ el, act }) => { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); },
+  'cm-chat': ({ el, act }) => { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); },
+  'cm-copy': ({ el, act }) => { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); },
+  'cm-window': ({ el, act }) => { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); },
+});
 /* ---------- «Настройки»: one window for everything about the look ---------- */
 function openSettings(sec = '') {
   setViewMenu(false);
@@ -819,16 +1087,6 @@ function renderSettings() {
 }
 // «⚙ Столбцы» opens right next to the table; headers can also be dragged to a new place.
 let colsOpen = false;
-function colsMenu() {
-  return `<div class="menu-wrap cols-wrap"><button class="btn ghostbtn sm" type="button" data-act="cols-pop" title="Какие столбцы показывать и в каком порядке. Порядок можно менять и перетаскиванием заголовков">⚙ Столбцы</button>
-    <div class="menu cols-menu"${colsOpen ? '' : ' hidden'}><p class="hint">Галка — показывать. Стрелки или перетаскивание заголовка таблицы — порядок.</p>${colRowsHtml()}</div></div>`;
-}
-function colRowsHtml() {
-  return `${colOrder().filter(c => (!c.money || canMoney()) && (c.id !== 'owner' || !isSpec())).map((c, i, all) => `<div class="cols-row">
-      <label class="chk"><input type="checkbox" data-act="col-toggle" data-id="${c.id}"${colPrefs.hidden.includes(c.id) ? '' : ' checked'}${c.fixed ? ' disabled' : ''}> ${c.label}${c.money ? ' <span class="hint">₽</span>' : ''}</label>
-      <span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="col-move" data-id="${c.id}" data-dir="-1"${i ? '' : ' disabled'} title="Выше">↑</button><button class="btn ghostbtn sm" type="button" data-act="col-move" data-id="${c.id}" data-dir="1"${i < all.length - 1 ? '' : ' disabled'} title="Ниже">↓</button></div>`).join('')}
-      <button class="btn ghostbtn sm" type="button" data-act="cols-reset">Как было</button>`;
-}
 // Header drag: drop a column onto another header to put it there.
 let colDrag = null;
 document.addEventListener('dragstart', e => {
@@ -859,56 +1117,8 @@ document.addEventListener('drop', e => {
   setColPrefs({ order: all });
 });
 document.addEventListener('dragend', () => { colDrag = null; $$('th.dragging, th.drop-ok').forEach(x => x.classList.remove('dragging', 'drop-ok')); });
-function moveCol(id, dir) {
-  const order = colOrder().map(c => c.id), i = order.indexOf(id), j = i + dir;
-  if (i < 0 || j < 0 || j >= order.length) return;
-  [order[i], order[j]] = [order[j], order[i]];
-  setColPrefs({ order });
-}
 
-function taskTable(list, { showProject = true, showContractor = true, empty = 'Карточек пока нет.', emptyActs = '', tall = false, limitKey = 'table', select = false } = {}) {
-  list = sortTasks(list.slice());
-  const showMoney = canMoney(), edit = canEditFields(), showOwner = !isSpec();
-  const cols = colOrder().filter(c => !colPrefs.hidden.includes(c.id) || c.fixed)
-    .filter(c => (c.id !== 'project' || showProject) && (c.id !== 'contractor' || showContractor) && (c.id !== 'owner' || showOwner) && (!c.money || showMoney));
-  const cell = (field, cls, inner) => `<td class="${cls}"${edit || field === 'status' ? ` data-edit="${field}" title="${EDIT_HINT}"` : ''}>${inner}</td>`;
-  const HEAD = { project: () => sortTh('project', 'Проект'), marks: () => sortTh('marks', 'Разделы'), owner: () => sortTh('owner', 'Ответственный'),
-    contractor: () => sortTh('contractor', 'Исполнитель'), start: () => sortTh('start', 'Старт'), finish: () => sortTh('finish', 'Финиш'),
-    status: () => sortTh('status', 'Статус'), ready: () => sortTh('ready', 'Готовность'), budget: () => sortTh('budget', 'Бюджет', 'r'), paid: () => sortTh('paid', 'Оплачено', 'r'), rest: () => sortTh('rest', 'Остаток', 'r') };
-  const CELL = {
-    project: t => `<td>${esc(projectOf(t)?.name || '— проект удалён —')}</td>`,
-    marks: t => `<td><div class="sec">${unread(t) ? '<span class="new-dot" title="Новое для вас"></span>' : ''}${marksHtml(t)}${t.title ? `<span class="t">${esc(t.title)}</span>` : ''}</div></td>`,
-    owner: t => { const o = ownerOf(t); return cell('owner', '', o ? `${esc(o.name)}${coOwnersOf(t).length ? ` <span class="chip tone-idle" title="Соисполнители: ${esc(coOwnersOf(t).map(u => u.name).join(', '))}">+${coOwnersOf(t).length}</span>` : ''}<div class="hint role-hint">${esc(A.ROLES[o.role]?.label || '')}</div>${absHits(t).length ? `<div class="due warn" title="${esc(absHits(t).map(A.absenceText).join('; '))}">отпуск/больничный</div>` : ''}${gapsOf(t).length ? `<div class="due ${t.profileOk ? 'warn' : 'bad'}" title="${esc(gapsOf(t).map(x => x.text).join(' '))}">${t.profileOk ? 'не по профилю (подтверждено)' : 'не по профилю'}</div>` : ''}` : '<span class="hint">не назначен</span>'); },
-    contractor: t => { const e = executorOf(t); return cell('contractor', '', e ? execLine(t) : '<span class="hint">не назначен</span>'); },
-    start: t => cell('start', 'num', fmtDate(t.start)),
-    finish: t => { const tm = timing(t); return cell('finish', '', `<div class="num">${fmtDate(t.finish)}</div><div class="due ${tm.cls}">${esc(tm.text)}</div>${finishExtras(t)}`); },
-    status: t => cell('status', '', statusChip(t)),
-    ready: t => (canEditFields() && L.readinessManual(t.status) ? cell('ready', '', readyHtml(t)) : `<td>${readyHtml(t)}</td>`),
-    budget: t => cell('budget', 'r num', money(budgetOf(t))),
-    paid: t => `<td class="r"><div class="num">${money(paidOf(t))}</div>${payBar(t)}</td>`,
-    rest: t => { const rest = restOf(t), due = L.paymentPlan(t, state.today).dueNow; return `<td class="r"><div class="num ${rest < 0 ? 'neg' : ''}">${money(rest)}</div>${due > 0 ? `<div class="due warn">пора платить ${money(due)}</div>` : ''}</td>`; },
-  };
-  const lim = limitOf(limitKey, tall ? 150 : 15), shown = list.slice(0, lim);
-  const pick = select && state.bulk;
-  const allOn = pick && shown.length && shown.every(t => state.bulk.has(t.id));
-  const head = `<tr>${pick ? `<th class="bulk-c"><input type="checkbox" data-act="bulk-all" aria-label="Выбрать все показанные"${allOn ? ' checked' : ''} data-ids="${esc(shown.map(t => t.id).join(' '))}"></th>` : ''}${cols.map(c => HEAD[c.id]().replace('<th', `<th draggable="true" data-col="${c.id}"`)).join('')}</tr>`;
-  const rows = list.length ? shown.map(t => `<tr class="row${pick && state.bulk.has(t.id) ? ' picked' : ''}" data-act="open-task" data-id="${esc(t.id)}">${pick ? `<td class="bulk-c"><input type="checkbox" data-act="bulk-pick" data-id="${esc(t.id)}"${state.bulk.has(t.id) ? ' checked' : ''} aria-label="Выбрать"></td>` : ''}${cols.map(c => CELL[c.id](t)).join('')}</tr>`).join('')
-    : `<tr class="empty-row"><td colspan="${cols.length + (pick ? 1 : 0)}">${esc(empty)}${emptyActs ? ` <span class="empty-acts">${emptyActs}</span>` : ''}</td></tr>`;
-  const more = moreBtn(limitKey, list.length, shown.length, tall ? 300 : 100);
-  return `<div class="tablewrap${tall ? ' tall' : ''}"><table><thead>${head}</thead><tbody>${rows}</tbody></table>${more ? `<div class="more-row">${more}</div>` : ''}</div>`;
-}
 
-// One row in an attention list; `side` overrides the default deadline text on the right.
-function attItem(t, side) {
-  const p = projectOf(t), c = executorOf(t), tm = timing(t);
-  const right = side ? side(t) : `<div class="due ${tm.cls}">${esc(tm.text)}</div><div class="num hint">${fmtDate(t.finish)}</div>`;
-  return `<div class="att-item" data-act="open-task" data-id="${esc(t.id)}" role="button" tabindex="0">
-    ${marksHtml(t)}
-    <span class="main">${unread(t) ? '<span class="new-dot" title="Новое для вас"></span>' : ''}${esc(p?.name || '—')}${t.title ? ' · ' + esc(t.title) : ''}</span>
-    <span class="side">${right}</span>
-    <span class="who">${ownerOf(t) ? `<span class="who-o" title="Ответственный в команде">${esc(ownerOf(t).name)}${coOwnersOf(t).length ? ' +' + coOwnersOf(t).length : ''}</span> · ` : ''}${c ? esc(c.name) + (c.phone ? ' · ' + esc(c.phone) : '') : 'исполнитель не назначен'}</span>
-  </div>`;
-}
 // Cards whose responsible person has no direction for some of the marks (e.g. directions were changed later).
 // Per responsible person whose directions don't cover the card's marks: [{ user, gaps, text }].
 const gapsOf = t => A.ownersOf(t).map(id => state.users?.get(id)).filter(Boolean)
@@ -967,6 +1177,18 @@ const attention = () => {
   return attCache.v;
 };
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'tips-reset': () => { tipsClosed.clear(); saveLocal('tipsClosed', []); renderNow(); },
+  'cols-pop': ({ el }) => { colsOpen = !colsOpen; el.closest('.cols-wrap').querySelector('.cols-menu').hidden = !colsOpen; },
+  'settings': ({ el }) => { openSettings(el.dataset.sec); },
+  'set-backdrop': ({ el }) => { api.setBackdrop?.(el.dataset.v).then(ok => { if (ok === false) toast('Этот фон Windows здесь недоступен — осталась своя прозрачность.', true); }); },
+  'set-dock': ({ el }) => { api.setDock?.(el.dataset.v); },
+  'nav-pos': ({ el }) => { setNav({ pos: el.dataset.v }); },
+  'nav-mini': () => { setNav({ mini: !nav.mini }); },
+  'nav-mini-chk': ({ el }) => { setNav({ mini: el.checked }); },
+  'set-theme': ({ el }) => { api.setTheme(el.dataset.v); },
+});
 /* ---------- 4.1.1: «Мой день» (item 48) — what is mine today, per role; every row is a button ---------- */
 const inScope = t => A.isGip(state.me) || hasOwner(t, state.me?.id) || executorOf(t)?.u?.id === state.me?.id || A.isChief(state.me);
 function myCards() { const me = state.me?.id; return tasksArr().filter(t => ACTIVE.has(t.status) && (t.ownerId === me || executorOf(t)?.u?.id === me || hasOwner(t, me))); }
@@ -1100,6 +1322,12 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'r' || e.key === 'к' || e.key === 'R' || e.key === 'К') { e.preventDefault(); $('#rq-note')?.focus(); }
 }, true);
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'review-queue': () => { openReviewQueue(); },
+  'tp-task': ({ el, id }) => { api.windowMain?.({ kind: 'task', id: el.dataset.id }); api.hide?.(); },
+  'tp-main': ({ el, id }) => { const c = [...state.chats.values()].find(x => msgUnread(x).length); api.windowMain?.(el.dataset.v === 'msg' && c ? { kind: 'chat', id: c.id } : { kind: 'main', id: el.dataset.v === 'day' ? 'day' : 'open' }); api.hide?.(); },
+});
 /* ---------- views ---------- */
 // 54: an empty list says what to do next — reset the filters, or create the first card.
 function tasksEmpty() {
@@ -1382,6 +1610,37 @@ function projectPanel(p, list) {
   </section>`;
 }
 
+// Completion forecast (3.6): at the pace of the last 60 days (works accepted per day), when will the remaining
+// works of the project be accepted, against the latest planned finish. Assignments are not counted.
+function projectForecast(tasks) {
+  const work = tasks.filter(t => t.kind !== 'assign');
+  const left = work.filter(t => t.status !== 'done');
+  if (!work.length) return null;
+  if (!left.length) return { done: true };
+  const from = addDays(state.today, -60);
+  const accepted = work.filter(t => t.status === 'done' && (([...(t.history || [])].reverse().find(h => h.type === 'status' && h.to === 'done')?.date) || '') >= from).length;
+  const plan = left.map(t => t.finish).filter(isDate).sort().at(-1) || '';
+  if (accepted < 2) return { few: true, accepted, left: left.length, plan };
+  const date = addDays(state.today, Math.ceil(left.length / (accepted / 60)));
+  return { date, plan, accepted, left: left.length, late: plan ? dayNum(date) - dayNum(plan) : null };
+}
+function forecastTile(tasks, tile) {
+  const f = projectForecast(tasks);
+  if (!f || f.done) return '';
+  if (f.few) return `<div class="pt-kpi" title="Прогноз считается по темпу приёмки за 60 дней; принято за это время: ${f.accepted}"><b>—</b><span>прогноз сдачи: мало данных (принято за 60 дн.: ${f.accepted})</span></div>`;
+  const tone = f.late > 14 ? 'bad' : f.late > 0 ? 'warn' : '';
+  return tile(fmtDate(f.date), `прогноз сдачи всех работ · темп ${f.accepted} за 60 дн.${f.plan ? ` · план ${fmtDate(f.plan)}${f.late ? ` (${f.late > 0 ? '+' : ''}${f.late} дн.)` : ''}` : ''}`, tone);
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'prog-weight': ({ el }) => { progWeight = el.dataset.v; saveLocal('progWeight', progWeight); renderNow(); },
+  'show-more': ({ el }) => { shownLimits.set(el.dataset.key, Number(el.dataset.shown) + Number(el.dataset.step)); renderNow(); },
+  'ov-move': ({ el }) => { moveOv(el.dataset.id, Number(el.dataset.dir)); },
+  'ov-show': ({ el }) => { setOvPrefs({ hidden: ovPrefs.hidden.filter(k => k !== el.dataset.id) }); },
+  'ov-show-all': () => { setOvPrefs({ hidden: ovPrefs.hidden.filter(k => k === 'projects' && ovPrefs.hidden.includes('projects')) }); },
+  'ov-reset': () => { setOvPrefs({ order: [], hidden: [...OV_DEFAULT_HIDDEN] }); },
+});
 /* ---------- project page: summary, participants, tasks grouped by the composition ---------- */
 // Every switched-on section of the composition is a task. Missing tasks are made when the project is saved;
 // an existing card of the project with the same mark (or the same title) is linked instead of a duplicate.
@@ -1476,6 +1735,128 @@ function openProjectPage(id) {
   render();
   const app = $('#app'); if (app) app.scrollTop = 0;
 }
+async function setMembers(p, ids, msg) {
+  await write(op.update('projects', p.id, { members: [...new Set(ids)] }), msg);
+}
+// One line of the tree: a heading (section with nested parts) or a task row.
+function ptTaskCells(t) {
+  if (!t) return '<td colspan="4" class="hint">задача появится после сохранения состава</td>';
+  const owner = state.users.get(t.ownerId), c = t.contractorId && state.contractors.get(t.contractorId);
+  return `<td>${esc(owner?.name || '—')}${c ? `<br><span class="hint">${esc(c.name)}</span>` : ''}</td><td class="nowrap${timing(t).overdue ? ' neg' : ''}">${t.finish ? fmtDate(t.finish) : '<span class="hint">срок не задан</span>'}</td><td>${readyHtml(t)}</td><td>${statusChip(t)}</td>`;
+}
+function ptProgress(tasks) {
+  if (!tasks.length) return '';
+  const done = tasks.filter(t => t.status === 'done').length, late = tasks.filter(t => timing(t).overdue).length;
+  return `<span class="pt-agg" title="Сдано задач из всех"><span class="rd-bar"><i style="width:${Math.round((done / tasks.length) * 100)}%"></i></span>сдано ${done} из ${tasks.length}${late ? ` · <span class="neg">сорвано ${late}</span>` : ''}</span>`;
+}
+function ptRow({ depth, label, title, code, task, heading, agg }) {
+  const attrs = task ? ` class="row pt-task" data-act="open-task" data-id="${esc(task.id)}" tabindex="0"` : ` class="pt-head lvl${depth}"`;
+  return `<tr${attrs}><td><div class="pt-name" style="--d:${depth}">${label ? `<span class="comp-k">${esc(label)}</span>` : ''}<span>${esc(title)}</span></div></td><td class="mono nowrap">${esc(code || '')}</td>${heading ? `<td colspan="4">${agg || ''}</td>` : ptTaskCells(task)}</tr>${task ? ptAssignRows(task, depth + 1) : ''}`;
+}
+// Assignments of a section task, under it: a folded summary line, opened — outgoing (subtasks) and incoming.
+function ptAssignRows(t, depth) {
+  const { out, inc } = assignsOf(t);
+  if (!out.length && !inc.length) return '';
+  const key = 'pao:' + t.id, open = isFolded(key); // stored as «opened»: assignments are folded by default
+  const done = l => l.filter(x => x.status === 'done').length;
+  const late = [...out, ...inc].filter(x => timing(x).overdue).length;
+  const sum = `<tr class="pt-asg-sum"><td colspan="6"><div class="pt-name" style="--d:${depth}"><button class="tree-tg" type="button" data-act="fold" data-key="${esc(key)}" aria-expanded="${open}">${open ? '▾' : '▸'}</button>
+    <span class="hint">Задания смежникам: ${out.length ? `исходящих ${out.length} (выдано ${done(out)})` : 'исходящих нет'} · ${inc.length ? `входящих ${inc.length} (получено ${done(inc)})` : 'входящих нет'}${late ? ` · <span class="neg">сорвано ${late}</span>` : ''}</span></div></td></tr>`;
+  if (!open) return sum;
+  const row = (x, dir) => `<tr class="row pt-task pt-asg" data-act="open-task" data-id="${esc(x.id)}" tabindex="0"><td><div class="pt-name" style="--d:${depth}"><span class="chip ${dir === 'out' ? 'tone-work' : 'tone-idle'} asg-dir">${dir === 'out' ? 'исх.' : 'вх.'}</span><span>${esc(x.title)}</span></div></td><td class="hint">${x.official ? `офиц.${x.officialNo ? ' № ' + esc(x.officialNo) : ''}` : ''}</td>${ptTaskCells(x)}</tr>`;
+  return sum + out.map(x => row(x, 'out')).join('') + inc.map(x => row(x, 'in')).join('');
+}
+function ptBlock(key, title, count, body, extra = '') {
+  const fold = isFolded(key);
+  return `<section class="panel pt-block${fold ? ' folded' : ''}"><div class="panel-h">${foldBtn(key, fold)}<h3>${esc(title)}</h3>${count}<span class="spacer"></span>${extra}</div>${fold ? '' : body}</section>`;
+}
+function viewProjectPage(p) {
+  const code = p.code || '', comp = p.composition;
+  const tasks = [...state.tasks.values()].filter(t => t.projectId === p.id);
+  const byId = id => (id ? state.tasks.get(id) : null);
+  const linked = new Set();
+  // Project documentation: the tree exactly as in the composition (Раздел 5 → ИОС1…6 → книги → части).
+  let pdHtml = '';
+  if (comp) {
+    const rows = Composition.rowsFor(comp, code).filter(r => !r.disabled);
+    const vols = new Set(Composition.volumes(comp, code).map(v => v.id));
+    const under = id => { const out = []; const rec = pid => rows.filter(r => r.node.parentId === pid).forEach(r => { if (vols.has(r.node.id)) { const t = byId(r.node.taskId); if (t) out.push(t); } rec(r.node.id); }); rec(id); return out; };
+    const html = rows.map(r => {
+      const n = r.node, no = n.kind === 'section' ? (n.num ?? r.idx[0]) : r.idx.at(-1), label = `${Composition.KINDS[n.kind]} ${no}`;
+      if (vols.has(n.id)) { const t = byId(n.taskId); if (t) linked.add(t.id); return ptRow({ depth: r.depth, label, title: n.title, code: r.code, task: t }); }
+      return ptRow({ depth: r.depth, label, title: n.title, code: '', heading: true, agg: ptProgress(under(n.id)) });
+    });
+    const all = [...vols].map(id => byId(comp.nodes.find(n => n.id === id)?.taskId)).filter(Boolean);
+    pdHtml = ptBlock('pp:' + p.id, 'Проектная документация', ptProgress(all), ptTable(html));
+  }
+  // Working documentation: grouped by the section of the project documentation it belongs to.
+  let rdHtml = '';
+  const rd = comp ? Composition.rdRows(comp, code) : [];
+  if (rd.length) {
+    const groups = new Map();
+    for (const r of rd) { const k = r.item.pdId || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+    const html = [], all = [];
+    for (const [pdId, list] of groups) {
+      const n = pdId && comp.nodes.find(x => x.id === pdId);
+      const ts = list.map(r => byId(r.item.taskId)).filter(Boolean);
+      all.push(...ts);
+      html.push(ptRow({ depth: 0, label: n ? n.abbr : '', title: n ? n.title : 'Прочие комплекты', heading: true, agg: ptProgress(ts) }));
+      for (const r of list) { const t = byId(r.item.taskId); if (t) linked.add(t.id); html.push(ptRow({ depth: 1, label: r.mark, title: r.title, code: r.code, task: t })); }
+    }
+    rdHtml = ptBlock('pr:' + p.id, 'Рабочая документация', ptProgress(all), ptTable(html));
+  }
+  // Assignments live under their sections (and under recipients), not among the other tasks.
+  const other = tasks.filter(t => !linked.has(t.id) && !(t.kind === 'assign' && state.tasks.has(t.parentId))).sort(sortByDeadline);
+  const otherHtml = ptBlock('po:' + p.id, 'Прочие задачи', `<span class="meta">${other.length}</span>`,
+    taskTable(other, { showProject: false, empty: 'Задачи вне состава проекта: согласования, изыскания, сбор исходных данных…', limitKey: 'po:' + p.id }),
+    p.archived ? '' : `<button class="btn sm" type="button" data-act="new-task" data-project="${esc(p.id)}">+ задача</button>`);
+
+  // Summary.
+  const x = totals(tasks), now = L.projectNow(p, state.today);
+  const reqOpen = (p.requests || []).filter(r => !r.done);
+  const tile = (num, label, tone = '') => `<div class="pt-kpi${tone ? ' ' + tone : ''}"><b>${num}</b><span>${label}</span></div>`;
+  const summary = `<section class="panel pt-sum"><div class="pt-kpis">
+      ${tile(`${x.done} из ${x.count}`, 'задач сдано')}
+      ${tile(taskCounts(tasks).idle, 'не начато')}
+      ${tile(taskCounts(tasks).work, 'в работе')}
+      ${tile(x.review, 'на проверке')}
+      ${tile(x.overdue, 'сорвано сроков', x.overdue ? 'bad' : '')}
+      ${now.current ? tile(esc(L.phaseLabel(now.current.key)), now.behind ? `текущий этап · отставание ${now.behind} дн.` : 'текущий этап', now.behind ? 'bad' : '') : ''}
+      ${now.next ? tile(now.daysToNext != null ? `${now.daysToNext} дн.` : '—', `до вехи «${esc(now.next.title)}»`) : ''}
+      ${reqOpen.length ? tile(reqOpen.length, 'ждём от заказчика', 'warn') : ''}
+      ${forecastTile(tasks, tile)}
+      ${canMoney() ? tile(money(x.rest), 'остаток к оплате') : ''}
+    </div>${goalHtml(tasks)}</section>`;
+
+  // Participants: who works on the project (the future project chat is made from them).
+  const members = memberIds(p);
+  const inTasks = [...new Set(tasks.flatMap(t => [t.ownerId, ...(t.coOwnerIds || [])]))].filter(id => id && state.users.has(id) && !members.includes(id));
+  const canEdit = A.canManageCatalog(state.me);
+  const roleOf = u => A.ROLES[u.role]?.label || '';
+  const addable = liveUsers().filter(u => !members.includes(u.id)).sort(byName);
+  const people = `<section class="panel pt-people"><div class="panel-h"><h3>Участники</h3><span class="meta">${members.length}</span><span class="spacer"></span><span class="hint">из них будет собран чат проекта</span></div>
+    <div class="pt-members">${members.map(id => { const u = state.users.get(id); return `<span class="pt-member"><span class="pt-ava">${esc(initials(u.name))}</span><span><b>${esc(u.name)}</b><br><span class="hint">${esc(roleOf(u))}${p.contactId === id ? ' · контакт для заказчика' : ''}</span></span>${canEdit ? `<button class="btn ghostbtn sm" type="button" data-act="member-del" data-id="${esc(id)}" aria-label="Убрать из проекта">✕</button>` : ''}</span>`; }).join('') || '<span class="hint">Пока никого. Добавьте тех, кто так или иначе задействован в проекте.</span>'}</div>
+    ${canEdit ? `<div class="row-in pt-add"><select id="pt-member"><option value="">— добавить участника —</option>${addable.map(u => `<option value="${esc(u.id)}">${esc(u.name)} · ${esc(roleOf(u))}</option>`).join('')}</select><button class="btn sm" type="button" data-act="member-add">Добавить</button>
+      ${inTasks.length ? `<span class="hint">Работают в задачах, но не в участниках: ${inTasks.map(id => esc(state.users.get(id).name)).join(', ')}</span><button class="btn ghostbtn sm" type="button" data-act="member-add-tasks">Добавить их</button>` : ''}</div>` : ''}</section>`;
+
+  const head = `<div class="pt-top">${SOLO ? '' : '<button class="btn ghostbtn sm" type="button" data-act="project-back">← Все проекты</button>'}
+    ${projIcon(p).replace('proj-ic', 'proj-ic big')}<h2>${esc(p.name)}</h2>${p.archived ? '<span class="chip tone-idle">в архиве</span>' : projectStageChip(p)}${code ? `<span class="pcode mono">${esc(code)}</span>` : ''}${p.client ? `<span class="meta">${esc(p.client)}</span>` : ''}${projectGip(p) ? `<span class="meta">ГИП: ${esc(projectGip(p).name)}</span>` : ''}
+    <span class="spacer"></span>${winBtn('project', p.id)}
+    ${p.folder ? `<button class="btn ghostbtn sm" data-act="open-folder" data-id="${esc(p.id)}" type="button" title="${esc(p.folder)}">Папка проекта</button>` : ''}
+    <button class="btn ghostbtn sm" type="button" data-act="techcard" title="Этапы, волны, задания смежникам">Техкарта</button>
+    ${canEdit ? `<button class="btn sm" type="button" data-act="project-timeline" data-id="${esc(p.id)}">Сроки</button><button class="btn sm" type="button" data-act="assign-board" data-id="${esc(p.id)}">Назначить исполнителей</button><button class="btn sm" type="button" data-act="ask-customer" data-id="${esc(p.id)}" title="ТУ, письма, согласования, решения — заказчик увидит в «Нужно от вас»">Запросить у заказчика</button>${A.canChat(state.me, p) ? (() => { const c = chatById(projectChatId(p.id)), n = c ? msgUnread(c).length : 0; return `<button class="btn sm" type="button" data-act="msg-project" data-id="${esc(p.id)}">Чат проекта${n ? ` <span class="cnt bad">${n}</span>` : ''}</button>`; })() : ''}<button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="comp">Состав проекта</button><button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="cust">Для заказчика</button><button class="btn sm" type="button" data-act="open-project" data-id="${esc(p.id)}">Изменить</button>` : ''}</div>`;
+  const noComp = !comp ? `<section class="panel"><div class="empty-in"><p>Состав проекта ещё не сформирован. Генератор предложит разделы по ПП РФ № 87 и рабочую документацию к ним; каждый раздел станет задачей.</p>${canEdit ? `<button class="btn primary" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="comp">Открыть генератор состава</button>` : ''}</div></section>` : '';
+  return `<div class="pt-page">${head}${summary}${people}${noComp}${pdHtml}${rdHtml}${otherHtml}${irdBlock(p)}${surveysBlock(p)}${lettersBlock(p)}</div>`;
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'project-page': ({ id }) => { openProjectPage(id); },
+  'project-back': () => { state.openProjectId = null; render(); },
+  'member-add': () => { const p = state.projects.get(state.openProjectId), uid = $('#pt-member')?.value; if (p && uid) setMembers(p, [...memberIds(p), uid], `${state.users.get(uid)?.name} — в участниках проекта`); },
+  'member-del': ({ id }) => { const p = state.projects.get(state.openProjectId); if (p) setMembers(p, memberIds(p).filter(x => x !== id), 'Убран из участников'); },
+  'member-add-tasks': () => { const p = state.projects.get(state.openProjectId); if (p) { const tasks = [...state.tasks.values()].filter(t => t.projectId === p.id); setMembers(p, [...memberIds(p), ...tasks.flatMap(t => [t.ownerId, ...(t.coOwnerIds || [])]).filter(x => x && state.users.has(x))], 'Участники добавлены'); } },
+});
 /* ---------- bookmarks and separate windows (4.0) ---------- */
 // A separate window shows one project or one chat: «?w=project:<id>» / «?w=chat:<key>». It runs this same
 // interface over the main window's data (the bridge forwards every call there) and shows only that page.
@@ -1644,6 +2025,31 @@ document.addEventListener('auxclick', e => {
   if (s) { e.preventDefault(); wsAddSection(s.dataset.id); }
 });
 document.addEventListener('mousedown', e => { if (e.button === 1 && e.target.closest?.('#tabs .tab[data-id], .dtab[data-doc]')) e.preventDefault(); }); // no autoscroll
+function orderedTabs() {
+  const known = TABS.map(x => x.id), order = tabOrder.filter(id => known.includes(id));
+  TABS.forEach((x, i) => { if (!order.includes(x.id)) order.splice(Math.min(i, order.length), 0, x.id); });
+  return order.map(id => TABS.find(x => x.id === id));
+}
+function setTabOrder(order) { tabOrder = order; saveLocal('tabOrder', order); renderNow(); if (document.querySelector('.settings-modal')) renderSettings(); }
+function moveTab(id, dir) {
+  const order = orderedTabs().map(x => x.id), i = order.indexOf(id), j = i + dir;
+  if (i < 0 || j < 0 || j >= order.length) return;
+  [order[i], order[j]] = [order[j], order[i]];
+  setTabOrder(order);
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'tab-move': ({ el, id }) => { moveTab(id, Number(el.dataset.dir)); },
+  'tabs-reset': () => { setTabOrder([]); },
+  'tab': ({ e, id }) => { if (e.ctrlKey) { wsAddSection(id); return; } wsRemember(); wsActive = ''; saveWs(); if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); },
+  'dtab-close': ({ id }) => { docTabClose(id); },
+  'ws-open': ({ el }) => { wsOpen(el.dataset.key); },
+  'ws-plus': () => { if (state.tab === 'projects' && state.openProjectId) toast('Проект уже во вкладке — откройте другой раздел и нажмите «＋», или щёлкните по разделу средней кнопкой мыши.'); else wsAddSection(state.tab); },
+  'ws-chat': ({ id }) => { wsAddChat(id); },
+  'win-detach': ({ el, id }) => { detachDoc(el.dataset.kind, id); },
+  'win-dock': () => { api.windowDock?.(SOLO); },
+});
 /* ---------- assigning people by drag and drop (3.6) ---------- */
 // People of the project (participants the current user may assign, plus contractors) on the left; sections of the
 // composition on the right, grouped like the project page. Drop a person on a section — or on a group heading to
@@ -1730,28 +2136,10 @@ function openAssignBoard(pid) {
   document.body.append(root);
 }
 
-// Completion forecast (3.6): at the pace of the last 60 days (works accepted per day), when will the remaining
-// works of the project be accepted, against the latest planned finish. Assignments are not counted.
-function projectForecast(tasks) {
-  const work = tasks.filter(t => t.kind !== 'assign');
-  const left = work.filter(t => t.status !== 'done');
-  if (!work.length) return null;
-  if (!left.length) return { done: true };
-  const from = addDays(state.today, -60);
-  const accepted = work.filter(t => t.status === 'done' && (([...(t.history || [])].reverse().find(h => h.type === 'status' && h.to === 'done')?.date) || '') >= from).length;
-  const plan = left.map(t => t.finish).filter(isDate).sort().at(-1) || '';
-  if (accepted < 2) return { few: true, accepted, left: left.length, plan };
-  const date = addDays(state.today, Math.ceil(left.length / (accepted / 60)));
-  return { date, plan, accepted, left: left.length, late: plan ? dayNum(date) - dayNum(plan) : null };
-}
-function forecastTile(tasks, tile) {
-  const f = projectForecast(tasks);
-  if (!f || f.done) return '';
-  if (f.few) return `<div class="pt-kpi" title="Прогноз считается по темпу приёмки за 60 дней; принято за это время: ${f.accepted}"><b>—</b><span>прогноз сдачи: мало данных (принято за 60 дн.: ${f.accepted})</span></div>`;
-  const tone = f.late > 14 ? 'bad' : f.late > 0 ? 'warn' : '';
-  return tile(fmtDate(f.date), `прогноз сдачи всех работ · темп ${f.accepted} за 60 дн.${f.plan ? ` · план ${fmtDate(f.plan)}${f.late ? ` (${f.late > 0 ? '+' : ''}${f.late} дн.)` : ''}` : ''}`, tone);
-}
-
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'assign-board': ({ id }) => { openAssignBoard(id); },
+});
 /* ---------- messenger (3.8): a dock at the bottom right, a side panel and a window with every chat ----------
    Project chats (GIP and participants, made with the first message), personal chats and group chats without a
    project. «@Фамилия» marks a colleague: their mention counter lights up separately. Written only by main. */
@@ -2165,126 +2553,45 @@ function msgNotify() {
 }
 
 const memberIds = p => (Array.isArray(p.members) ? p.members : []).filter(id => state.users.has(id) && !state.users.get(id).deletedAt);
-async function setMembers(p, ids, msg) {
-  await write(op.update('projects', p.id, { members: [...new Set(ids)] }), msg);
-}
 
-// One line of the tree: a heading (section with nested parts) or a task row.
-function ptTaskCells(t) {
-  if (!t) return '<td colspan="4" class="hint">задача появится после сохранения состава</td>';
-  const owner = state.users.get(t.ownerId), c = t.contractorId && state.contractors.get(t.contractorId);
-  return `<td>${esc(owner?.name || '—')}${c ? `<br><span class="hint">${esc(c.name)}</span>` : ''}</td><td class="nowrap${timing(t).overdue ? ' neg' : ''}">${t.finish ? fmtDate(t.finish) : '<span class="hint">срок не задан</span>'}</td><td>${readyHtml(t)}</td><td>${statusChip(t)}</td>`;
-}
-function ptProgress(tasks) {
-  if (!tasks.length) return '';
-  const done = tasks.filter(t => t.status === 'done').length, late = tasks.filter(t => timing(t).overdue).length;
-  return `<span class="pt-agg" title="Сдано задач из всех"><span class="rd-bar"><i style="width:${Math.round((done / tasks.length) * 100)}%"></i></span>сдано ${done} из ${tasks.length}${late ? ` · <span class="neg">сорвано ${late}</span>` : ''}</span>`;
-}
-function ptRow({ depth, label, title, code, task, heading, agg }) {
-  const attrs = task ? ` class="row pt-task" data-act="open-task" data-id="${esc(task.id)}" tabindex="0"` : ` class="pt-head lvl${depth}"`;
-  return `<tr${attrs}><td><div class="pt-name" style="--d:${depth}">${label ? `<span class="comp-k">${esc(label)}</span>` : ''}<span>${esc(title)}</span></div></td><td class="mono nowrap">${esc(code || '')}</td>${heading ? `<td colspan="4">${agg || ''}</td>` : ptTaskCells(task)}</tr>${task ? ptAssignRows(task, depth + 1) : ''}`;
-}
-// Assignments of a section task, under it: a folded summary line, opened — outgoing (subtasks) and incoming.
-function ptAssignRows(t, depth) {
-  const { out, inc } = assignsOf(t);
-  if (!out.length && !inc.length) return '';
-  const key = 'pao:' + t.id, open = isFolded(key); // stored as «opened»: assignments are folded by default
-  const done = l => l.filter(x => x.status === 'done').length;
-  const late = [...out, ...inc].filter(x => timing(x).overdue).length;
-  const sum = `<tr class="pt-asg-sum"><td colspan="6"><div class="pt-name" style="--d:${depth}"><button class="tree-tg" type="button" data-act="fold" data-key="${esc(key)}" aria-expanded="${open}">${open ? '▾' : '▸'}</button>
-    <span class="hint">Задания смежникам: ${out.length ? `исходящих ${out.length} (выдано ${done(out)})` : 'исходящих нет'} · ${inc.length ? `входящих ${inc.length} (получено ${done(inc)})` : 'входящих нет'}${late ? ` · <span class="neg">сорвано ${late}</span>` : ''}</span></div></td></tr>`;
-  if (!open) return sum;
-  const row = (x, dir) => `<tr class="row pt-task pt-asg" data-act="open-task" data-id="${esc(x.id)}" tabindex="0"><td><div class="pt-name" style="--d:${depth}"><span class="chip ${dir === 'out' ? 'tone-work' : 'tone-idle'} asg-dir">${dir === 'out' ? 'исх.' : 'вх.'}</span><span>${esc(x.title)}</span></div></td><td class="hint">${x.official ? `офиц.${x.officialNo ? ' № ' + esc(x.officialNo) : ''}` : ''}</td>${ptTaskCells(x)}</tr>`;
-  return sum + out.map(x => row(x, 'out')).join('') + inc.map(x => row(x, 'in')).join('');
-}
 const ptTable = rows => `<div class="tablewrap"><table class="pt-t"><thead><tr><th>Раздел</th><th>Обозначение</th><th>Ответственный</th><th>Срок</th><th>Готовность</th><th>Статус</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
-function ptBlock(key, title, count, body, extra = '') {
-  const fold = isFolded(key);
-  return `<section class="panel pt-block${fold ? ' folded' : ''}"><div class="panel-h">${foldBtn(key, fold)}<h3>${esc(title)}</h3>${count}<span class="spacer"></span>${extra}</div>${fold ? '' : body}</section>`;
-}
 
 // «В работе» — started and not handed in (in progress, on revision); «не начато» — not started or paused.
 const taskCounts = list => ({ work: list.filter(t => ['in_progress', 'revision'].includes(t.status)).length, idle: list.filter(t => ['not_started', 'paused'].includes(t.status)).length });
-function viewProjectPage(p) {
-  const code = p.code || '', comp = p.composition;
-  const tasks = [...state.tasks.values()].filter(t => t.projectId === p.id);
-  const byId = id => (id ? state.tasks.get(id) : null);
-  const linked = new Set();
-  // Project documentation: the tree exactly as in the composition (Раздел 5 → ИОС1…6 → книги → части).
-  let pdHtml = '';
-  if (comp) {
-    const rows = Composition.rowsFor(comp, code).filter(r => !r.disabled);
-    const vols = new Set(Composition.volumes(comp, code).map(v => v.id));
-    const under = id => { const out = []; const rec = pid => rows.filter(r => r.node.parentId === pid).forEach(r => { if (vols.has(r.node.id)) { const t = byId(r.node.taskId); if (t) out.push(t); } rec(r.node.id); }); rec(id); return out; };
-    const html = rows.map(r => {
-      const n = r.node, no = n.kind === 'section' ? (n.num ?? r.idx[0]) : r.idx.at(-1), label = `${Composition.KINDS[n.kind]} ${no}`;
-      if (vols.has(n.id)) { const t = byId(n.taskId); if (t) linked.add(t.id); return ptRow({ depth: r.depth, label, title: n.title, code: r.code, task: t }); }
-      return ptRow({ depth: r.depth, label, title: n.title, code: '', heading: true, agg: ptProgress(under(n.id)) });
-    });
-    const all = [...vols].map(id => byId(comp.nodes.find(n => n.id === id)?.taskId)).filter(Boolean);
-    pdHtml = ptBlock('pp:' + p.id, 'Проектная документация', ptProgress(all), ptTable(html));
-  }
-  // Working documentation: grouped by the section of the project documentation it belongs to.
-  let rdHtml = '';
-  const rd = comp ? Composition.rdRows(comp, code) : [];
-  if (rd.length) {
-    const groups = new Map();
-    for (const r of rd) { const k = r.item.pdId || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
-    const html = [], all = [];
-    for (const [pdId, list] of groups) {
-      const n = pdId && comp.nodes.find(x => x.id === pdId);
-      const ts = list.map(r => byId(r.item.taskId)).filter(Boolean);
-      all.push(...ts);
-      html.push(ptRow({ depth: 0, label: n ? n.abbr : '', title: n ? n.title : 'Прочие комплекты', heading: true, agg: ptProgress(ts) }));
-      for (const r of list) { const t = byId(r.item.taskId); if (t) linked.add(t.id); html.push(ptRow({ depth: 1, label: r.mark, title: r.title, code: r.code, task: t })); }
-    }
-    rdHtml = ptBlock('pr:' + p.id, 'Рабочая документация', ptProgress(all), ptTable(html));
-  }
-  // Assignments live under their sections (and under recipients), not among the other tasks.
-  const other = tasks.filter(t => !linked.has(t.id) && !(t.kind === 'assign' && state.tasks.has(t.parentId))).sort(sortByDeadline);
-  const otherHtml = ptBlock('po:' + p.id, 'Прочие задачи', `<span class="meta">${other.length}</span>`,
-    taskTable(other, { showProject: false, empty: 'Задачи вне состава проекта: согласования, изыскания, сбор исходных данных…', limitKey: 'po:' + p.id }),
-    p.archived ? '' : `<button class="btn sm" type="button" data-act="new-task" data-project="${esc(p.id)}">+ задача</button>`);
-
-  // Summary.
-  const x = totals(tasks), now = L.projectNow(p, state.today);
-  const reqOpen = (p.requests || []).filter(r => !r.done);
-  const tile = (num, label, tone = '') => `<div class="pt-kpi${tone ? ' ' + tone : ''}"><b>${num}</b><span>${label}</span></div>`;
-  const summary = `<section class="panel pt-sum"><div class="pt-kpis">
-      ${tile(`${x.done} из ${x.count}`, 'задач сдано')}
-      ${tile(taskCounts(tasks).idle, 'не начато')}
-      ${tile(taskCounts(tasks).work, 'в работе')}
-      ${tile(x.review, 'на проверке')}
-      ${tile(x.overdue, 'сорвано сроков', x.overdue ? 'bad' : '')}
-      ${now.current ? tile(esc(L.phaseLabel(now.current.key)), now.behind ? `текущий этап · отставание ${now.behind} дн.` : 'текущий этап', now.behind ? 'bad' : '') : ''}
-      ${now.next ? tile(now.daysToNext != null ? `${now.daysToNext} дн.` : '—', `до вехи «${esc(now.next.title)}»`) : ''}
-      ${reqOpen.length ? tile(reqOpen.length, 'ждём от заказчика', 'warn') : ''}
-      ${forecastTile(tasks, tile)}
-      ${canMoney() ? tile(money(x.rest), 'остаток к оплате') : ''}
-    </div>${goalHtml(tasks)}</section>`;
-
-  // Participants: who works on the project (the future project chat is made from them).
-  const members = memberIds(p);
-  const inTasks = [...new Set(tasks.flatMap(t => [t.ownerId, ...(t.coOwnerIds || [])]))].filter(id => id && state.users.has(id) && !members.includes(id));
-  const canEdit = A.canManageCatalog(state.me);
-  const roleOf = u => A.ROLES[u.role]?.label || '';
-  const addable = liveUsers().filter(u => !members.includes(u.id)).sort(byName);
-  const people = `<section class="panel pt-people"><div class="panel-h"><h3>Участники</h3><span class="meta">${members.length}</span><span class="spacer"></span><span class="hint">из них будет собран чат проекта</span></div>
-    <div class="pt-members">${members.map(id => { const u = state.users.get(id); return `<span class="pt-member"><span class="pt-ava">${esc(initials(u.name))}</span><span><b>${esc(u.name)}</b><br><span class="hint">${esc(roleOf(u))}${p.contactId === id ? ' · контакт для заказчика' : ''}</span></span>${canEdit ? `<button class="btn ghostbtn sm" type="button" data-act="member-del" data-id="${esc(id)}" aria-label="Убрать из проекта">✕</button>` : ''}</span>`; }).join('') || '<span class="hint">Пока никого. Добавьте тех, кто так или иначе задействован в проекте.</span>'}</div>
-    ${canEdit ? `<div class="row-in pt-add"><select id="pt-member"><option value="">— добавить участника —</option>${addable.map(u => `<option value="${esc(u.id)}">${esc(u.name)} · ${esc(roleOf(u))}</option>`).join('')}</select><button class="btn sm" type="button" data-act="member-add">Добавить</button>
-      ${inTasks.length ? `<span class="hint">Работают в задачах, но не в участниках: ${inTasks.map(id => esc(state.users.get(id).name)).join(', ')}</span><button class="btn ghostbtn sm" type="button" data-act="member-add-tasks">Добавить их</button>` : ''}</div>` : ''}</section>`;
-
-  const head = `<div class="pt-top">${SOLO ? '' : '<button class="btn ghostbtn sm" type="button" data-act="project-back">← Все проекты</button>'}
-    ${projIcon(p).replace('proj-ic', 'proj-ic big')}<h2>${esc(p.name)}</h2>${p.archived ? '<span class="chip tone-idle">в архиве</span>' : projectStageChip(p)}${code ? `<span class="pcode mono">${esc(code)}</span>` : ''}${p.client ? `<span class="meta">${esc(p.client)}</span>` : ''}${projectGip(p) ? `<span class="meta">ГИП: ${esc(projectGip(p).name)}</span>` : ''}
-    <span class="spacer"></span>${winBtn('project', p.id)}
-    ${p.folder ? `<button class="btn ghostbtn sm" data-act="open-folder" data-id="${esc(p.id)}" type="button" title="${esc(p.folder)}">Папка проекта</button>` : ''}
-    <button class="btn ghostbtn sm" type="button" data-act="techcard" title="Этапы, волны, задания смежникам">Техкарта</button>
-    ${canEdit ? `<button class="btn sm" type="button" data-act="project-timeline" data-id="${esc(p.id)}">Сроки</button><button class="btn sm" type="button" data-act="assign-board" data-id="${esc(p.id)}">Назначить исполнителей</button><button class="btn sm" type="button" data-act="ask-customer" data-id="${esc(p.id)}" title="ТУ, письма, согласования, решения — заказчик увидит в «Нужно от вас»">Запросить у заказчика</button>${A.canChat(state.me, p) ? (() => { const c = chatById(projectChatId(p.id)), n = c ? msgUnread(c).length : 0; return `<button class="btn sm" type="button" data-act="msg-project" data-id="${esc(p.id)}">Чат проекта${n ? ` <span class="cnt bad">${n}</span>` : ''}</button>`; })() : ''}<button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="comp">Состав проекта</button><button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="cust">Для заказчика</button><button class="btn sm" type="button" data-act="open-project" data-id="${esc(p.id)}">Изменить</button>` : ''}</div>`;
-  const noComp = !comp ? `<section class="panel"><div class="empty-in"><p>Состав проекта ещё не сформирован. Генератор предложит разделы по ПП РФ № 87 и рабочую документацию к ним; каждый раздел станет задачей.</p>${canEdit ? `<button class="btn primary" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="comp">Открыть генератор состава</button>` : ''}</div></section>` : '';
-  return `<div class="pt-page">${head}${summary}${people}${noComp}${pdHtml}${rdHtml}${otherHtml}${irdBlock(p)}${surveysBlock(p)}${lettersBlock(p)}</div>`;
-}
 // Blocks of the project page that are not its documentation (source data, letters).
 const auxBlock = (...a) => ptBlock(...a).replace('class="panel pt-block', 'class="panel pt-block pt-aux');
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'msg-open-any': () => { msgOpen(); },
+  'msg-open': () => { msgOpen(); },
+  'msg-close': () => { msgClose(); },
+  'msg-size': () => { msg.mode = msg.mode === 'full' ? 'side' : 'full'; renderMsg(); },
+  'msg-stick': () => { msg.stick = !msg.stick; saveLocal('msgStick', msg.stick); renderMsg(); toast(msg.stick ? 'Окно сообщений закреплено — перетащите карточку в чат, чтобы отправить её' : 'Окно сообщений свернётся при щелчке мимо'); },
+  'msg-chat': ({ id }) => { msgOpen(id); },
+  'msg-back': () => { msg.chatId = ''; renderMsg(); },
+  'msg-filter': ({ el }) => { msg.filter = el.dataset.v; renderMsg(); },
+  'msg-pin': ({ id }) => { msgTogglePin(id); },
+  'msg-cust-project': ({ id }) => { msgClose(); openProject(id, 'cust'); },
+  'mc-send': () => { msgSend(); },
+  'mc-edit': ({ id }) => { mcEditStart(id); },
+  'mc-edit-save': () => { mcEditSave(); },
+  'mc-edit-cancel': () => { mcEditCancel(); },
+  'msg-info': () => { msg.info = !msg.info; renderMsg(); },
+  'chat-icon': ({ id, act }) => { setChatIcon(id, act === 'chat-icon'); },
+  'chat-icon-clear': ({ id, act }) => { setChatIcon(id, act === 'chat-icon'); },
+  'proj-icon': ({ act }) => { setProjectIconField(act === 'proj-icon'); },
+  'proj-icon-clear': ({ act }) => { setProjectIconField(act === 'proj-icon'); },
+  'msg-project': ({ id }) => { msgOpen(projectChatId(id)); },
+  'msg-new': () => { msg.chatId = 'new'; msg.newKind = 'direct'; if (msg.mode === 'pill') { msg.mode = 'side'; msg.enter = true; } renderMsg(); },
+  'msg-newkind': ({ el }) => { msg.newKind = el.dataset.v; renderMsg(); },
+  'msg-pick': ({ el }) => { if (el.checked) msg.newPick.add(el.value); else msg.newPick.delete(el.value); msg.newTitle = $('#mc-title')?.value || msg.newTitle; renderMsg(); },
+  'msg-ac': ({ el }) => { msgAcPick(Number(el.dataset.i)); },
+  'msg-direct': ({ id }) => { api.chatDirect(id).then(async r => { if (!r?.ok) return toast(r?.message || 'Ошибка', true); await refresh(); msgOpen(r.id); }); },
+  'msg-create': () => { const title = ($('#mc-title')?.value || '').trim(); api.chatCreate({ title, members: [...msg.newPick] }).then(async r => { if (!r?.ok) return toast(r?.message || 'Ошибка', true); msg.newPick = new Set(); msg.newTitle = ''; await refresh(); msgOpen(r.id); toast(`Чат «${title}» создан`); }); },
+  'msg-add-member': () => { const c = chatById(msg.chatId), uid = $('#mc-add')?.value; if (c && uid) api.chatUpdate(c.id, { members: [...(c.members || []), uid] }).then(r => (r?.ok ? refresh() : toast(r?.message || 'Ошибка', true))); },
+  'msg-leave': () => { const c = chatById(msg.chatId); if (c) confirmBox(`Выйти из чата «${chatTitle(c)}»? Вернуть может автор чата.`, 'Выйти').then(ok => ok && api.chatLeave(c.id).then(() => { msg.chatId = ''; refresh(); })); },
+});
 /* ---------- 4.1.1 (item 60): source data in folders, with files, dates of issue and validity ---------- */
 const IRD_FOLDERS = [['rights', 'Правоустанавливающие документы'], ['gpzu', 'ГПЗУ'], ['tz', 'Техническое задание'], ['tu', 'Технические условия'],
   ['geology', 'Инженерная геология'], ['geodesy', 'Инженерная геодезия'], ['ecology', 'Инженерная экология'], ['survey', 'Обмеры / обследование'],
@@ -2474,6 +2781,25 @@ async function mailLetter(l) {
 
 const initials = name => String(name || '').replace(/^Пример:\s*/, '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'ird-folder': ({ el }) => { irdOpen[el.dataset.id] = el.dataset.v; renderNow(); },
+  'ird-upload': ({ el }) => { const pid = el.dataset.id, folder = el.closest('.ird')?.querySelector('[data-ird-folder]')?.dataset.irdFolder || 'other'; api.attachAdd(pid).then(r => irdAdd(pid, [r], folder)); },
+  'sv-upload': ({ el }) => { const pid = el.dataset.id, folder = el.dataset.folder; api.attachAdd(pid).then(r => irdAdd(pid, [r], folder)); },
+  'sv-files': ({ el }) => {
+    const p = state.projects.get(el.dataset.id), list = (p?.irdFiles || []).filter(f => f.folder === el.dataset.folder);
+    // The newest report opens; with several, the plate names the others.
+    const last = list.at(-1);
+    if (last) api.attachOpen(p.id, last.id).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть файл.', true); else if (list.length > 1) toast(`Открыт последний: ${last.name}. Ещё: ${list.slice(0, -1).map(f => f.name).join(', ')}`); });
+  },
+  'ird-open': ({ el }) => { api.attachOpen(el.dataset.id, el.dataset.fid).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть файл.', true); }); },
+  'ird-del': ({ el }) => { const p = state.projects.get(el.dataset.id); if (p) write(op.update('projects', p.id, { irdFiles: (p.irdFiles || []).filter(f => f.id !== el.dataset.fid) }), 'Файл убран'); },
+  'ird-newfolder': ({ el }) => { const p = state.projects.get(el.dataset.id); if (p) askText('Новая папка', 'Название папки', 'Например: Согласования с сетевыми').then(name => { if (!name?.trim()) return; const id = newId(); irdOpen[p.id] = id; write(op.update('projects', p.id, { irdFolders: [...(p.irdFolders || []), { id, name: name.trim().slice(0, 80) }] }), 'Папка добавлена'); }); },
+  'let-view': ({ el }) => { letterView[el.dataset.id] = el.dataset.v; renderNow(); },
+  'let-new': ({ el }) => { const p = state.projects.get(el.dataset.id); if (p) askLetter(p, null, el.dataset.v); },
+  'let-edit': ({ el }) => { const p = state.projects.get(el.dataset.id), l = p?.letters?.find(x => x.id === el.dataset.lid); if (l) askLetter(p, l); },
+  'let-mail': ({ el }) => { const p = state.projects.get(el.dataset.id), l = p?.letters?.find(x => x.id === el.dataset.lid); if (l) mailLetter(l); },
+});
 /* ---------- 4.1.1: portfolio chart (item 59) — every project on one time scale, phases inside, studio load below ---------- */
 let projMode = loadLocal('projMode', 'list');
 function viewPortfolio(projects) {
@@ -2551,12 +2877,6 @@ function reliabilityHtml(c) {
   ].filter(Boolean).join(' · ');
   return `<div class="rel"><span class="chip tone-${tone}" title="Доля работ, сданных к контрольному сроку исполнителя">${r.pct}% в срок</span><span class="hint">${esc(bits)}</span></div>`;
 }
-// Staff have their own panel in the program; outside contractors do not and are tracked by the chief.
-function staffArr() {
-  const all = liveUsers().filter(u => u.role !== 'gip');
-  const mine = A.isGip(state.me) ? all : all.filter(u => u.id === state.me?.id || (u.role === 'specialist' && u.chiefId === state.me?.id));
-  return mine.sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
-}
 /* ---------- folding (people and projects) ---------- */
 const folded = new Set(loadLocal('folded', []));
 const isFolded = key => folded.has(key);
@@ -2571,6 +2891,19 @@ function foldAllBar(keys) {
     <button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="0" data-keys="${esc(keys.join(' '))}"${keys.some(isFolded) ? '' : ' disabled'}>▾ Развернуть все</button></div>`;
 }
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'pstage': ({ el }) => { state.projectStage = el.dataset.v; renderNow(); },
+  'fold': ({ el }) => { setFold([el.dataset.key], !isFolded(el.dataset.key)); },
+  'fold-all': ({ el }) => { setFold(el.dataset.keys.split(' ').filter(Boolean), el.dataset.on === '1'); },
+  'proj-mode': ({ el }) => { projMode = el.dataset.v === 'portfolio' ? 'portfolio' : 'list'; saveLocal('projMode', projMode); renderNow(); },
+  'goto-project': ({ id }) => {
+    if (state.win.compact) { api.setCompact(false); state.win.compact = false; }
+    state.tab = 'projects'; renderNow();
+    document.getElementById('p-' + id)?.scrollIntoView({ block: 'start' });
+  },
+  'toggle-archive': () => { state.showArchive = !state.showArchive; renderNow(); },
+});
 /* ---------- handing a card from one person to another ---------- */
 // Specialization check for giving card `t` to a staff member or an outside contractor; '' when it fits.
 function misfitText(t, kind, toId) {
@@ -2789,6 +3122,23 @@ function viewPeople() {
       : `<p class="hint people-empty">${A.isGip(state.me) ? 'Добавьте подрядчиков с контактами — затем их можно будет назначать на карточки.' : 'Здесь — ваши подрядчики: добавленные вами и работающие по карточкам вашей группы.'}</p>`));
 }
 
+// Staff have their own panel in the program; outside contractors do not and are tracked by the chief.
+function staffArr() {
+  const all = liveUsers().filter(u => u.role !== 'gip');
+  const mine = A.isGip(state.me) ? all : all.filter(u => u.id === state.me?.id || (u.role === 'specialist' && u.chiefId === state.me?.id));
+  return mine.sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'set-game': ({ el }) => { game = el.dataset.v === '1'; saveLocal('game', game); renderNow(); },
+  'people-mode': ({ el }) => { peopleMode = el.dataset.v; saveLocal('peopleMode', peopleMode); renderNow(); },
+  'cg-toggle': ({ id }) => { toggleSet(cgOpen, id, 'cgOpen'); },
+  'co-toggle': ({ id }) => { toggleSet(coOpen, id, 'coOpen'); },
+  'cg-all': ({ el }) => { if (el.dataset.on === '1') CONTRACTOR_GROUPS.forEach(([k]) => cgOpen.add(k || '-')); else cgOpen.clear(); saveLocal('cgOpen', [...cgOpen]); renderNow(); },
+  'person-tasks': ({ e, id }) => { if (!e.target.closest('button')) { state.filters = { ...EMPTY_FILTERS, owner: id }; state.tab = 'tasks'; saveLocal('tab', 'tasks'); renderNow(); } },
+  'move-task': ({ e, el, id }) => { e.stopPropagation(); reassign(id, el.dataset.kind, el.dataset.from); },
+});
 /* ---------- 4.1: «Оргструктура» — departments and groups top-down, seen by every staff member ----------
    A department: { name, headId, parentId }; people belong by user.deptId. Without departments the tree is built from
    the roles (company → chiefs' groups). The GIP adds, renames and moves departments; «+» on a card adds a sub-department. */
@@ -3070,6 +3420,19 @@ document.addEventListener('pointerup', e => {
   if (from && to) { track('drop:office'); pickCardToHand(from, to); }
 });
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'office-person': ({ id }) => { officePerson(id); },
+  'office-zoom': ({ el }) => { setOffice({ zoom: Math.min(2, Math.max(0.5, (officePrefs.zoom || 1) * (el.dataset.dir === 'in' ? 1.2 : 1 / 1.2))) }); },
+  'office-fit': () => { setOffice({ zoom: 1 }); },
+  'office-anim': () => { setOffice({ anim: officePrefs.anim === false }); },
+  'office-labels': () => { setOffice({ labels: !officePrefs.labels }); },
+  'org-fold': ({ el }) => { const id = el.dataset.id; if (el.dataset.open === 'true') { orgOpen.delete(id); orgOpen.add('x:' + id); } else { orgOpen.add(id); orgOpen.delete('x:' + id); } saveLocal('orgOpen', [...orgOpen]); renderNow(); },
+  'org-people': ({ el }) => { orgToggle('p:' + el.dataset.id); },
+  'org-add': ({ el }) => { askDept(null, el.dataset.parent || ''); },
+  'org-edit': ({ el }) => { const d = state.depts.get(el.dataset.id); if (d) askDept(d); },
+  'org-from-groups': () => { orgFromGroups(); },
+});
 /* ---------- Gantt chart: drag to pan, Ctrl+wheel or buttons to zoom ---------- */
 const GANTT_MIN_DAYS = 7, GANTT_MAX_DAYS = 730;
 const GANTT_PRESETS = [[14, '2 нед'], [31, 'Месяц'], [63, '2 мес'], [92, 'Квартал'], [183, 'Полгода'], [365, 'Год']];
@@ -3492,6 +3855,16 @@ document.addEventListener('wheel', e => {
   }
 }, { passive: false });
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'g-mode': ({ el }) => { setGantt({ mode: el.dataset.v }); },
+  'g-scale': ({ el }) => { zoomGantt(Number(el.dataset.days) / state.gantt.days, dayNum(state.today) >= dayNum(state.gantt.from) && dayNum(state.today) <= dayNum(state.gantt.from) + state.gantt.days ? (dayNum(state.today) - dayNum(state.gantt.from)) / state.gantt.days : 0.5); },
+  'g-zoom': ({ el }) => { zoomGantt(el.dataset.dir === 'in' ? 0.7 : 1 / 0.7); },
+  'g-shift': ({ el }) => { setGantt({ from: addDays(state.gantt.from, Math.round(state.gantt.days / 3) * Number(el.dataset.dir)) }); },
+  'g-group': ({ el }) => { setGantt({ group: el.dataset.group }); },
+  'g-today': () => { setGantt({ from: addDays(state.today, -Math.round(state.gantt.days / 9)) }); },
+  'g-crit': () => { state.gantt.crit = !state.gantt.crit; saveLocal('ganttCrit', state.gantt.crit); renderNow(); },
+});
 /* ---------- Kanban ---------- */
 const KANBAN_COLS = ['not_started', 'in_progress', 'revision', 'review', 'paused', 'done'];
 const KANBAN_DONE_LIMIT = 15;
@@ -3624,6 +3997,95 @@ document.addEventListener('drop', e => {
   if (id) { track('drop:kanban'); changeStatus(id, col.dataset.kbCol); }
 });
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'kb-lanes': ({ el }) => { state.kanban.lanes = el.dataset.v; saveLocal('kbLanes', el.dataset.v); renderNow(); },
+  'kb-show-all': ({ el }) => { for (const [k] of KB_SHOW) state.kbShow[k] = el.dataset.v === '1'; saveLocal('kbShow', state.kbShow); renderKeepMenu('.kb-view'); },
+});
+function taskTable(list, { showProject = true, showContractor = true, empty = 'Карточек пока нет.', emptyActs = '', tall = false, limitKey = 'table', select = false } = {}) {
+  list = sortTasks(list.slice());
+  const showMoney = canMoney(), edit = canEditFields(), showOwner = !isSpec();
+  const cols = colOrder().filter(c => !colPrefs.hidden.includes(c.id) || c.fixed)
+    .filter(c => (c.id !== 'project' || showProject) && (c.id !== 'contractor' || showContractor) && (c.id !== 'owner' || showOwner) && (!c.money || showMoney));
+  const cell = (field, cls, inner) => `<td class="${cls}"${edit || field === 'status' ? ` data-edit="${field}" title="${EDIT_HINT}"` : ''}>${inner}</td>`;
+  const HEAD = { project: () => sortTh('project', 'Проект'), marks: () => sortTh('marks', 'Разделы'), owner: () => sortTh('owner', 'Ответственный'),
+    contractor: () => sortTh('contractor', 'Исполнитель'), start: () => sortTh('start', 'Старт'), finish: () => sortTh('finish', 'Финиш'),
+    status: () => sortTh('status', 'Статус'), ready: () => sortTh('ready', 'Готовность'), budget: () => sortTh('budget', 'Бюджет', 'r'), paid: () => sortTh('paid', 'Оплачено', 'r'), rest: () => sortTh('rest', 'Остаток', 'r') };
+  const CELL = {
+    project: t => `<td>${esc(projectOf(t)?.name || '— проект удалён —')}</td>`,
+    marks: t => `<td><div class="sec">${unread(t) ? '<span class="new-dot" title="Новое для вас"></span>' : ''}${marksHtml(t)}${t.title ? `<span class="t">${esc(t.title)}</span>` : ''}</div></td>`,
+    owner: t => { const o = ownerOf(t); return cell('owner', '', o ? `${esc(o.name)}${coOwnersOf(t).length ? ` <span class="chip tone-idle" title="Соисполнители: ${esc(coOwnersOf(t).map(u => u.name).join(', '))}">+${coOwnersOf(t).length}</span>` : ''}<div class="hint role-hint">${esc(A.ROLES[o.role]?.label || '')}</div>${absHits(t).length ? `<div class="due warn" title="${esc(absHits(t).map(A.absenceText).join('; '))}">отпуск/больничный</div>` : ''}${gapsOf(t).length ? `<div class="due ${t.profileOk ? 'warn' : 'bad'}" title="${esc(gapsOf(t).map(x => x.text).join(' '))}">${t.profileOk ? 'не по профилю (подтверждено)' : 'не по профилю'}</div>` : ''}` : '<span class="hint">не назначен</span>'); },
+    contractor: t => { const e = executorOf(t); return cell('contractor', '', e ? execLine(t) : '<span class="hint">не назначен</span>'); },
+    start: t => cell('start', 'num', fmtDate(t.start)),
+    finish: t => { const tm = timing(t); return cell('finish', '', `<div class="num">${fmtDate(t.finish)}</div><div class="due ${tm.cls}">${esc(tm.text)}</div>${finishExtras(t)}`); },
+    status: t => cell('status', '', statusChip(t)),
+    ready: t => (canEditFields() && L.readinessManual(t.status) ? cell('ready', '', readyHtml(t)) : `<td>${readyHtml(t)}</td>`),
+    budget: t => cell('budget', 'r num', money(budgetOf(t))),
+    paid: t => `<td class="r"><div class="num">${money(paidOf(t))}</div>${payBar(t)}</td>`,
+    rest: t => { const rest = restOf(t), due = L.paymentPlan(t, state.today).dueNow; return `<td class="r"><div class="num ${rest < 0 ? 'neg' : ''}">${money(rest)}</div>${due > 0 ? `<div class="due warn">пора платить ${money(due)}</div>` : ''}</td>`; },
+  };
+  const lim = limitOf(limitKey, tall ? 150 : 15), shown = list.slice(0, lim);
+  const pick = select && state.bulk;
+  const allOn = pick && shown.length && shown.every(t => state.bulk.has(t.id));
+  const head = `<tr>${pick ? `<th class="bulk-c"><input type="checkbox" data-act="bulk-all" aria-label="Выбрать все показанные"${allOn ? ' checked' : ''} data-ids="${esc(shown.map(t => t.id).join(' '))}"></th>` : ''}${cols.map(c => HEAD[c.id]().replace('<th', `<th draggable="true" data-col="${c.id}"`)).join('')}</tr>`;
+  const rows = list.length ? shown.map(t => `<tr class="row${pick && state.bulk.has(t.id) ? ' picked' : ''}" data-act="open-task" data-id="${esc(t.id)}">${pick ? `<td class="bulk-c"><input type="checkbox" data-act="bulk-pick" data-id="${esc(t.id)}"${state.bulk.has(t.id) ? ' checked' : ''} aria-label="Выбрать"></td>` : ''}${cols.map(c => CELL[c.id](t)).join('')}</tr>`).join('')
+    : `<tr class="empty-row"><td colspan="${cols.length + (pick ? 1 : 0)}">${esc(empty)}${emptyActs ? ` <span class="empty-acts">${emptyActs}</span>` : ''}</td></tr>`;
+  const more = moreBtn(limitKey, list.length, shown.length, tall ? 300 : 100);
+  return `<div class="tablewrap${tall ? ' tall' : ''}"><table><thead>${head}</thead><tbody>${rows}</tbody></table>${more ? `<div class="more-row">${more}</div>` : ''}</div>`;
+}
+function viewTasks() {
+  if (isEmpty()) return emptyState();
+  const f = state.filters, q = f.q.trim().toLowerCase();
+  // «att:…» statuses come from the header counters: the same lists the overview shows.
+  const attIds = f.status.startsWith('att:') ? new Set((attention()[f.status.slice(4)] || []).map(t => t.id)) : null;
+  const list = tasksArr().filter(t => {
+    if (f.project && t.projectId !== f.project) return false;
+    if (!execMatch(t, f.contractor)) return false;
+    if (attIds && !attIds.has(t.id)) return false;
+    if (f.status.startsWith('att:') ? false : f.status === 'overdue' ? !timing(t).overdue : f.status === 'new' ? !unread(t) : f.status === 'quiet' ? !quietList([t]).length : (f.status && t.status !== f.status)) return false;
+    if (f.owner && !hasOwner(t, f.owner === 'me' ? state.me?.id : f.owner)) return false;
+    if (f.mark && !sectionsOf(t).includes(f.mark)) return false;
+    if (q) {
+      const hay = [sectionsOf(t).join(' '), t.title, t.note, t.contractNo, projectOf(t)?.name, contractorOf(t)?.name].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }).sort(sortByDeadline);
+  const opt = (v, l, sel) => `<option value="${esc(v)}"${v === sel ? ' selected' : ''}>${esc(l)}</option>`;
+  const tt = totals(list);
+  return `<div class="filters one-row">${presetBar()}
+      ${isSpec() ? '' : `<select id="f-owner" aria-label="Ответственный">${opt('', 'Все ответственные', f.owner)}${opt('me', 'Мои карточки', f.owner)}${liveUsers().sort(byName).map(u => opt(u.id, u.name, f.owner)).join('')}</select>`}
+      <select id="f-project" aria-label="Проект">${opt('', 'Все проекты', f.project)}${liveProjects().map(p => opt(p.id, p.name, f.project)).join('')}</select>
+      <select id="f-contractor" aria-label="Исполнитель">${execFilterOpts(opt, f.contractor)}</select>
+      <select id="f-status" aria-label="Статус">${opt('', 'Любой статус', f.status)}${opt('overdue', 'Срок сорван', f.status)}${opt('new', 'Новое для меня', f.status)}${opt('att:week', 'Сдача ≤ 7 дней', f.status)}${opt('att:milestones', 'Сорваны КТ', f.status)}${opt('att:pay', 'Пора платить', f.status)}${opt('quiet', 'Тишина', f.status)}${Object.entries(STATUSES).map(([k, s]) => opt(k, s.label, f.status)).join('')}</select>
+      <select id="f-mark" aria-label="Раздел">${opt('', 'Любой раздел', f.mark)}${normalizeMarks(tasksArr().flatMap(sectionsOf)).map(m => opt(m, m, f.mark)).join('')}</select>
+      <input id="f-q" type="search" placeholder="Поиск: раздел, проект, подрядчик, договор" value="${esc(f.q)}">
+    </div>
+    <section class="panel"><div class="panel-h"><h3>Карточки</h3><span class="meta">${tt.count}${canMoney() ? ` · бюджет ${money(tt.budget)} · оплачено ${money(tt.paid)} · остаток ${money(tt.rest)}` : ''}</span><span class="spacer"></span>${canEditFields() ? `<button class="btn ghostbtn sm${state.bulk ? ' on' : ''}" type="button" data-act="bulk-toggle" title="Отметить несколько карточек и изменить их разом">${state.bulk ? 'Готово' : 'Выбрать несколько'}</button>` : ''}${colsMenu()}</div>
+    ${state.bulk ? bulkBar() : ''}
+    ${taskTable(list, list.length ? { tall: true, limitKey: 'tasks', select: canEditFields() } : tasksEmpty())}</section>`;
+}
+// Compact widget: one line per card, grouped by what to do; the header says how many wait for you.
+function compactRow(t, side = '') {
+  const tm = timing(t), p = projectOf(t);
+  return `<button class="cw-row" type="button" data-act="open-task" data-id="${esc(t.id)}">${marksHtml(t)}<span class="cw-p">${esc(p?.name || '—')}</span><span class="cw-d due ${tm.cls}">${side || esc(tm.text)}</span></button>`;
+}
+function viewCompact() {
+  if (isEmpty()) return `<div class="none">Данных пока нет. Разверните окно, чтобы добавить проекты и карточки.</div>`;
+  const a = attention(), fresh = tasksArr().filter(unread);
+  const mine = [...new Map([...a.review, ...fresh].map(t => [t.id, t])).values()];
+  const group = (title, items, tone, side) => items.length ? `<section class="cw-g"><h4 class="tone-${tone}">${title} <b class="num">${items.length}</b></h4>${items.slice(0, 6).map(t => compactRow(t, side?.(t))).join('')}${items.length > 6 ? `<div class="hint cw-more">и ещё ${items.length - 6}</div>` : ''}</section>` : '';
+  const waits = mine.length + a.overdue.length;
+  const goals = liveProjects().map(p => ({ p, g: L.projectGoal(tasksArr().filter(t => t.projectId === p.id)) })).filter(x => x.g.total).slice(0, 4);
+  const html = `<div class="cw-head"><b>${waits ? `Ждут вас: <span class="num">${waits}</span>` : 'Всё по плану'}</b><span class="hint">${fmtDate(state.today)}</span></div>`
+    + group('Проверить и прочитать', mine, 'review', t => (t.status === 'review' ? 'на проверке' : 'новое'))
+    + group('Срок сорван', a.overdue, 'bad')
+    + group('Сдача за 7 дней', a.week, 'warn')
+    + group('Сорваны КТ', a.milestones, 'bad', t => esc(L.milestonesOf(t, state.today).overdue[0]?.title || 'КТ'))
+    + (canMoney() ? group('Пора платить', a.pay, 'work', t => money(L.paymentPlan(t, state.today).dueNow)) : '')
+    + (goals.length ? `<section class="cw-g"><h4>Проекты</h4>${goals.map(({ p, g }) => `<button class="cw-row cw-goal" type="button" data-act="goto-project" data-id="${esc(p.id)}"><span class="cw-p"><b>${esc(p.name)}</b></span>${goalHtml(tasksArr().filter(t => t.projectId === p.id), true)}</button>`).join('')}</section>` : '');
+  return `<div class="cw">${html}</div>`;
+}
 /* ---------- saved filters ---------- */
 const EMPTY_FILTERS = { project: '', contractor: '', status: '', mark: '', q: '', owner: '' };
 const BUILTIN_PRESETS = [
@@ -3663,107 +4125,6 @@ function deletePreset(id) {
   presets = presets.filter(p => p.id !== id);
   saveLocal('presets', presets);
   renderNow();
-}
-// Small modal with one text field; resolves to the text or null.
-// A longer note (up to 200 characters) in a small dialog; null when cancelled.
-// «Запросить у заказчика» from the project page: one request (and a row of source data unless it is a decision).
-function askCustomer(p) {
-  const kinds = [...IRD_KINDS, ['decision', 'Решение или ответ']];
-  return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="aqt" novalidate><h2 id="aqt">Запросить у заказчика · ${esc(p.name)}</h2>
-      <p class="hint">Заказчик увидит запрос в «Нужно от вас» и в «Вопросах» и ответит прямо со страницы. ТУ, письма, согласования и документы попадут ещё и в «Исходные данные».</p>
-      <div class="f"><span class="lbl">Что запрашиваем</span><div class="aq-kinds" role="radiogroup">${kinds.map(([k, l], i) => `<label><input type="radio" name="aq-kind" value="${k}"${i === 0 ? ' checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div></div>
-      <div class="f"><label for="aq-title" class="req">Что нужно</label><input id="aq-title" maxlength="160" placeholder="ТУ на электроснабжение 630 кВт" list="aq-dl"><datalist id="aq-dl">${Techcard.SOURCE_DATA.map(([t]) => `<option value="${esc(t)}">`).join('')}</datalist></div>
-      <div class="fgrid"><div class="f"><label for="aq-due">Срок</label><input id="aq-due" type="date" value="${addDays(state.today, 10)}"></div>
-        <div class="f"><label for="aq-who">Кто готовит</label><input id="aq-who" value="Заказчик" maxlength="60"></div></div>
-      <div class="f"><label for="aq-why">Зачем (увидит заказчик)</label><input id="aq-why" maxlength="200" placeholder="Без них экспертиза не примет раздел ИОС1"></div>
-      <div class="f"><span class="lbl">Файлы для согласования</span><div class="aq-files" id="aq-files"></div>
-        <div class="row-in"><button class="btn sm" type="button" data-m="attach">Приложить файл…</button><span class="hint">Заказчик скачает их в кабинете и ответит «Согласовано» или «Есть замечания».</span></div></div>
-      <p class="neg" id="aq-err"></p>
-      <div class="modal-f"><button class="btn primary" type="submit">Запросить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-    document.body.append(root);
-    const q = s => root.querySelector(s), close = v => { root.remove(); resolve(v); };
-    const files = [];
-    const drawFiles = () => { q('#aq-files').innerHTML = files.map((f, i) => `<span class="aq-file">${icon('file')}${esc(f.name)} <span class="hint">${fileSize(f.size)}</span><button type="button" class="linkbtn" data-m="unattach" data-i="${i}" aria-label="Убрать">✕</button></span>`).join(''); };
-    q('#aq-title').focus();
-    root.addEventListener('click', async e => {
-      if (e.target === root || e.target.dataset.m === 'cancel') return close(false);
-      const m = e.target.closest('[data-m]')?.dataset.m;
-      if (m === 'attach') { const r = await api.attachAdd(p.id); if (r?.ok) { files.push(r.file); drawFiles(); } else if (r && !r.canceled) q('#aq-err').textContent = r.message; }
-      if (m === 'unattach') { files.splice(Number(e.target.closest('[data-m]').dataset.i), 1); drawFiles(); }
-    });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } });
-    root.addEventListener('change', e => { if (e.target.id === 'aq-title' && !root.querySelector('input[name="aq-kind"]:checked').dataset.touched) { const k = irdKindOf(e.target.value); root.querySelector(`input[name="aq-kind"][value="${k}"]`).checked = true; } if (e.target.name === 'aq-kind') e.target.dataset.touched = '1'; });
-    q('form').addEventListener('submit', async e => {
-      e.preventDefault(); e.stopPropagation();
-      const title = q('#aq-title').value.trim(), kind = root.querySelector('input[name="aq-kind"]:checked').value, due = q('#aq-due').value, why = q('#aq-why').value.trim();
-      if (!title) return modalErr(root, '#aq-err', 'Напишите, что нужно.', '#aq-title');
-      const lbl = kinds.find(k => k[0] === kind)[1];
-      const reqTitle = kind === 'decision' || kind === 'doc' || new RegExp('^' + lbl, 'i').test(title) ? title : `${lbl}: ${title}`;
-      const requests = [...(p.requests || [])], ird = [...(p.ird || [])];
-      const r = { id: newId(), title: reqTitle, due: isDate(due) ? due : '', why: why || (kind === 'decision' ? '' : IRD_WHY[kind]), done: false, irdId: '', ...(files.length ? { files } : {}) };
-      if (kind !== 'decision') {
-        const same = ird.find(x => x.title.trim().toLowerCase() === title.toLowerCase());
-        const row = same ? { ...same, status: ['accepted', 'done'].includes(same.status) ? same.status : 'wait', due: r.due || same.due } : { id: newId(), title, kind, who: q('#aq-who').value.trim() || 'Заказчик', status: 'wait', due: r.due, note: why };
-        if (same) ird[ird.indexOf(same)] = row; else ird.push(row);
-        r.irdId = row.id;
-      }
-      requests.push(r);
-      const ok = await write(op.update('projects', p.id, kind === 'decision' ? { requests } : { requests, ird }), `Запрос добавлен: ${reqTitle}${cab?.published?.[p.id] ? ' — отправляем в кабинет заказчика' : ''}`);
-      if (ok) { close(true); if (cab?.published?.[p.id]) api.cabinetSync(); } // republish right away, not in 2 minutes
-    });
-  });
-}
-function askNote(title, label, value = '') {
-  return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="ntitle" novalidate><h2 id="ntitle">${esc(title)}</h2>
-      <div class="f"><label for="n-text">${esc(label)}</label><textarea id="n-text" rows="3" maxlength="200">${esc(value)}</textarea></div>
-      <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-    document.body.append(root);
-    const close = v => { root.remove(); resolve(v); };
-    root.querySelector('#n-text').focus();
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
-    root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); close(root.querySelector('#n-text').value.trim()); });
-  });
-}
-// Backlog 45 for dialogs: a stopped submit shows its reason in the dialog, highlights the field it is about,
-// scrolls to it and puts the cursor there. `msg` empty clears the error.
-function modalErr(root, errSel, msg, fieldSel = '') {
-  const err = root.querySelector(errSel);
-  if (err) { err.textContent = msg; err.hidden = !msg; err.setAttribute('role', 'alert'); }
-  if (!msg) { root.querySelectorAll('.field-bad').forEach(x => x.classList.remove('field-bad')); return false; }
-  const f = fieldSel && root.querySelector(fieldSel);
-  if (f) {
-    f.classList.add('field-bad');
-    const off = () => f.classList.remove('field-bad');
-    f.addEventListener('input', off, { once: true }); f.addEventListener('change', off, { once: true });
-    f.scrollIntoView({ block: 'center' });
-    f.focus?.({ preventScroll: true });
-  } else err?.scrollIntoView({ block: 'nearest' });
-  return false;
-}
-// The same outside dialogs: an error plate plus the highlighted field.
-function pageErr(msg, fieldSel) { toast(msg, true); return modalErr(document, '#page-err-none', msg, fieldSel); }
-function askText(title, label, placeholder = '') {
-  return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate><h2 id="mtitle">${esc(title)}</h2>
-      <div class="f"><label class="req" for="m-text">${esc(label)}</label><input id="m-text" maxlength="40" placeholder="${esc(placeholder)}"></div>
-      <div class="err" id="m-err" hidden></div>
-      <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-    document.body.append(root);
-    const close = v => { root.remove(); resolve(v); };
-    root.querySelector('#m-text').focus();
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
-    root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const v = root.querySelector('#m-text').value.trim(); if (v) close(v); else modalErr(root, '#m-err', 'Заполните поле «' + label + '».', '#m-text'); });
-  });
 }
 
 /* ---------- usage statistics: what is actually used (kept only on this computer) ---------- */
@@ -3845,6 +4206,13 @@ function openCounter(f) {
   $('#app').scrollTop = 0;
 }
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'preset': ({ id }) => { applyPreset(id); },
+  'preset-del': ({ id }) => { deletePreset(id); },
+  'preset-save': () => { savePreset(); },
+  'preset-reset': () => { state.filters = { ...EMPTY_FILTERS }; renderNow(); },
+});
 /* ---------- bulk actions over picked cards (3.6) ---------- */
 function bulkBar() {
   const ids = [...state.bulk].filter(id => state.tasks.has(id)), n = ids.length;
@@ -3900,134 +4268,26 @@ async function bulkDo(kind) {
   }
   if (await write(ops, msg)) { state.bulk = new Set(); renderNow(); }
 }
-function viewTasks() {
-  if (isEmpty()) return emptyState();
-  const f = state.filters, q = f.q.trim().toLowerCase();
-  // «att:…» statuses come from the header counters: the same lists the overview shows.
-  const attIds = f.status.startsWith('att:') ? new Set((attention()[f.status.slice(4)] || []).map(t => t.id)) : null;
-  const list = tasksArr().filter(t => {
-    if (f.project && t.projectId !== f.project) return false;
-    if (!execMatch(t, f.contractor)) return false;
-    if (attIds && !attIds.has(t.id)) return false;
-    if (f.status.startsWith('att:') ? false : f.status === 'overdue' ? !timing(t).overdue : f.status === 'new' ? !unread(t) : f.status === 'quiet' ? !quietList([t]).length : (f.status && t.status !== f.status)) return false;
-    if (f.owner && !hasOwner(t, f.owner === 'me' ? state.me?.id : f.owner)) return false;
-    if (f.mark && !sectionsOf(t).includes(f.mark)) return false;
-    if (q) {
-      const hay = [sectionsOf(t).join(' '), t.title, t.note, t.contractNo, projectOf(t)?.name, contractorOf(t)?.name].join(' ').toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  }).sort(sortByDeadline);
-  const opt = (v, l, sel) => `<option value="${esc(v)}"${v === sel ? ' selected' : ''}>${esc(l)}</option>`;
-  const tt = totals(list);
-  return `<div class="filters one-row">${presetBar()}
-      ${isSpec() ? '' : `<select id="f-owner" aria-label="Ответственный">${opt('', 'Все ответственные', f.owner)}${opt('me', 'Мои карточки', f.owner)}${liveUsers().sort(byName).map(u => opt(u.id, u.name, f.owner)).join('')}</select>`}
-      <select id="f-project" aria-label="Проект">${opt('', 'Все проекты', f.project)}${liveProjects().map(p => opt(p.id, p.name, f.project)).join('')}</select>
-      <select id="f-contractor" aria-label="Исполнитель">${execFilterOpts(opt, f.contractor)}</select>
-      <select id="f-status" aria-label="Статус">${opt('', 'Любой статус', f.status)}${opt('overdue', 'Срок сорван', f.status)}${opt('new', 'Новое для меня', f.status)}${opt('att:week', 'Сдача ≤ 7 дней', f.status)}${opt('att:milestones', 'Сорваны КТ', f.status)}${opt('att:pay', 'Пора платить', f.status)}${opt('quiet', 'Тишина', f.status)}${Object.entries(STATUSES).map(([k, s]) => opt(k, s.label, f.status)).join('')}</select>
-      <select id="f-mark" aria-label="Раздел">${opt('', 'Любой раздел', f.mark)}${normalizeMarks(tasksArr().flatMap(sectionsOf)).map(m => opt(m, m, f.mark)).join('')}</select>
-      <input id="f-q" type="search" placeholder="Поиск: раздел, проект, подрядчик, договор" value="${esc(f.q)}">
-    </div>
-    <section class="panel"><div class="panel-h"><h3>Карточки</h3><span class="meta">${tt.count}${canMoney() ? ` · бюджет ${money(tt.budget)} · оплачено ${money(tt.paid)} · остаток ${money(tt.rest)}` : ''}</span><span class="spacer"></span>${canEditFields() ? `<button class="btn ghostbtn sm${state.bulk ? ' on' : ''}" type="button" data-act="bulk-toggle" title="Отметить несколько карточек и изменить их разом">${state.bulk ? 'Готово' : 'Выбрать несколько'}</button>` : ''}${colsMenu()}</div>
-    ${state.bulk ? bulkBar() : ''}
-    ${taskTable(list, list.length ? { tall: true, limitKey: 'tasks', select: canEditFields() } : tasksEmpty())}</section>`;
-}
 
-// Compact widget: one line per card, grouped by what to do; the header says how many wait for you.
-function compactRow(t, side = '') {
-  const tm = timing(t), p = projectOf(t);
-  return `<button class="cw-row" type="button" data-act="open-task" data-id="${esc(t.id)}">${marksHtml(t)}<span class="cw-p">${esc(p?.name || '—')}</span><span class="cw-d due ${tm.cls}">${side || esc(tm.text)}</span></button>`;
-}
-function viewCompact() {
-  if (isEmpty()) return `<div class="none">Данных пока нет. Разверните окно, чтобы добавить проекты и карточки.</div>`;
-  const a = attention(), fresh = tasksArr().filter(unread);
-  const mine = [...new Map([...a.review, ...fresh].map(t => [t.id, t])).values()];
-  const group = (title, items, tone, side) => items.length ? `<section class="cw-g"><h4 class="tone-${tone}">${title} <b class="num">${items.length}</b></h4>${items.slice(0, 6).map(t => compactRow(t, side?.(t))).join('')}${items.length > 6 ? `<div class="hint cw-more">и ещё ${items.length - 6}</div>` : ''}</section>` : '';
-  const waits = mine.length + a.overdue.length;
-  const goals = liveProjects().map(p => ({ p, g: L.projectGoal(tasksArr().filter(t => t.projectId === p.id)) })).filter(x => x.g.total).slice(0, 4);
-  const html = `<div class="cw-head"><b>${waits ? `Ждут вас: <span class="num">${waits}</span>` : 'Всё по плану'}</b><span class="hint">${fmtDate(state.today)}</span></div>`
-    + group('Проверить и прочитать', mine, 'review', t => (t.status === 'review' ? 'на проверке' : 'новое'))
-    + group('Срок сорван', a.overdue, 'bad')
-    + group('Сдача за 7 дней', a.week, 'warn')
-    + group('Сорваны КТ', a.milestones, 'bad', t => esc(L.milestonesOf(t, state.today).overdue[0]?.title || 'КТ'))
-    + (canMoney() ? group('Пора платить', a.pay, 'work', t => money(L.paymentPlan(t, state.today).dueNow)) : '')
-    + (goals.length ? `<section class="cw-g"><h4>Проекты</h4>${goals.map(({ p, g }) => `<button class="cw-row cw-goal" type="button" data-act="goto-project" data-id="${esc(p.id)}"><span class="cw-p"><b>${esc(p.name)}</b></span>${goalHtml(tasksArr().filter(t => t.projectId === p.id), true)}</button>`).join('')}</section>` : '');
-  return `<div class="cw">${html}</div>`;
-}
 
-// One «Требует внимания» button instead of a row of counters; the list opens under it.
-function counters() {
-  if (!state.loaded || isEmpty()) return '';
-  const a = attention();
-  const items = [
-    ['new', tasksArr().filter(unread).length, 'work', 'Новое для вас', 'поручено, комментарии и сдачи, которые вы ещё не открыли'],
-    ['review', a.review.length, 'review', 'Ждут вашей проверки', 'сданы на проверку'],
-    ['overdue', a.overdue.length, 'bad', 'Срок сорван', 'финиш прошёл, работа не сдана'],
-    ['att:week', a.week.length, 'warn', 'Сдача в течение 7 дней', ''],
-    ['att:milestones', a.milestones.length, 'bad', 'Сорваны контрольные точки', ''],
-    ...(canMoney() ? [['att:pay', a.pay.length, 'work', 'Пора платить', 'подрядчикам по графику']] : []),
-  ].filter(x => x[1]);
-  const total = items.reduce((s, x) => s + x[1], 0);
-  const worst = items.some(x => x[2] === 'bad') ? 'bad' : items.length ? 'warn' : 'ok';
-  return `<button type="button" class="att-btn tone-${worst}" data-act="att-menu" aria-haspopup="menu" aria-expanded="${attOpen}" title="Что ждёт вашего решения">
-      ${total ? `Требует внимания <b class="num">${total}</b>` : 'Всё по плану'}<svg class="caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-    <div class="menu att-menu" role="menu"${attOpen ? '' : ' hidden'}>${items.length ? items.map(([f, n, tone, label, sub]) => `<button role="menuitem" type="button" class="ccount" data-act="counter" data-f="${f}"><span class="att-n tone-${tone} num">${n}</span><span><b>${label}</b>${sub ? `<small>${sub}</small>` : ''}</span></button>`).join('')
-      : '<div class="none">Просрочек, проверок и платежей нет.</div>'}</div>`;
-}
 let attOpen = false;
-function setAttMenu(open) { attOpen = open; const w = $('#att-wrap'); if (w) w.innerHTML = counters(); }
-function setCreateMenu(open) {
-  $('#create-menu').hidden = !open;
-  $('#btn-create').setAttribute('aria-expanded', String(open));
-}
 
-// The footer keeps only the search; journal, trash, data folder and help live in «Отчёты и данные».
-function footer() {
-  const hasDemo = !isSpec() && [...state.projects.values(), ...state.contractors.values(), ...state.tasks.values(), ...liveUsers()].some(x => x.demo);
-  return `<div class="foot">
-    ${tip('foot', 'Срок сорван — финиш прошёл, а работа не сдана на проверку и не принята. «Осталось» — в рабочих днях по производственному календарю.')}
-    <span class="spacer"></span>
-    <button class="btn ghostbtn sm" data-act="open-search" type="button" title="Ctrl+K — поиск · Ctrl+N — новая карточка · Ctrl+Z — отменить · Alt+1…7 — вкладки · двойной щелчок по ячейке — правка">Поиск Ctrl+K</button>
-    ${hasDemo ? '<button class="btn ghostbtn sm" data-act="clear-demo" type="button">Удалить примеры</button>' : ''}
-  </div>`;
-}
 
 let renderQueued = false;
-function render() {
-  if (renderQueued) return;
-  renderQueued = true;
-  requestAnimationFrame(() => { renderQueued = false; renderNow(); });
-}
-function renderNow() {
-  state.today = todayStr();
-  $('#att-wrap').innerHTML = counters();
-  const overdueCount = state.loaded ? attention().overdue.length : 0;
-  const title = !SOLO ? A.titleFor(state.me) : SOLO.kind === 'project' ? (state.projects.get(SOLO.id)?.name || 'Проект') : threadTitle(SOLO.id);
-  $('#app-title').textContent = title;
-  document.title = title;
-  $('#user-name').textContent = state.me ? `${state.me.name}${A.directionLabels(state.me).length ? ' · ' + A.directionLabels(state.me).join(', ') : ''}` : '—';
-  document.querySelectorAll('[data-role-hide]').forEach(el => { el.hidden = !roleAllows(el.dataset.roleHide); });
-  $('#tabs').innerHTML = visibleTabs().map(t => `<button class="tab" role="tab" type="button" draggable="true" data-act="tab" data-id="${t.id}" aria-selected="${state.tab === t.id}" title="${t.label} — перетащите, чтобы поменять порядок вкладок">${icon(t.id)}<span class="lbl">${t.label}</span>${
-    t.id === 'tasks' ? `<span class="cnt">${tasksArr().length}</span>` : t.id === 'overview' && overdueCount ? `<span class="cnt bad">${overdueCount}</span>` : ''}</button>`).join('');
 
-  const app = $('#app');
-  if (!state.loaded) { app.innerHTML = '<div class="hint">Загружаем данные…</div>'; return; }
-  const active = document.activeElement?.id, caret = document.activeElement?.selectionStart;
-  if (SOLO?.kind === 'tray') { app.innerHTML = viewTrayPanel(); return; }
-  if (!SOLO && state.me) api.setBadge?.(badgeCount()); // 4.1.1 (34): the number over the taskbar icon
-  if (!SOLO && state.me) needsMeNotify();
-  if (!SOLO && state.me && !tour) maybeStartTour();
-  if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
-  if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
-  const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
-  app.innerHTML = docTabsHtml() + view() + footer();
-  renderMsg(); msgNotify(); renderFocus();
-  if (active === 'f-q') { const el = $('#f-q'); el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* not a text input any more */ } }
-  if (state.tab === 'gantt') drawGanttLinks();
-  if (state.tab === 'kanban') fitKanban();
-  if (state.drawer?.kind === 'task' && state.drawer.id) { renderPayments(); renderPlanPreview(); renderTalk(); if (state.drawer.tab === 'log') loadTaskLog(state.drawer.id); }
-}
-
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'bulk-toggle': () => { state.bulk = state.bulk ? null : new Set(); renderNow(); },
+  'bulk-pick': ({ e, el, id }) => { e.stopPropagation(); if (el.checked) state.bulk.add(id); else state.bulk.delete(id); renderNow(); },
+  'bulk-all': ({ e, el }) => { e.stopPropagation(); const ids = el.dataset.ids.split(' ').filter(Boolean); for (const x of ids) { if (el.checked) state.bulk.add(x); else state.bulk.delete(x); } renderNow(); },
+  'bulk-clear': () => { state.bulk = new Set(); renderNow(); },
+  'bulk-owner': ({ act }) => { bulkDo(act.slice(5)); },
+  'bulk-contr': ({ act }) => { bulkDo(act.slice(5)); },
+  'bulk-shift': ({ act }) => { bulkDo(act.slice(5)); },
+  'bulk-start': ({ act }) => { bulkDo(act.slice(5)); },
+  'bulk-trash': ({ act }) => { bulkDo(act.slice(5)); },
+  'counter': ({ el }) => { attOpen = false; openCounter(el.dataset.f); },
+});
 /* ---------- drawer shell ---------- */
 function closeDrawer() {
   state.drawer = null; state.draft = null; state.dirtyBase = null; state.importData = null;
@@ -4212,1146 +4472,6 @@ function ownerOptions(selected, marks = []) {
   const extra = selected && !list.some(u => u.id === selected) ? `<option value="${esc(selected)}" selected>${esc(userLabel(state.users.get(selected)))}</option>` : '';
   return extra + [['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
     .map(([r, l]) => byRole(r).length ? `<optgroup label="${l}">${byRole(r).map(opt).join('')}</optgroup>` : '').join('');
-}
-
-/* ---------- roles: header markup, user switch, team ---------- */
-// data-role-hide="spec" — hidden from specialists; "gip" — shown to the GIP only.
-function roleAllows(spec) {
-  if (spec === 'gip') return A.isGip(state.me);
-  if (spec === 'spec') return !isSpec();
-  return true;
-}
-const liveUsers = () => [...(state.users?.values() || [])];
-const usersByRole = r => liveUsers().filter(u => u.role === r).sort(byName);
-const userTag = u => `${A.ROLES[u.role]?.label || ''}${A.directionLabels(u).length ? ' · ' + A.directionLabels(u).join(', ') : ''}`;
-
-function setUserMenu(open) {
-  const menu = $('#user-menu');
-  if (open) {
-    const item = u => `<button role="menuitem" type="button" data-act="switch-user" data-id="${esc(u.id)}"${u.id === state.me?.id ? ' aria-current="true"' : ''}>
-      <b>${esc(u.name)}</b><small>${esc(userTag(u))}</small></button>`;
-    if (state.remote) {
-      menu.innerHTML = `<div class="menu-h">${esc(state.me?.name || '')}</div><p class="role-hint">${esc(userTag(state.me || {}))} · общая база ${esc(state.remote.url || '')}, вход «${esc(state.remote.login || '')}»</p>
-        <button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Связь, пароль${A.isGip(state.me) ? ', кто может входить' : ''}</small></button>`;
-      menu.hidden = !open; $('#btn-user').setAttribute('aria-expanded', String(open)); return;
-    }
-    menu.innerHTML = [['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
-      .map(([r, l]) => usersByRole(r).length ? `<div class="menu-h">${l}</div>${usersByRole(r).map(item).join('')}` : '').join('')
-      + '<p class="role-hint">Локальная версия: вход без пароля, роли разделяют интерфейс, но не защищают файл данных.</p>'
-      + (api.serverInfo ? '<button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Общая база команды: подключиться или перенести</small></button>' : '');
-  }
-  menu.hidden = !open;
-  $('#btn-user').setAttribute('aria-expanded', String(open));
-  if (open) menu.querySelector('[aria-current]')?.focus();
-}
-// «Свой вид» (3.6): each person on this computer keeps their own tab, columns, sorting, folded blocks, Gantt and
-// office settings. Switching the user stores the current set under the old user and brings back the new one's.
-const VIEW_KEYS = ['tab', 'cols', 'sort', 'folded', 'gantt', 'kbLanes', 'office', 'overview', 'peopleMode', 'presets', 'dense', 'teamCollapsed', 'progWeight', 'quietDays', 'tabOrder', 'nav', 'scroll'];
-function swapView(fromId, toId) {
-  try {
-    if (fromId) localStorage.setItem('glavspec.view:' + fromId, JSON.stringify(Object.fromEntries(VIEW_KEYS.map(k => [k, localStorage.getItem('glavspec.' + k)]))));
-    const saved = JSON.parse(localStorage.getItem('glavspec.view:' + toId) || 'null');
-    if (!saved) return false; // first visit: keep the current view as a start
-    for (const k of VIEW_KEYS) { if (saved[k] == null) localStorage.removeItem('glavspec.' + k); else localStorage.setItem('glavspec.' + k, saved[k]); }
-    return true;
-  } catch { return false; }
-}
-async function switchUser(id) {
-  setUserMenu(false);
-  if (id === state.me?.id) return;
-  if (state.drawer) closeDrawer();
-  const from = state.me?.id;
-  const res = await api.switchUser(id);
-  if (!res?.ok) return toast(res?.message || 'Не удалось сменить пользователя.', true);
-  const u = state.users.get(id);
-  const msg = `Вы вошли как ${u ? u.name : 'другой пользователь'} — ${A.titleFor(u)}`;
-  if (swapView(from, id)) { try { sessionStorage.setItem('glavspec.toast', msg + ' · свой вид восстановлен'); } catch { /* optional */ } api.reloadWindow(); return; }
-  toast(msg);
-}
-
-function ownerStats(uid) {
-  const list = tasksArr().filter(t => hasOwner(t, uid));
-  const active = list.filter(t => L.ACTIVE.has(t.status));
-  return { total: list.length, active: active.length, overdue: active.filter(t => timing(t).overdue).length, review: list.filter(t => t.status === 'review').length };
-}
-// Tree: GIP → chiefs → their specialists. Specialists without a chief hang under «Без главспеца».
-const teamCollapsed = new Set(loadLocal('teamCollapsed', []));
-function toggleTeamNode(id) {
-  if (teamCollapsed.has(id)) teamCollapsed.delete(id); else teamCollapsed.add(id);
-  saveLocal('teamCollapsed', [...teamCollapsed]);
-  renderNow();
-}
-function viewTeam() {
-  const gip = A.isGip(state.me);
-  const visible = gip ? liveUsers() : liveUsers().filter(u => u.id === state.me.id || (u.role === 'specialist' && u.chiefId === state.me.id));
-  const subsOf = id => visible.filter(u => u.role === 'specialist' && u.chiefId === id).sort(byName);
-  const budgetCell = u => u.role === 'chief' ? (gip
-    ? `<label class="chk"><input type="checkbox" data-act="toggle-budget" data-id="${esc(u.id)}"${u.canSeeBudget ? ' checked' : ''}> видит бюджет</label>`
-    : (u.canSeeBudget ? 'видит бюджет' : 'бюджет скрыт')) : u.role === 'gip' ? 'полный доступ' : 'без бюджета';
-  // depth: 0 GIP, 1 chief, 2 specialist; `kids` — ids under this node, for branch totals and collapsing.
-  const row = (u, depth, kids = [], last = false, trunk = false) => {
-    const own = ownerStats(u.id);
-    const branch = kids.reduce((a, id) => { const x = ownerStats(id); return { active: a.active + x.active, overdue: a.overdue + x.overdue, review: a.review + x.review }; }, own);
-    const s = kids.length && u.role === 'chief' ? branch : own;
-    const open = !teamCollapsed.has(u.id);
-    const toggle = kids.length ? `<button class="tree-tg" type="button" data-act="team-toggle" data-id="${esc(u.id)}" aria-expanded="${open}" title="${open ? 'Свернуть' : 'Развернуть'}">${open ? '▾' : '▸'}</button>` : '<span class="tree-tg ph"></span>';
-    const addSub = gip && u.role === 'chief' ? `<button class="btn ghostbtn sm" data-act="new-user" data-role="specialist" data-chief="${esc(u.id)}" type="button" title="Добавить специалиста в группу">+ специалист</button>` : '';
-    return `<tr class="tree d${depth}${last ? ' last' : ''}${trunk ? ' trunk' : ''}" style="--d:${depth}">
-      <td><div class="tree-cell" style="--d:${depth}">${toggle}<span class="tree-dot r-${u.role}"></span><span class="kicons">${userIcons(u)}</span>
-        <span><b>${esc(userLabel(u))}</b>${kids.length && u.role === 'chief' ? `<div class="hint">в группе ${kids.length + 1} · цифры по группе</div>` : ''}</span></div></td>
-      <td>${esc(userTag(u))}</td>
-      <td class="r num">${s.active}</td><td class="r num${s.overdue ? ' neg' : ''}">${s.overdue}</td><td class="r num">${s.review}</td>
-      <td>${budgetCell(u)}</td>
-      <td class="nowrap">${addSub}${gip ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</td></tr>`;
-  };
-  // `lastChief`: no sibling below, so the GIP's line stops at this chief.
-  const chiefBranch = (c, depth, lastChief = true) => {
-    const subs = subsOf(c.id);
-    return row(c, depth, subs.map(x => x.id), lastChief) + (teamCollapsed.has(c.id) ? '' : subs.map((x, i) => row(x, depth + 1, [], i === subs.length - 1, !lastChief)).join(''));
-  };
-  let body;
-  if (gip) {
-    const chiefs = visible.filter(u => u.role === 'chief').sort(byName);
-    const orphans = visible.filter(u => u.role === 'specialist' && !chiefs.some(c => c.id === u.chiefId)).sort(byName);
-    const gips = visible.filter(u => u.role === 'gip').sort(byName);
-    const top = gips[0];
-    const under = chiefs.map((c, i) => chiefBranch(c, 1, i === chiefs.length - 1 && !orphans.length)).join('')
-      + (orphans.length ? `<tr class="tree d1 last orphan-h" style="--d:1"><td colspan="7"><div class="tree-cell" style="--d:1"><span class="tree-tg ph"></span><span class="hint">Без главспеца — ${orphans.length}: назначьте руководителя в карточке сотрудника</span></div></td></tr>`
-        + orphans.map((x, i) => row(x, 2, [], i === orphans.length - 1)).join('') : '');
-    body = (top ? row(top, 0, chiefs.map(c => c.id).concat(orphans.map(o => o.id))) : '')
-      + (top && teamCollapsed.has(top.id) ? '' : under)
-      + gips.slice(1).map(g => row(g, 0)).join('');
-  } else {
-    body = chiefBranch(state.me, 0);
-  }
-  return `<section class="panel team">
-    <div class="panel-h"><h3>Структура команды</h3><span class="spacer"></span>${gip ? '<button class="btn primary sm" data-act="new-user" type="button">+ Сотрудник</button>' : ''}</div>
-    ${tip('team', gip ? 'Структура: ГИП → главспецы → их специалисты. Цифры у главспеца — по всей его группе. Подрядчики (внештатные) — ниже на этой же вкладке.'
-      : 'Вы и ваши специалисты. Состав команды и доступ к бюджету меняет ГИП.', 'team-hint')}
-    <div class="tablewrap"><table class="tree-tbl"><thead><tr><th>Сотрудник</th><th>Роль и направления</th><th class="r">В работе</th><th class="r">Сорвано</th><th class="r">На проверке</th><th>Бюджет</th><th></th></tr></thead>
-    <tbody>${body}</tbody></table></div>
-    ${visible.some(u => u.role === 'specialist') ? '' : `<div class="empty-hint">${gip
-      ? '<b>Специалистов пока нет.</b> Нажмите «+ Сотрудник» или «+ специалист» в строке главспеца — каждому сразу создаётся свой пульт. Затем карточки можно спускать им, а здесь будет видна загрузка группы.'
-      : '<b>В вашей группе пока нет специалистов.</b> Их добавляет ГИП; после этого вы сможете спускать им карточки и видеть их работу здесь.'}</div>`}</section>`;
-}
-async function toggleBudget(id, on) {
-  const u = state.users.get(id);
-  if (!u) return;
-  await write(op.update('users', id, { canSeeBudget: on }), on ? `${u.name} теперь видит бюджет` : `${u.name} больше не видит бюджет`);
-}
-
-function openUser(id, role = 'specialist', chiefId = '') {
-  const chief = chiefId && state.users.get(chiefId);
-  const u = id ? state.users.get(id) : { role: A.ROLES[role] ? role : 'specialist', chiefId: chief ? chiefId : '', directions: chief ? [...(chief.directions || [])] : [] };
-  if (!u) return toast('Сотрудник не найден.', true);
-  state.drawer = { kind: 'user', id };
-  const chiefs = usersByRole('chief');
-  const owned = id ? [...state.tasks.values()].filter(t => hasOwner(t, id)).length : 0;
-  drawerShell({
-    title: id ? 'Штатный сотрудник' : 'Новый сотрудник',
-    body: `${id ? '' : kindSwitch('staff')}<div class="fgrid">
-      <div class="f wide"><label class="req" for="u-name">Имя</label><input id="u-name" name="name" value="${esc(u.name || '')}" maxlength="120" placeholder="Иванов И. И."></div>
-      <div class="f"><label for="u-role">Роль</label><select id="u-role" name="role"${id === state.me.id ? ' disabled' : ''}>
-        ${Object.entries(A.ROLES).map(([r, x]) => `<option value="${r}"${u.role === r ? ' selected' : ''}>${x.label}</option>`).join('')}</select></div>
-      <div class="f" data-for-role="specialist"><label for="u-chief">Главспец</label><select id="u-chief" name="chiefId">
-        <option value="">— не назначен —</option>${chiefs.map(c => `<option value="${esc(c.id)}"${u.chiefId === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
-      <div class="f wide" data-for-role="chief specialist"><span class="lbl">Направления</span><div class="chk-row">
-        ${A.DIRECTIONS.map(d => `<label class="chk"><input type="checkbox" name="dir" value="${d.id}"${(u.directions || []).includes(d.id) ? ' checked' : ''}> ${esc(d.label)}</label>`).join('')}</div></div>
-      <div class="f wide" data-for-role="chief"><label class="chk"><input type="checkbox" name="canSeeContacts"${u.canSeeContacts ? ' checked' : ''}> Видит заказчиков и их контакты (кабинет заказчика)</label></div>
-      <div class="f wide" data-for-role="chief"><label class="chk"><input type="checkbox" name="canSeeBudget"${u.canSeeBudget ? ' checked' : ''}> Видит бюджет и оплаты своих карточек</label></div>
-      <div class="f"><label for="u-phone">Телефон</label><input id="u-phone" name="phone" type="tel" value="${esc(u.phone || '')}" maxlength="40"></div>
-      <div class="f"><label for="u-email">Почта</label><input id="u-email" name="email" type="email" value="${esc(u.email || '')}" maxlength="120"></div>
-      <div class="f"><label for="u-msg">Мессенджер</label><input id="u-msg" name="messenger" value="${esc(u.messenger || '')}" maxlength="120"></div>
-      <div class="f"><label for="u-bday">День рождения</label><input id="u-bday" name="birthday" type="date" value="${esc(u.birthday || '')}"><span class="hint">В «Офисе» в этот день — колпак. Год не показывается.</span></div>
-    </div>
-    <p class="hint">${id ? 'Пульт сотрудника' : 'Пульт для сотрудника создаётся автоматически'}: войти в него — щелчок по имени в заголовке программы.</p>
-    <div class="err" id="form-err" hidden></div>
-    ${id ? `<p class="hint">Карточек на сотруднике: ${owned}.</p>` : ''}`,
-    footer: `<button class="btn primary" type="submit">${id ? 'Сохранить' : 'Добавить'}</button>
-      <button class="btn" data-act="discard" type="button">Отмена</button>
-      <span class="spacer"></span>
-      ${id && id !== state.me.id ? '<button class="btn danger" data-act="ask-delete" type="button">Удалить</button>' : ''}`,
-  });
-  syncUserForm();
-  markClean();
-  if (!id) $('#u-name').focus();
-}
-function syncUserForm() {
-  const role = $('#u-role')?.value;
-  $$('[data-for-role]').forEach(el => { el.hidden = !el.dataset.forRole.split(' ').includes(role); });
-}
-async function submitUser() {
-  const { id } = state.drawer;
-  const role = id === state.me.id ? state.me.role : val('role');
-  const data = { name: val('name'), role, directions: $$('input[name="dir"]:checked').map(i => i.value), phone: val('phone'), email: val('email'), messenger: val('messenger'), birthday: isDate(val('birthday')) ? val('birthday') : '' };
-  if (!data.name) return formError('Укажите имя сотрудника.', '', 'name');
-  if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.', '', 'email');
-  if (!A.ROLES[role]) return formError('Выберите роль.', '', 'role');
-  data.chiefId = role === 'specialist' ? val('chiefId') : '';
-  data.canSeeBudget = role === 'chief' && checked('canSeeBudget');
-  data.canSeeContacts = role === 'chief' && checked('canSeeContacts');
-  if (role === 'gip') data.directions = [];
-  if (id && role !== 'chief' && state.users.get(id)?.role === 'chief' && usersByRole('specialist').some(s => s.chiefId === id))
-    return formError('У этого главспеца есть специалисты — сначала переведите их к другому главспецу.');
-  const left = id ? [...state.tasks.values()].filter(t => hasOwner(t, id) && t.status !== 'done' && A.profileGaps({ ...state.users.get(id), ...data }, t).length).length : 0;
-  const ok = id ? await write(op.update('users', id, data), left ? `Сохранено. Внимание: карточек не по профилю — ${left}, они в сводке` : 'Сотрудник сохранён')
-    : await write(op.set('users', newId(), { ...data, createdAt: new Date().toISOString() }), `${data.name}: штатный сотрудник добавлен, пульт создан`);
-  if (ok) closeDrawer();
-  return ok;
-}
-
-// The task's place in the composition: a section/volume of ПД or a set of РД.
-function compPlaceOf(t) {
-  return t?.id ? placeIndex().get(t.id) || null : null;
-}
-// «Марка» in the task card: no checkbox grid any more. A section of the composition shows where it sits;
-// an assignment shows from whom to whom; any other task gets one text field (marks are optional there).
-function marksField(t) {
-  const marks = sectionsOf(t), hidden = `<input type="hidden" name="marksExtra" value="${esc(marks.join(', '))}">`;
-  if (t.kind === 'assign') {
-    const from = state.tasks.get(t.parentId), to = (t.toTaskIds || []).map(id => state.tasks.get(id)).filter(Boolean);
-    return `<div class="f wide asg-box">${hidden}<div class="asg-h"><b>Задание смежнику</b> <button class="btn ghostbtn sm" type="button" data-act="techcard" data-sec="assign" title="Откуда берутся задания — техкарта">? техкарта</button></div>
-      <div class="asg-route"><span>от</span> ${from ? `<button class="linkbtn" type="button" data-act="open-task" data-id="${esc(from.id)}">${esc(marksText(from))}${from.title ? ' · ' + esc(from.title) : ''}</button>` : '<span class="hint">раздел удалён</span>'}
-        <span>→</span> ${to.map(x => `<button class="linkbtn" type="button" data-act="open-task" data-id="${esc(x.id)}">${esc(marksText(x))}${x.title ? ' · ' + esc(x.title) : ''}</button>`).join(', ') || '<span class="hint">получатель удалён</span>'}</div>
-      <div class="fgrid asg-off"><label class="chk"><input type="checkbox" name="official"${t.official ? ' checked' : ''}> Оформляется официально</label>
-        <div class="f"><label for="t-off-no">Номер задания</label><input id="t-off-no" name="officialNo" value="${esc(t.officialNo || '')}" maxlength="40" placeholder="ЗД-ОВ-03"></div>
-        <div class="f"><label for="t-off-by">Подписывает</label><input id="t-off-by" name="officialBy" value="${esc(t.officialBy || '')}" maxlength="80" placeholder="ГИП, главспец ОВ"></div></div>
-      <span class="hint">Получатель видит это задание у себя как входящее. Пока задание не выдано, смежник ждёт его${state.tasks.get(t.toTaskIds?.[0])?.dependsOn?.includes(t.id) ? ' — срок его старта связан с этим заданием' : ''}.</span></div>`;
-  }
-  return taskAssignsBlock(t) + `<div class="f wide" id="t-doc-box">${docFieldHtml(t.projectId, t)}</div>`;
-}
-// «Раздел» of a card: chosen from the project composition (ПД volumes and РД sections not yet taken by another
-// card). Without a composition — a code typed by hand. Without a section — a task with an explanation
-// (согласование, сбор ИРД). The composition itself is edited on the project's «Состав» tab.
-function docFieldHtml(projectId, t, typed = null) {
-  const p = state.projects.get(projectId), comp = p?.composition;
-  const place = t.projectId === projectId ? compPlaceOf(t) : null;
-  const marks = typed ?? sectionsOf(t);
-  // Suggestions: ПД sections (ПП РФ № 87) and РД sections (ГОСТ Р 21.101 and practice).
-  const known = [...new Map([...Composition.BASES.nonprod.sections.flatMap(([, abbr, title, , subs]) => [[abbr, title], ...(subs || []).map(([a, tl]) => [a, tl])]),
-    ...MARK_GROUPS.flatMap(g => g.marks), ...Object.entries(Composition.RD_MARKS).map(([m, [tl]]) => [m, tl])]).entries()];
-  const freeInput = (show, value) => `<div class="doc-free"${show ? '' : ' hidden'}><input id="t-marks-extra" name="marksExtra" value="${esc(value)}" placeholder="Шифр раздела: ЭОМ, ИОС1, АР…" maxlength="200" autocomplete="off" aria-label="Шифр раздела" list="marks-dl">
-    <datalist id="marks-dl">${known.map(([c, n]) => `<option value="${esc(c)}">${esc(n)}</option>`).join('')}</datalist>
-    <span class="hint">Несколько — через запятую.</span></div>`;
-  if (!comp) {
-    return `<label for="t-marks-extra">Раздел</label>${freeInput(true, marks.join(', '))}
-      <span class="hint">${p ? 'У проекта нет состава документации — разделы можно выбрать из списка, если сформировать состав на вкладке проекта «Состав».' : 'Сначала выберите проект.'} Без раздела — задача с уточнением (согласование, сбор ИРД).</span>`;
-  }
-  const taken = id => id && id !== t.id && state.tasks.has(id);
-  const vols = Composition.volumes(comp, p.code || ''), rds = Composition.rdRows(comp, p.code || '');
-  const cur = place?.ref || (marks.length ? 'free' : '');
-  const opt = (v, l, dis = false) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(l)}</option>`;
-  const pdOpts = vols.map(v => { const n = comp.nodes.find(x => x.id === v.id); return opt('pd:' + v.id, `${v.abbr || v.code} · ${v.title}${taken(n?.taskId) ? ' — уже есть карточка' : ''}`, taken(n?.taskId)); }).join('');
-  const rdOpts = rds.map(r => opt('rd:' + r.id, `${r.mark} · ${r.title}${taken(r.item.taskId) ? ' — уже есть карточка' : ''}`, taken(r.item.taskId))).join('');
-  return `<label for="t-doc">Раздел</label>
-    <select id="t-doc" name="docRef">${opt('', '— без раздела: задача (согласование, сбор ИРД…)')}
-      ${pdOpts ? `<optgroup label="Проектная документация · стадия П">${pdOpts}</optgroup>` : ''}${rdOpts ? `<optgroup label="Рабочая документация · стадия Р">${rdOpts}</optgroup>` : ''}
-      <optgroup label="Другое">${opt('free', 'Свой раздел — вписать шифр…')}</optgroup></select>
-    ${freeInput(cur === 'free', place ? '' : marks.join(', '))}
-    <span class="hint">${place ? `Том ${esc(String(place.tom))} · ${esc(place.code)}. ` : ''}Разделы берутся из состава проекта (вкладка «Состав»).</span>`;
-}
-// Codes of the chosen composition section, for directions and contractor suggestions (ИОС1 → ЭС, ЭН, ЭОМ, ЭО).
-function docRefSections(projectId, ref) {
-  const p = state.projects.get(projectId), comp = p?.composition;
-  if (!comp || !ref) return [];
-  const [kind, id] = ref.split(':');
-  if (kind === 'pd') { const v = Composition.volumes(comp, p.code || '').find(x => x.id === id); return v ? normalizeMarks(v.node.marks?.length ? v.node.marks : [v.abbr]) : []; }
-  if (kind === 'rd') { const r = Composition.rdRows(comp, p.code || '').find(x => x.id === id); return r ? normalizeMarks([r.mark]) : []; }
-  return [];
-}
-// The composition with this card linked to `ref` (and unlinked from where it was). null — nothing to change.
-function compWithLink(projectId, taskId, ref) {
-  const p = state.projects.get(projectId), comp = p?.composition;
-  if (!comp) return null;
-  const next = JSON.parse(JSON.stringify(comp));
-  let changed = false;
-  for (const n of next.nodes || []) if (n.taskId === taskId && 'pd:' + n.id !== ref) { n.taskId = ''; changed = true; }
-  for (const x of next.rd || []) if (x.taskId === taskId && 'rd:' + x.id !== ref) { x.taskId = ''; changed = true; }
-  const [kind, id] = (ref || '').split(':');
-  const target = kind === 'pd' ? (next.nodes || []).find(n => n.id === id) : kind === 'rd' ? (next.rd || []).find(x => x.id === id) : null;
-  if (target && target.taskId !== taskId) { target.taskId = taskId; changed = true; }
-  return changed ? next : null;
-}
-// In a section's card: its outgoing assignments (subtasks) and the incoming ones it waits for.
-function taskAssignsBlock(t) {
-  const { out, inc } = assignsOf(t);
-  if (!out.length && !inc.length) return '';
-  const line = (x, dir) => { const other = dir === 'out' ? (x.toTaskIds || []).map(id => state.tasks.get(id)).filter(Boolean).map(marksText).join(', ') : marksText(state.tasks.get(x.parentId) || {});
-    return `<li><button class="linkbtn" type="button" data-act="open-task" data-id="${esc(x.id)}">${dir === 'out' ? '→' : '←'} ${esc(other || x.title)}</button> ${statusChip(x)} <span class="hint">${x.finish ? 'до ' + fmtDate(x.finish) : ''} · ${esc((x.note || '').slice(0, 90))}${(x.note || '').length > 90 ? '…' : ''}</span></li>`; };
-  return `<div class="f wide asg-list">${out.length ? `<span class="lbl">Исходящие задания (${out.length})</span><ul>${out.map(x => line(x, 'out')).join('')}</ul>` : ''}
-    ${inc.length ? `<span class="lbl">Входящие задания (${inc.length})</span><ul>${inc.map(x => line(x, 'in')).join('')}</ul>` : ''}</div>`;
-}
-function marksPicker(selected) {
-  const known = new Set(MARK_GROUPS.flatMap(g => g.marks.map(m => m[0])));
-  const custom = selected.filter(m => !known.has(m));
-  const groups = MARK_GROUPS.map(g => `<fieldset class="mk-group" data-dir="${esc(g.dir || '')}"><legend>${esc(g.title)}</legend><div class="mk-grid">${g.marks.map(([code, name]) =>
-    `<label class="mk" title="${esc(name)}"><input type="checkbox" name="mark" value="${esc(code)}"${selected.includes(code) ? ' checked' : ''}><span class="code">${esc(code)}</span><small>${esc(name)}</small></label>`).join('')}</div></fieldset>`).join('');
-  return `<div class="f wide marks-f">
-    <div class="mk-head"><span class="lbl req" id="marks-lbl">Разделы</span><span class="hint" id="marks-count"></span></div>
-    <div class="mk-tools" data-transient><input id="mk-search" type="search" placeholder="Найти раздел: ЭО, вент, пожар…" autocomplete="off">
-      <button class="btn ghostbtn sm" type="button" data-act="mk-all" id="mk-all"></button></div>
-    <div class="mk-groups" role="group" aria-labelledby="marks-lbl">${groups}</div>
-    <label for="t-marks-extra">Другие разделы, через запятую</label>
-    <input id="t-marks-extra" name="marksExtra" value="${esc(custom.join(', '))}" placeholder="ЭОМ1, АИИС КУЭ" maxlength="200" autocomplete="off">
-  </div>`;
-}
-// Shows only the directions of the chosen responsible person (plus groups with ticked marks); search looks everywhere.
-function applyMarksFilter() {
-  const box = $('#dform .mk-groups');
-  if (!box) return;
-  const q = ($('#mk-search')?.value || '').trim().toLowerCase();
-  const owner = state.users?.get($('#t-owner')?.value);
-  const own = new Set(owner && !A.isGip(owner) ? owner.directions || [] : []);
-  const limit = !state.drawer?.allMarks && own.size > 0 && !q;
-  let hiddenGroups = 0;
-  for (const g of $$('.mk-group', box)) {
-    let any = false;
-    for (const l of $$('.mk', g)) {
-      const hit = !q || l.textContent.toLowerCase().includes(q);
-      l.hidden = !hit;
-      any ||= hit;
-    }
-    const keep = any && (!limit || own.has(g.dataset.dir) || $$('input:checked', g).length > 0);
-    g.hidden = !keep;
-    if (!keep && any) hiddenGroups++;
-  }
-  const btn = $('#mk-all');
-  if (btn) {
-    btn.hidden = !(own.size && !q);
-    btn.textContent = state.drawer?.allMarks ? 'Только направления ответственного' : `Все направления${hiddenGroups ? ` (+${hiddenGroups})` : ''}`;
-  }
-}
-function selectedMarks() {
-  const doc = $('#t-doc');
-  if (doc && doc.value && doc.value !== 'free') return docRefSections(val('projectId'), doc.value);
-  if (doc && !doc.value) return [];
-  const checked = $$('#dform input[name="mark"]:checked').map(i => i.value);
-  return normalizeMarks([...checked, ...splitMarks(val('marksExtra'))]);
-}
-function onMarksChanged() {
-  const list = selectedMarks();
-  const el = $('#dform .mk-groups') && $('#marks-count');
-  if (el) el.textContent = list.length ? `выбрано ${list.length}: ${list.join(', ')}` : 'ничего не выбрано';
-  const own = $('#t-owner');
-  if (own && !own.disabled) { const v = own.value; own.innerHTML = ownerOptions(v, list); own.value = v; }
-  execPickersRefresh();
-  updateOwnerWarn();
-  applyMarksFilter();
-  smartDefaults();
-}
-/* ---------- 50: a new card suggests its dates and executor ---------- */
-// Dates: a ПД section takes the project's «Стадия П», a РД section «Стадия Р» — while the dates were not typed by hand.
-// Executor: the best fit by section and load (the picker's own order) is offered with one click, never set silently.
-function smartDefaults() {
-  const box_hide = () => { const b = $('#smart-hint'); if (b) b.hidden = true; };
-  if (state.drawer?.kind !== 'task' || state.drawer.id) return;
-  const p = state.projects.get($('#t-project')?.value || ''), ref = $('#t-doc')?.value || '';
-  const key = ref.startsWith('pd:') ? 'p' : ref.startsWith('rd:') ? 'r' : '';
-  const ph = key && (p?.phases || []).find(x => x.key === key);
-  const st = $('#t-start'), fin = $('#t-finish');
-  const notes = [];
-  if (ph && st && fin && !st.dataset.typed && !fin.dataset.typed && (isDate(ph.start) || isDate(ph.finish))) {
-    const start = isDate(ph.start) ? (ph.start > state.today ? ph.start : state.today) : st.value;
-    const finish = isDate(ph.finish) ? ph.finish : fin.value;
-    // A stage already over gives nothing to take: the card would finish before it starts.
-    if (finish && start && finish < start) { box_hide(); return; }
-    if (st.value !== start || fin.value !== finish) { st.value = start; fin.value = finish; updateShiftBox(); }
-    notes.push(`Сроки — из этапа «${L.phaseLabel(key)}» проекта${isDate(ph.finish) ? ` (до ${fmtDate(ph.finish)})` : ''}.`);
-  }
-  const execBox = $('#dform .exec-pick[data-pick="exec"]'), marks = selectedMarks();
-  let pick = null;
-  if (execBox && !execBox.querySelector('input[type="hidden"]').value && marks.length) {
-    // Someone whose own direction it is first; otherwise any fitting one — but not the GIP, who «fits» everything.
-    const cands = execCandidates(marks, true);
-    pick = cands.find(x => x.own) || cands.find(x => x.fit && !A.isGip(refUser(x.ref))) || null;
-  }
-  let box = $('#smart-hint');
-  if (!box) {
-    const anchor = $('#t-finish')?.closest('.f');
-    if (!anchor) return;
-    anchor.insertAdjacentHTML('afterend', '<div class="f wide smart-hint" id="smart-hint" hidden></div>');
-    box = $('#smart-hint');
-  }
-  const pickHtml = pick ? `<span>Подходит по разделу: <b>${esc(pick.name)}</b>${pick.n ? ` · в работе ${pick.n}` : ' · сейчас свободен'}</span> <button class="btn sm" type="button" data-act="smart-exec" data-ref="${esc(pick.ref)}">Назначить исполнителем</button>` : '';
-  box.innerHTML = notes.map(n => `<span>${esc(n)}</span>`).join('') + pickHtml;
-  box.hidden = !notes.length && !pick;
-}
-document.addEventListener('input', e => { if (e.target.id === 't-start' || e.target.id === 't-finish') e.target.dataset.typed = '1'; });
-// Warns in the card when the chosen person has no direction for some of the marks.
-/* ---------- 4.1: «Кто делает» — responsible in the team, executor (staff or outside), one optional co-executor ----------
-   Stored: ownerId; contractorId (an outside executor) or execUserId (a staff one); coExecRef 'u:<id>' | 'c:<id>'.
-   Staff executor and co-executor also go into coOwnerIds, so visibility and rights stay as before. */
-const refUser = r => (String(r || '').startsWith('u:') ? state.users.get(r.slice(2)) || null : null);
-const refContractor = r => (String(r || '').startsWith('c:') ? state.contractors.get(r.slice(2)) || null : null);
-const refName = r => refUser(r)?.name || refContractor(r)?.name || '';
-// Before 4.1 staff co-owners stood in coOwnerIds: the first becomes the executor (when there is no contractor) or the co-executor.
-function legacyCo(t) {
-  if (t.execUserId !== undefined || t.coExecRef !== undefined) return [];
-  return (t.coOwnerIds || []).filter(id => id !== t.ownerId && state.users.has(id));
-}
-const execRefOf = t => (t.contractorId ? 'c:' + t.contractorId : t.execUserId ? 'u:' + t.execUserId : !t.contractorId && legacyCo(t)[0] ? 'u:' + legacyCo(t)[0] : '');
-const coExecRefOf = t => (t.coExecRef !== undefined ? t.coExecRef : (() => { const l = legacyCo(t); const rest = t.contractorId ? l : l.slice(1); return rest[0] ? 'u:' + rest[0] : ''; })());
-// Older co-owners beyond the two new fields are kept (and listed) so saving never drops them.
-function legacyExtra(t) { const l = legacyCo(t); return t.contractorId ? l.slice(1) : l.slice(2); }
-function legacyCoHtml(t) {
-  const extra = legacyExtra(t).map(id => state.users.get(id)).filter(Boolean);
-  return extra.length ? `<div class="hint legacy-co" data-ids="${esc(extra.map(u => u.id).join(','))}">Ещё работают по карточке (из прежней версии): ${esc(extra.map(u => u.name).join(', '))}</div>` : '';
-}
-// Executor of a card for lists and the Gantt: { kind: 'staff'|'contractor', name, phone } or null.
-function executorOf(t) {
-  const c = contractorOf(t);
-  if (c) return { kind: 'contractor', name: c.name, phone: c.phone || '', c };
-  const u = t.execUserId ? state.users.get(t.execUserId) : (t.coExecRef === undefined ? state.users.get(legacyCo(t)[0] || '') : null);
-  return u ? { kind: 'staff', name: u.name, phone: u.phone || '', u } : null;
-}
-// Filters «Все исполнители / Без исполнителя / <who>»: a contractor id (as before 4.1) or 'u:<staff id>'.
-const execMatch = (t, f) => !f || (f === '__none' ? !executorOf(t) : f.startsWith('u:') ? executorOf(t)?.u?.id === f.slice(2) : t.contractorId === f);
-const execStaff = () => liveUsers().filter(u => tasksArr().some(t => executorOf(t)?.u?.id === u.id)).sort(byName);
-const execFilterOpts = (opt, sel) => `${opt('', 'Все исполнители', sel)}${opt('__none', 'Без исполнителя', sel)}${execStaff().length ? `<optgroup label="Штатные">${execStaff().map(u => opt('u:' + u.id, u.name, sel)).join('')}</optgroup><optgroup label="Внештатные">` : ''}${contractorsArr().map(c => opt(c.id, c.name, sel)).join('')}${execStaff().length ? '</optgroup>' : ''}`;
-const execLine = t => { const e = executorOf(t), co = coExecRefOf(t) ? refName(coExecRefOf(t)) : ''; return e ? `${esc(e.name)}${co ? ` <span class="hint">+ ${esc(co)}</span>` : ''}` : ''; };
-function execCandidates(marks, onlyFit) {
-  const can = new Set(A.assignableOwners(state.me, liveUsers()).map(u => u.id));
-  const load = { u: id => tasksArr().filter(t => ACTIVE.has(t.status) && (t.execUserId === id || hasOwner(t, id))).length, c: id => tasksArr().filter(t => t.contractorId === id && ACTIVE.has(t.status)).length };
-  // `own`: the section is in the person's own directions / specialty — such people come first; the GIP (not limited) after them.
-  const ownDir = u => marks.some(m => (u.directions || []).includes(A.directionOfMark(m)?.id));
-  const staff = liveUsers().filter(u => can.has(u.id)).map(u => ({ ref: 'u:' + u.id, name: u.name, sub: `штатный · ${A.ROLES[u.role]?.label || ''}${A.directionLabels(u).length ? ' · ' + A.directionLabels(u).join(', ') : ''}`, fit: !A.profileGaps(u, { sections: marks }).length, own: ownDir(u), n: load.u(u.id) }));
-  const outside = contractorsArr().map(c => { const n = marks.length ? L.matchCount(c, marks) : 0; return { ref: 'c:' + c.id, name: c.name, sub: `внештатный${c.specialty ? ' · ' + c.specialty : ''}`, fit: !marks.length || n > 0, own: n > 0, n: load.c(c.id) }; });
-  const all = [...staff, ...outside];
-  return (onlyFit && marks.length ? all.filter(x => x.fit) : all).sort((a, b) => (b.own - a.own) || (b.fit - a.fit) || a.n - b.n || a.name.localeCompare(b.name, 'ru'));
-}
-function execPickerHtml(key, label, hint, ref) {
-  return `<div class="f exec-pick" data-pick="${key}"><label for="t-${key}-q">${label} <span class="hint">${hint}</span></label>
-    <div class="ep-box"><input id="t-${key}-q" class="ep-q" autocomplete="off" placeholder="Начните вводить фамилию или название…" value="${esc(refName(ref))}" role="combobox" aria-expanded="false" aria-controls="t-${key}-list">
-      <button class="btn ghostbtn sm ep-clear" type="button" data-act="ep-clear" data-pick="${key}" title="Убрать"${ref ? '' : ' hidden'}>×</button>
-      <input type="hidden" name="${key}Ref" value="${esc(ref)}"><div class="ep-list" id="t-${key}-list" role="listbox" hidden></div></div></div>`;
-}
-function execPickersRefresh() { for (const box of $$('#dform .exec-pick')) epRender(box, false); updateOwnerWarn(); }
-function epRender(box, open = true) {
-  const q = box.querySelector('.ep-q'), list = box.querySelector('.ep-list');
-  const ref = box.querySelector('input[type="hidden"]').value;
-  const text = q.value.trim().toLowerCase(), current = refName(ref).toLowerCase();
-  const items = execCandidates(selectedMarks(), $('#exec-fit')?.checked).filter(x => !text || text === current || x.name.toLowerCase().includes(text)).slice(0, 40);
-  list.innerHTML = items.map((x, i) => `<button type="button" role="option" class="ep-opt${x.ref === ref ? ' sel' : ''}${i === 0 ? ' act' : ''}" data-act="ep-pick" data-pick="${box.dataset.pick}" data-ref="${esc(x.ref)}"><b>${esc(x.name)}</b>${x.fit ? '' : ' <span class="chip tone-warn">не по профилю</span>'}<span class="hint">${esc(x.sub)} · в работе ${x.n}</span></button>`).join('')
-    || `<div class="hint ep-none">${$('#exec-fit')?.checked ? 'Подходящих по специальности нет — снимите галку «Только подходящие».' : 'Никого не нашлось.'}</div>`;
-  list.hidden = !open; q.setAttribute('aria-expanded', String(open));
-}
-function epSet(key, ref) {
-  const box = $(`#dform .exec-pick[data-pick="${key}"]`);
-  if (!box) return;
-  box.querySelector('input[type="hidden"]').value = ref;
-  box.querySelector('.ep-q').value = refName(ref);
-  box.querySelector('.ep-clear').hidden = !ref;
-  box.querySelector('.ep-list').hidden = true;
-  updateOwnerWarn();
-}
-document.addEventListener('focusin', e => { const box = e.target.closest?.('.exec-pick'); if (box && e.target.matches('.ep-q')) { e.target.select(); epRender(box, true); } });
-document.addEventListener('input', e => { const box = e.target.closest?.('.exec-pick'); if (box && e.target.matches('.ep-q')) epRender(box, true); });
-document.addEventListener('keydown', e => {
-  const box = e.target.closest?.('.exec-pick');
-  if (!box || !e.target.matches('.ep-q')) return;
-  const opts = $$('.ep-opt', box), i = opts.findIndex(o => o.classList.contains('act'));
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (box.querySelector('.ep-list').hidden) epRender(box, true); const j = Math.max(0, Math.min(opts.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))); opts.forEach((o, k) => o.classList.toggle('act', k === j)); opts[j]?.scrollIntoView({ block: 'nearest' }); }
-  else if (e.key === 'Enter' && !box.querySelector('.ep-list').hidden) { e.preventDefault(); if (opts[i]) epSet(box.dataset.pick, opts[i].dataset.ref); }
-  else if (e.key === 'Escape' && !box.querySelector('.ep-list').hidden) { e.preventDefault(); e.stopPropagation(); epSet(box.dataset.pick, box.querySelector('input[type="hidden"]').value); }
-});
-document.addEventListener('focusout', e => {
-  const box = e.target.closest?.('.exec-pick');
-  if (!box) return;
-  setTimeout(() => { if (!box.contains(document.activeElement)) epSet(box.dataset.pick, box.querySelector('input[type="hidden"]').value); }, 150);
-});
-// Staff ids on the card besides the responsible one: executor, co-executor and the older co-owners that were kept.
-function formOwners() {
-  const owner = $('#t-owner')?.value || '';
-  const exec = val('execRef'), co = val('coexecRef');
-  const legacy = ($('#dform .legacy-co')?.dataset.ids || '').split(',').filter(Boolean);
-  return [owner, refUser(exec)?.id, refUser(co)?.id, ...legacy].filter((v, i, a) => v && a.indexOf(v) === i);
-}
-function formGaps() {
-  const marks = selectedMarks();
-  return formOwners().map(id => state.users.get(id)).filter(Boolean)
-    .map(u => ({ u, g: A.profileGaps(u, { sections: marks }) })).filter(x => x.g.length).map(x => A.profileMessage(x.u, x.g));
-}
-function updateAbsenceWarn() {
-  const box = $('#abs-warn');
-  if (!box) return;
-  const hits = A.absenceHits({ ownerId: $('#t-owner')?.value, coOwnerIds: formOwners().slice(1), start: val('start'), finish: val('finish') }, liveUsers());
-  box.hidden = !hits.length;
-  box.textContent = hits.length ? `Внимание: ${hits.map(h => A.absenceText(h) + (h.onFinish ? ' — на эти дни приходится финиш' : '')).join('; ')}.` : '';
-}
-function updateOwnerWarn() {
-  updateAbsenceWarn();
-  const box = $('#owner-warn');
-  if (!box) return;
-  const texts = formGaps();
-  box.hidden = !texts.length;
-  $('#owner-warn-text').textContent = texts.join(' ');
-}
-
-/* ---------- weekly summary for management ---------- */
-function weeklyText(list = tasksArr()) {
-  const today = state.today, from = addDays(today, -6), next = addDays(today, 7);
-  const line = t => `• ${projectOf(t)?.name || '—'} — ${marksText(t)}${t.title ? ' (' + t.title + ')' : ''}${ownerOf(t) ? ', ' + ownerOf(t).name : ''}${contractorOf(t) ? ', ' + contractorOf(t).name : ''}`;
-  const inWeek = d => d && d >= from && d <= today;
-  const accepted = list.filter(t => t.status === 'done' && inWeek(L.reviewStats(t, today).accepted));
-  const submitted = list.filter(t => (t.history || []).some(h => h.type === 'status' && h.to === 'review' && inWeek(h.date)) && !accepted.includes(t));
-  const shifted = list.flatMap(t => (t.history || []).filter(h => h.type === 'finish' && inWeek(h.date)).map(h => ({ t, h })));
-  const overdue = list.filter(t => timing(t).overdue);
-  const coming = list.filter(t => L.ACTIVE.has(t.status) && !timing(t).overdue && isDate(t.finish) && t.finish >= today && t.finish <= next).sort(sortByDeadline);
-  const review = list.filter(t => t.status === 'review');
-  const sec = (title, items, fmt = line) => items.length ? `\n${title} (${items.length}):\n${items.map(fmt).join('\n')}\n` : '';
-  const head = `Сводка за неделю ${fmtDate(from)}–${fmtDate(today)}${state.me ? ' · ' + state.me.name : ''}\n`
-    + `В работе ${list.filter(t => L.ACTIVE.has(t.status)).length}, сорвано ${overdue.length}, на проверке ${review.length}.\n`;
-  return head
-    + sec('Принято', accepted)
-    + sec('Сдано на проверку', submitted)
-    + sec('Перенесены сроки', shifted, ({ t, h }) => `${line(t)}: ${fmtDate(h.from)} → ${fmtDate(h.to)}${h.reason ? ' — ' + (SHIFT_REASONS[h.reason] || h.reason).toLowerCase() : ''}${h.note ? ' (' + h.note + ')' : ''}`)
-    + sec('Срок сорван', overdue, t => `${line(t)} — ${timing(t).text}`)
-    + sec('Сдача на следующей неделе', coming, t => `${line(t)} — до ${fmtDate(t.finish)}`)
-    + sec('Ждут проверки', review);
-}
-function openWeekly() {
-  setFileMenu(false);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<div class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="mtitle">
-    <h2 id="mtitle">Сводка за неделю</h2>
-    <p class="hint">Текст можно поправить перед отправкой. Деньги в сводку не попадают.</p>
-    <textarea id="wk-text" class="wk-text" rows="16">${esc(weeklyText())}</textarea>
-    <div class="modal-f"><button class="btn primary" type="button" data-m="copy">Копировать</button><button class="btn" type="button" data-m="cancel">Закрыть</button></div></div>`;
-  document.body.append(root);
-  const close = () => root.remove();
-  root.addEventListener('click', e => {
-    if (e.target === root || e.target.dataset.m === 'cancel') close();
-    if (e.target.dataset.m === 'copy') copyText($('#wk-text').value).then(ok => toast(ok ? 'Сводка скопирована — вставьте в мессенджер или почту' : 'Текст выделен — нажмите Ctrl+C'));
-  });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  $('#wk-text').focus();
-}
-
-/* ---------- absences of staff (vacation, sick leave) ---------- */
-function openAbsences(uid) {
-  const u = state.users.get(uid);
-  if (!u || !A.canEditAbsences(state.me, u)) return toast('Отсутствия этого сотрудника ведут ГИП или его главспец.', true);
-  let rows = clone(A.absencesOf(u).length ? u.absences : []);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  const draw = () => {
-    root.querySelector('#abs-rows').innerHTML = rows.length ? rows.map((a, i) => `<div class="abs-row" data-i="${i}">
-      <select data-k="kind">${Object.entries(A.ABSENCE_KINDS).map(([k, l]) => `<option value="${k}"${a.kind === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
-      <input type="date" data-k="from" value="${esc(a.from || '')}" aria-label="С"><span>—</span><input type="date" data-k="to" value="${esc(a.to || '')}" aria-label="По">
-      <input data-k="note" value="${esc(a.note || '')}" placeholder="Комментарий" maxlength="100">
-      <button class="btn ghostbtn sm" type="button" data-m="del" data-i="${i}" title="Удалить">✕</button></div>`).join('') : '<div class="hint">Отсутствий не отмечено.</div>';
-  };
-  root.innerHTML = `<form class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
-    <h2 id="mtitle">Отсутствия: ${esc(u.name)}</h2>
-    <p class="hint">Отпуска и больничные. Программа предупредит, если срок карточки сотрудника попадает на эти дни, и покажет их на диаграмме Ганта.</p>
-    <div id="abs-rows"></div>
-    <button class="btn sm" type="button" data-m="add">+ Добавить период</button>
-    <div class="err" id="m-err" hidden></div>
-    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div>
-  </form>`;
-  document.body.append(root);
-  draw();
-  const close = () => root.remove();
-  root.addEventListener('input', e => { const r = e.target.closest('.abs-row'); if (r) rows[Number(r.dataset.i)][e.target.dataset.k] = e.target.value; });
-  root.addEventListener('click', e => {
-    const m = e.target.dataset.m;
-    if (e.target === root || m === 'cancel') close();
-    if (m === 'add') { rows.push({ id: newId(), kind: 'vacation', from: todayStr(), to: addDays(todayStr(), 13), note: '' }); draw(); }
-    if (m === 'del') { rows.splice(Number(e.target.dataset.i), 1); draw(); }
-  });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.querySelector('form').addEventListener('submit', async e => {
-    e.preventDefault(); e.stopPropagation();
-    const bad = rows.find(a => !isDate(a.from) || !isDate(a.to) || a.to < a.from);
-    if (bad) { const i = rows.indexOf(bad); return modalErr(root, '#m-err', 'Проверьте даты: «по» не раньше «с».', `.abs-row[data-i="${i}"] [data-k="${isDate(bad.from) ? 'to' : 'from'}"]`); }
-    const list = rows.map(a => ({ id: a.id || newId(), kind: a.kind, from: a.from, to: a.to, note: (a.note || '').trim() })).sort((a, b) => a.from.localeCompare(b.from));
-    if (await write(op.update('users', uid, { absences: list }), `Отсутствия сохранены: ${u.name}`)) close();
-  });
-}
-const upcomingAbsences = u => A.absencesOf(u).filter(a => a.to >= state.today);
-
-/* ---------- card discussion ---------- */
-function renderTalk() {
-  const box = $('#talk-box'), t = state.tasks.get(state.drawer?.id);
-  if (!box || !t) return;
-  const draft = $('#talk-text')?.value || '', typing = document.activeElement?.id === 'talk-text';
-  if (talkEdit && $('#talk-edit')) talkEdit.text = $('#talk-edit').value; // keep the edit through a re-render
-  if (talkEdit && !(t.comments || []).some(c => c.id === talkEdit.cid)) talkEdit = null;
-  const editingNow = document.activeElement?.id === 'talk-edit';
-  const list = t.comments || [];
-  const when = ts => new Date(ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  box.innerHTML = `<div class="talk">${list.length ? list.map(c => `<div class="msg-item${c.userId === state.me?.id ? ' mine' : ''}${c.kind === 'submit' ? ' submit' : ''}">
-      <div class="msg-h"><b>${esc(c.user || '—')}</b>${c.kind === 'submit' ? '<span class="chip tone-review">сдал на проверку</span>' : ''}<span class="hint">${when(c.ts)}${c.editedAt ? ' · изменено' : ''}</span>${c.userId === state.me?.id && talkEdit?.cid !== c.id ? `<button class="edit-msg" type="button" data-act="talk-edit" data-cid="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>
-      ${talkEdit?.cid === c.id ? `<div class="msg-edit"><textarea id="talk-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(talkEdit.text)}</textarea>
-        <div class="row-in"><button class="btn primary sm" type="button" data-act="talk-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="talk-edit-cancel">Отмена</button><span class="hint">Ctrl+Enter — сохранить, Esc — отмена</span></div></div>`
-        : `<div class="msg-t">${esc(c.text)}</div>`}${thankBtn(t, c)}</div>`).join('') : '<div class="hint">Обсуждения пока нет. Здесь видят друг друга ответственные по карточке и их руководители.</div>'}</div>
-    <div class="talk-new"><textarea id="talk-text" rows="2" maxlength="2000" placeholder="Написать… (Ctrl+Enter — отправить)">${esc(draft)}</textarea>
-      <button class="btn primary" type="button" data-act="talk-send">Отправить</button></div>`;
-  const tl = box.querySelector('.talk'); tl.scrollTop = tl.scrollHeight;
-  if (typing) { const ta = $('#talk-text'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
-  if (editingNow) { const ta = $('#talk-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
-}
-// «Спасибо» under a colleague's message: one per person; the author sees the count and it adds up on their card.
-function thankBtn(t, c) {
-  if (!game) return '';
-  const n = (c.thanks || []).length, mine = (c.thanks || []).includes(state.me?.id), own = c.userId === state.me?.id;
-  if (own) return n ? `<div class="thanks-row"><span class="thanks-n" title="Вас поблагодарили">♥ спасибо: ${n}</span></div>` : '';
-  if (!c.userId) return '';
-  return `<div class="thanks-row"><button class="thanks-btn${mine ? ' on' : ''}" type="button" data-act="thank" data-task="${esc(t.id)}" data-cid="${esc(c.id)}" aria-pressed="${mine}" title="${mine ? 'Убрать спасибо' : 'Поблагодарить — например, за помощь или быструю проверку'}">♥ Спасибо${n ? ` · ${n}` : ''}</button></div>`;
-}
-async function thank(taskId, cid) {
-  const res = await api.thankComment(taskId, cid);
-  if (!res?.ok) return toast(res?.message || 'Не удалось.', true);
-  await refresh();
-  renderTalk();
-  if (res.on) toast('Спасибо отправлено');
-}
-// The field is emptied before sending: the card re-renders while the message is saved, and it must not
-// come back with the old text. On failure the text is put back.
-async function sendComment() {
-  const el = $('#talk-text'), id = state.drawer?.id;
-  if (!el || !id || !el.value.trim()) return;
-  const text = el.value;
-  el.value = '';
-  const res = await api.addComment(id, text);
-  if (!res?.ok) { const cur = $('#talk-text'); if (cur && !cur.value) cur.value = text; return toast(res?.message || 'Не удалось отправить.', true); }
-  await refresh();
-  renderTalk();
-}
-// Editing one's own message in a card discussion: inline, Ctrl+Enter saves, Esc cancels.
-let talkEdit = null; // { cid, text }
-function talkEditStart(cid) {
-  const c = (state.tasks.get(state.drawer?.id)?.comments || []).find(x => x.id === cid);
-  if (!c || c.userId !== state.me?.id) return;
-  talkEdit = { cid, text: c.text };
-  renderTalk();
-  const ta = $('#talk-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
-}
-async function talkEditSave() {
-  const ta = $('#talk-edit'), id = state.drawer?.id;
-  if (!talkEdit || !ta || !id) return;
-  const text = ta.value.trim();
-  if (!text) return toast('Сообщение не может быть пустым.', true);
-  const res = await api.editComment(id, talkEdit.cid, text);
-  if (!res?.ok) return toast(res?.message || 'Не удалось сохранить.', true);
-  talkEdit = null;
-  await refresh();
-  renderTalk();
-}
-function talkEditCancel() { talkEdit = null; renderTalk(); }
-
-// Status changes are actions (buttons in the card header, the status cell, the kanban), not a free list.
-const QUICK = {
-  start: { to: 'in_progress', label: 'Начать работу', okMsg: 'Карточка в работе' },
-  submit: { to: 'review', label: 'Сдал на проверку', okMsg: 'Отмечено: сдано на проверку' },
-  remarks: { to: 'revision', label: 'Выдать замечания', okMsg: 'Замечания выданы — карточка на доработке' },
-  accept: { to: 'done', label: 'Принять работу', okMsg: 'Работа принята' },
-  pause: { to: 'paused', label: 'Приостановить', okMsg: 'Карточка приостановлена' },
-  resume: { to: 'in_progress', label: 'Возобновить', okMsg: 'Работа возобновлена' },
-  reopen: { to: 'in_progress', label: 'Вернуть в работу', okMsg: 'Карточка снова в работе' },
-};
-// Which actions a status offers. A specialist only submits own work.
-function quickKeys(status) {
-  const map = { not_started: ['start', 'pause'], in_progress: ['submit', 'pause'], revision: ['submit', 'pause'], review: ['accept', 'remarks'], paused: ['resume'], done: ['reopen'] };
-  const keys = map[status] || ['start'];
-  return isSpec() ? keys.filter(k => k === 'submit' || (k === 'start' && status === 'not_started')) : keys;
-}
-const quickFor = (from, to) => Object.keys(QUICK).find(k => QUICK[k].to === to && quickKeys(from).includes(k));
-
-function taskMainPanel(t, isNew) {
-  const projects = [...state.projects.values()].filter(p => !p.archived || p.id === t.projectId).sort(byName);
-  const marks = sectionsOf(t);
-  return `
-    ${!projects.length ? '<div class="note-box">Сначала добавьте проект — карточка всегда относится к проекту.</div>' : ''}
-    <div class="fgrid">
-      <div class="f wide"><label class="req" for="t-project">Проект</label><select id="t-project" name="projectId">${selOpts(projects, t.projectId, '— выберите —')}</select></div>
-      ${marksField(t)}
-      <fieldset class="f wide who-box"><legend>Кто делает</legend>
-        <div class="who-grid">
-          <div class="f"><label class="req" for="t-owner" title="${A.isGip(state.me) ? 'ГИП может спустить карточку любому главспецу или специалисту.' : A.isChief(state.me) ? 'Главспец спускает карточки только своим специалистам.' : 'Карточку спустил вам руководитель.'}">Ответственный в команде</label><select id="t-owner" name="ownerId">${ownerOptions(t.ownerId || state.me?.id, marks)}</select></div>
-          ${execPickerHtml('exec', 'Исполнитель', 'штатный или внештатный', execRefOf(t))}
-          ${execPickerHtml('coexec', 'Соисполнитель', 'необязательно', coExecRefOf(t))}
-        </div>
-        <label class="chk sm-chk exec-fit"><input type="checkbox" id="exec-fit"${loadLocal('execFit', true) ? ' checked' : ''}> Только подходящие по специальности</label>
-        ${legacyCoHtml(t)}
-        <div class="warnline soft" id="abs-warn" hidden></div>
-        <div class="warnline" id="owner-warn" hidden><span id="owner-warn-text"></span>
-          <label class="chk"><input type="checkbox" id="t-profile-ok" name="profileOk"${t.profileOk ? ' checked' : ''}> Всё равно назначить</label></div>
-      </fieldset>
-      <div class="f"><label for="t-start">Старт работ</label><input id="t-start" name="start" type="date" value="${esc(t.start || '')}"></div>
-      <div class="f"><label for="t-finish">Плановый финиш</label><input id="t-finish" name="finish" type="date" value="${esc(t.finish || '')}" data-orig="${esc(isNew ? '' : t.finish || '')}"></div>
-      <div class="f wide shift" id="shift-box" hidden>
-        <div class="shift-h">Срок переносится: <b id="shift-text"></b></div>
-        <div class="fgrid">
-          <div class="f"><label class="req" for="t-shift-reason">Причина переноса</label><select id="t-shift-reason" name="shiftReason"><option value="">— выберите —</option>${Object.entries(SHIFT_REASONS).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
-          <div class="f"><label for="t-shift-note">Комментарий</label><input id="t-shift-note" name="shiftNote" maxlength="200" placeholder="Например: заказчик сменил ТУ"></div>
-        </div>
-        <span class="hint">Переносы по вине исполнителя не сдвигают его контрольный срок и учитываются в надёжности.</span>
-      </div>
-      <div class="f"><span class="lbl">Статус</span>${isNew ? `<label class="chk"><input type="checkbox" id="t-start-now" name="startNow"> Сразу в работу</label><input type="hidden" id="t-status" name="status" value="not_started">`
-        : `<div class="status-ro">${statusChip(t)}<input type="hidden" id="t-status" name="status" value="${esc(t.status)}"></div><span class="hint">Меняется кнопками в шапке карточки. «Срок сорван» ставится сам.</span>`}</div>
-      <div class="f"><label for="t-ready">Готовность, %</label>
-        <div class="ready-in"><input type="range" id="t-ready-r" min="${L.READY_MIN}" max="${L.READY_MAX}" step="5" value="${L.readinessManual(t.status) ? L.readiness(t) : L.READY_MIN}" data-transient aria-label="Готовность, ползунок">
-          <input id="t-ready" name="readiness" type="number" min="${L.READY_MIN}" max="${L.READY_MAX}" step="1" value="${L.readinessManual(t.status) ? L.readiness(t) : ''}"></div>
-        <span class="hint" id="ready-hint"></span></div>
-      ${canMoney() ? `<div class="f"><label for="t-budget">Бюджет, ₽</label><input id="t-budget" name="budget" inputmode="decimal" value="${t.budget ? esc(String(t.budget).replace('.', ',')) : ''}" placeholder="150 000"></div>` : ''}
-      <details class="f wide more"${t.title || t.note || t.folder ? ' open' : ''}><summary>Дополнительно: уточнение, папка раздела, примечание</summary><div class="fgrid">
-        <div class="f wide"><label for="t-title">Уточнение</label><input id="t-title" name="title" value="${esc(t.title || '')}" placeholder="Корпус 2, стадия Р" maxlength="120"></div>
-        <div class="f wide"><label for="t-folder">Папка раздела</label>
-          <div class="row-in"><input id="t-folder" name="folder" value="${esc(t.folder || '')}" placeholder="\\\\server\\Проекты\\0425-24\\ЭОМ" maxlength="400">
-            <button class="btn" data-act="pick-task-folder" type="button">Выбрать…</button>${projectOf(t)?.folder ? '<button class="btn ghostbtn" data-act="suggest-task-folder" type="button" title="Папка проекта + раздел">Из папки проекта</button>' : ''}</div>
-          <span class="hint">Чертежи и файлы раздела. Кнопка «📁 Папка» в шапке карточки откроет её в Проводнике.</span></div>
-        <div class="f wide"><label for="t-note">Примечание</label><textarea id="t-note" name="note" maxlength="2000">${esc(t.note || '')}</textarea></div>
-      </div></details>
-      ${taskFilesHtml(t)}
-    </div>`;
-}
-/* ---------- 4.1.1 (item 39): files of a card — dropped from Explorer, a screenshot pasted with Ctrl+V ---------- */
-const canFiles = () => typeof api.attachBytes === 'function';
-function taskFilesHtml(t) {
-  if (!canFiles()) return '';
-  const files = Array.isArray(t.files) ? t.files : [];
-  return `<div class="f wide tf" id="tf-box"><span class="lbl">Файлы${files.length ? ` <span class="hint">${files.length}</span>` : ''}</span>
-    <div class="tf-list">${files.map(f => `<span class="aq-file tf-file">${icon('file')}<button class="linkbtn" type="button" data-act="tf-open" data-fid="${esc(f.id)}" title="Открыть">${esc(f.name)}</button> <span class="hint">${fileSize(f.size)}</span><button class="btn ghostbtn sm" type="button" data-act="tf-del" data-fid="${esc(f.id)}" title="Убрать из карточки" aria-label="Убрать">×</button></span>`).join('')}</div>
-    <div class="tf-drop">${t.id ? 'Перетащите сюда файлы из Проводника или нажмите <b>Ctrl+V</b>, чтобы вставить скриншот' : 'Сохраните карточку — потом сюда можно будет перетаскивать файлы'}</div></div>`;
-}
-async function attachToTask(taskId, fileList) {
-  const t = state.tasks.get(taskId);
-  if (!t || !canFiles()) return;
-  const added = [];
-  for (const f of [...fileList].slice(0, 20)) {
-    if (!f || !f.size) continue;
-    const name = f.name && f.name !== 'image.png' ? f.name : `Скриншот ${new Date().toLocaleString('ru-RU').replace(/[:.,]/g, '-').replace(/\s+/g, ' ')}.png`;
-    const r = await api.attachBytes(t.projectId, name, new Uint8Array(await f.arrayBuffer()));
-    if (r?.ok) added.push(r.file); else toast(r?.message || `Не удалось приложить «${name}».`, true);
-  }
-  if (!added.length) return;
-  const cur = state.tasks.get(taskId);
-  await write(op.update('tasks', taskId, { files: [...(Array.isArray(cur.files) ? cur.files : []), ...added] }), `${marksText(t)}: ${added.length === 1 ? `приложен «${added[0].name}»` : `приложено файлов: ${added.length}`}`);
-  refreshTaskFiles();
-}
-// The open card shows its file list without losing what is typed in the form.
-function refreshTaskFiles() { const box = $('#tf-box'), t = state.drawer?.kind === 'task' && state.tasks.get(state.drawer.id); if (box && t) box.outerHTML = taskFilesHtml(t); }
-const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
-const fileTarget = e => {
-  if (e.target.closest?.('#dform') && state.drawer?.kind === 'task' && state.drawer.id) return state.drawer.id;
-  return e.target.closest?.('[data-kb-id]')?.dataset.kbId || e.target.closest?.('.tl-bar[data-bar]')?.dataset.bar || '';
-};
-document.addEventListener('dragover', e => {
-  if (!hasFiles(e) || !canFiles()) return;
-  const id = fileTarget(e);
-  $$('.file-over').forEach(x => x.classList.remove('file-over'));
-  if (!id) return;
-  e.preventDefault(); e.stopPropagation();
-  e.dataTransfer.dropEffect = 'copy';
-  (e.target.closest('#tf-box, #dform, [data-kb-id], .tl-bar') || e.target).classList.add('file-over');
-}, true);
-document.addEventListener('dragleave', e => { if (hasFiles(e) && !e.relatedTarget) $$('.file-over').forEach(x => x.classList.remove('file-over')); }, true);
-document.addEventListener('drop', e => {
-  if (!hasFiles(e) || !canFiles()) return;
-  $$('.file-over').forEach(x => x.classList.remove('file-over'));
-  const id = fileTarget(e);
-  if (!id) return;
-  e.preventDefault(); e.stopPropagation();
-  attachToTask(id, e.dataTransfer.files);
-}, true);
-document.addEventListener('paste', e => {
-  const files = [...(e.clipboardData?.files || [])];
-  if (!files.length || !canFiles() || state.drawer?.kind !== 'task' || !state.drawer.id) return;
-  e.preventDefault();
-  attachToTask(state.drawer.id, files);
-});
-
-function historyLine(h) {
-  if (h.type === 'finish') {
-    const d = dayNum(h.to) - dayNum(h.from);
-    return `<b>Срок перенесён</b> ${fmtDate(h.from)} → ${fmtDate(h.to)} (${d >= 0 ? '+' : ''}${d} дн.) · ${esc(SHIFT_REASONS[h.reason] || SHIFT_REASONS.other)}${h.note ? ` · «${esc(h.note)}»` : ''}`;
-  }
-  const lbl = s => (s ? STATUSES[s]?.label || s : 'создана');
-  return h.from ? `<b>${esc(lbl(h.to))}</b> <span class="hint">(было: ${esc(lbl(h.from))})</span>${h.note ? ` · «${esc(h.note)}»` : ''}` : `<b>Карточка создана</b> · ${esc(lbl(h.to))}`;
-}
-function taskTimePanel(t, isNew) {
-  const summary = isNew ? '' : (() => {
-    const sh = L.shiftsOf(t), rs = L.reviewStats(t, state.today);
-    const lt = L.lateness(t, state.today);
-    const cells = [
-      ['Переносов срока', sh.count ? `${sh.count} · ${sh.days >= 0 ? '+' : ''}${sh.days} дн.` : 'не было'],
-      ['Первоначальный срок', fmtDate(sh.original)],
-      ['Контрольный срок исполнителя', fmtDate(sh.contractorDeadline)],
-      ['Кругов замечаний', String(rs.rounds)],
-      ['На проверке у вас', days(rs.chiefDays)],
-      ['На доработке у исполнителя', days(rs.contractorDays)],
-    ];
-    return `<div class="sub0"><div class="kv">${cells.map(([k, v]) => `<div><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>
-      ${lt && lt.late ? `<div class="err">${lt.final ? `Сдано на ${days(lt.late)} позже контрольного срока.` : `Просрочка от контрольного срока: ${days(lt.late)}.`}</div>` : ''}</div>`;
-  })();
-  const hist = isNew ? '' : (() => {
-    const list = L.historyOf(t).slice().reverse();
-    return `<div class="sub"><h3>История</h3>${list.length ? `<ol class="hist">${list.map(h => `<li><span class="num hint">${fmtDate(h.date)}</span><span>${historyLine(h)}</span></li>`).join('')}</ol>`
-      : '<div class="hint">История пишется с момента обновления программы: переносы сроков и смены статусов.</div>'}</div>`;
-  })();
-  const issues = isNew ? [] : L.dependencyIssues(t, state.tasks, state.today);
-  return `${summary}
-    <div class="sub"><h3>Зависит от (смежные разделы)</h3>
-      ${issues.length ? `<div class="err">${issues.map(i => esc(i.text)).join('<br>')}</div>` : ''}
-      <div id="dep-box"></div>
-      <span class="hint">Например: СС ждёт задание от ЭОМ. На диаграмме Ганта связь показана стрелкой; если смежник срывает срок, карточка попадёт в «Под угрозой».</span></div>
-    <div class="sub"><h3>Контрольные точки</h3><div id="ms-box"></div>
-      <button class="btn sm" data-act="ms-add" type="button">+ Контрольная точка</button>
-      <span class="hint">Например: выдача заданий смежникам, промежуточная сдача, согласование с заказчиком.</span></div>
-    <div class="sub"><h3>Изменения (ревизии)</h3><div id="rev-box"></div>
-      <button class="btn sm" data-act="rev-add" type="button">+ Изменение</button>
-      <span class="hint">Учёт выпусков: «Изм. 1 — по замечаниям экспертизы». Последнее изменение видно в штампе карточки и на странице для заказчика.</span></div>
-    ${hist}`;
-}
-// Candidates: other cards of the same project that would not create a loop.
-function renderDeps() {
-  const box = $('#dep-box');
-  if (!box || !state.draft) return;
-  const selfId = state.drawer.id || '__new';
-  const projectId = val('projectId');
-  const byId = new Map(state.tasks);
-  const chosen = state.draft.dependsOn.filter(id => state.tasks.has(id));
-  const label = x => `${marksText(x)} · ${executorOf(x)?.name || 'нет исполнителя'} · до ${fmtDate(x.finish)}`;
-  const options = [...state.tasks.values()]
-    .filter(x => x.id !== selfId && x.projectId === projectId && !chosen.includes(x.id) && !(state.drawer.id && L.wouldCycle(state.drawer.id, x.id, byId)))
-    .sort(sortByDeadline);
-  box.innerHTML = `${chosen.length ? `<div class="dep-list">${chosen.map(id => {
-      const x = state.tasks.get(id), tm = timing(x);
-      return `<div class="dep-row">${marksHtml(x)}<span class="dep-who">${esc(executorOf(x)?.name || 'нет исполнителя')}</span>
-        <span class="due ${tm.cls}">${x.status === 'done' ? 'принят' : esc(tm.text)}</span>
-        <button class="btn ghostbtn sm" data-act="dep-del" data-id="${esc(id)}" type="button" aria-label="Убрать зависимость">✕</button></div>`;
-    }).join('')}</div>` : '<div class="hint">Зависимостей нет.</div>'}
-    ${options.length ? `<select id="dep-add" data-transient aria-label="Добавить зависимость"><option value="">+ Добавить: эта карточка ждёт…</option>${options.map(x => `<option value="${esc(x.id)}">${esc(label(x))}</option>`).join('')}</select>`
-      : `<div class="hint">${projectId ? 'В проекте нет других карточек, от которых можно зависеть.' : 'Сначала выберите проект.'}</div>`}`;
-}
-
-function renderMilestones() {
-  const box = $('#ms-box');
-  if (!box) return;
-  const list = state.draft.milestones;
-  box.innerHTML = list.length ? `<div class="ms-list">${list.map((m, i) => {
-    const late = !m.done && isDate(m.date) && m.date < state.today;
-    return `<div class="ms-row ${m.done ? 'done' : ''} ${late ? 'late' : ''}">
-      <input type="checkbox" data-ms="${i}" data-k="done" ${m.done ? 'checked' : ''} aria-label="Выполнена">
-      <input data-ms="${i}" data-k="title" value="${esc(m.title || '')}" placeholder="Название" maxlength="120" aria-label="Название контрольной точки">
-      <input type="date" data-ms="${i}" data-k="date" value="${esc(m.date || '')}" aria-label="Дата">
-      <button class="btn ghostbtn sm" data-act="ms-del" data-i="${i}" type="button" aria-label="Удалить">✕</button>
-    </div>`;
-  }).join('')}</div>` : '<div class="hint">Контрольных точек нет.</div>';
-  if (isSpec()) $$('#ms-box input:not([data-k="done"])').forEach(el => { el.disabled = true; });
-}
-
-function renderRevisions() {
-  const box = $('#rev-box');
-  if (!box || !state.draft) return;
-  const list = state.draft.revisions;
-  box.innerHTML = list.length ? `<div class="rev-list">${list.map((r, i) => `<div class="rev-row">
-      <span class="rev-no">Изм.&nbsp;<input data-rev="${i}" data-k="no" value="${esc(r.no)}" maxlength="6" aria-label="Номер изменения" inputmode="numeric"></span>
-      <input type="date" data-rev="${i}" data-k="date" value="${esc(r.date || '')}" aria-label="Дата изменения">
-      <input data-rev="${i}" data-k="note" value="${esc(r.note || '')}" placeholder="Что изменено и почему" maxlength="200" aria-label="Содержание изменения">
-      <button class="btn ghostbtn sm" data-act="rev-del" data-i="${i}" type="button" aria-label="Удалить">✕</button></div>`).join('')}</div>`
-    : '<div class="hint">Изменений не было — выпуск первоначальный.</div>';
-}
-function addRevision() {
-  const list = state.draft.revisions;
-  const next = list.reduce((m, r) => Math.max(m, parseInt(r.no, 10) || 0), 0) + 1;
-  list.push({ id: newId(), no: String(next), date: todayStr(), note: '' });
-  renderRevisions();
-  $$('#rev-box [data-k="note"]').at(-1)?.focus();
-}
-function cleanRevisions() {
-  const out = [];
-  for (const r of state.draft.revisions || []) {
-    const no = String(r.no || '').trim(), note = String(r.note || '').trim();
-    if (!no && !note) continue;
-    if (!no) return { error: 'Укажите номер изменения.' };
-    if (r.date && !isDate(r.date)) return { error: 'Проверьте даты изменений.' };
-    out.push({ id: r.id || newId(), no, date: r.date || todayStr(), note });
-  }
-  return { list: out };
-}
-async function openTaskFolder(id) {
-  const res = await api.openTaskFolder(id);
-  if (!res.ok) toast(res.message, true);
-}
-async function pickTaskFolder() {
-  const res = await api.pickFolder(val('folder') || projectOf({ projectId: val('projectId') })?.folder || '');
-  if (res?.path) $('#t-folder').value = res.path;
-}
-function suggestTaskFolder() {
-  const p = projectOf({ projectId: val('projectId') });
-  if (!p?.folder) return toast('У проекта не указана папка.', true);
-  const m = selectedMarks()[0] || '';
-  $('#t-folder').value = p.folder.replace(/[\\/]+$/, '') + (p.folder.includes('/') && !p.folder.includes('\\') ? '/' : '\\') + m;
-}
-
-function taskMoneyPanel(t, isNew) {
-  return `
-    <div class="sub0"><h3 class="h3">Договор и документы</h3>
-      <div class="fgrid">
-        <div class="f"><label for="t-contract">Договор №</label><input id="t-contract" name="contractNo" value="${esc(t.contractNo || '')}" maxlength="60" placeholder="15/24-П"></div>
-        <div class="f"><label for="t-contract-date">от</label><input id="t-contract-date" name="contractDate" type="date" value="${esc(t.contractDate || '')}"></div>
-        <label class="chk"><input type="checkbox" name="invoiceReceived" ${t.invoiceReceived ? 'checked' : ''}> Счёт получен${t.invoiceDate ? ` <span class="hint">${fmtDate(t.invoiceDate)}</span>` : ''}</label>
-        <label class="chk"><input type="checkbox" name="actSigned" ${t.actSigned ? 'checked' : ''}> Акт подписан${t.actDate ? ` <span class="hint">${fmtDate(t.actDate)}</span>` : ''}</label>
-      </div>
-    </div>
-    <div class="sub"><h3>График платежей по договору</h3>
-      <div class="tpl-row"><span class="hint">Шаблон:</span>
-        <button class="btn sm" data-act="plan-tpl" data-tpl="30-70" type="button">Аванс 30% + 70% после приёмки</button>
-        <button class="btn sm" data-act="plan-tpl" data-tpl="50-50" type="button">50% + 50%</button>
-        <button class="btn sm" data-act="plan-tpl" data-tpl="100" type="button">100% после приёмки</button>
-      </div>
-      <div id="plan-box"></div>
-      <button class="btn sm" data-act="plan-add" type="button">+ Платёж в график</button>
-      <div id="plan-preview"></div>
-    </div>
-    ${isNew ? '<p class="hint">Фактические платежи можно будет вносить после сохранения карточки.</p>' : '<div class="sub" id="payments"></div>'}`;
-}
-const planValue = r => (r.pct !== null && r.pct !== undefined && r.pct !== '' ? `${String(r.pct).replace('.', ',')}%` : r.amount ? String(r.amount).replace('.', ',') : '');
-function renderPlanRows() {
-  const box = $('#plan-box');
-  if (!box) return;
-  const list = state.draft.plan;
-  box.innerHTML = list.length ? `<div class="plan-list">${list.map((r, i) => `<div class="plan-row">
-      <input data-pl="${i}" data-k="title" value="${esc(r.title || '')}" placeholder="Аванс" maxlength="80" aria-label="Назначение платежа">
-      <input data-pl="${i}" data-k="value" value="${esc(planValue(r))}" placeholder="30% или 50 000" inputmode="decimal" aria-label="Сумма или процент">
-      <select data-pl="${i}" data-k="trigger" aria-label="Когда платить">${Object.entries(PAY_TRIGGERS).map(([k, l]) => `<option value="${k}"${(r.trigger || 'accepted') === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
-      <input type="date" data-pl="${i}" data-k="date" value="${esc(r.date || '')}" ${r.trigger === 'date' ? '' : 'hidden'} aria-label="Дата платежа">
-      <button class="btn ghostbtn sm" data-act="plan-del" data-i="${i}" type="button" aria-label="Удалить">✕</button>
-    </div>`).join('')}</div>` : '<div class="hint">Графика нет — весь остаток считается к оплате после приёмки.</div>';
-}
-// Live preview from the form: budget, status and start may be edited but not saved yet.
-function renderPlanPreview() {
-  const box = $('#plan-preview');
-  if (!box || !state.draft) return;
-  const saved = state.drawer.id ? state.tasks.get(state.drawer.id) : {};
-  const budget = parseMoney(val('budget'));
-  const t = { ...saved, budget: Number.isNaN(budget) ? 0 : budget, status: val('status') || saved?.status, start: val('start'), plan: state.draft.plan, payments: saved?.payments || [] };
-  const pp = L.paymentPlan(t, state.today);
-  const stateChip = r => ({ paid: '<span class="chip tone-ok">оплачено</span>', due: '<span class="chip tone-warn">пора платить</span>', upcoming: '<span class="chip tone-idle">позже</span>' }[r.state]);
-  box.innerHTML = `<div class="plan-prev">
-    ${pp.rows.map(r => `<div class="pp-row ${r.virtual ? 'virtual' : ''}"><span>${esc(r.title || 'Платёж')}<span class="hint"> · ${esc(PAY_TRIGGERS[r.trigger] || '')}${r.dueDate ? ` ${fmtDate(r.dueDate)}` : ''}</span></span>
-      <span class="num">${r.paid > 0 && r.paid < r.amount ? `<span class="hint">оплачено ${money(r.paid)} из </span>` : ''}${money(r.amount)}</span>${stateChip(r)}</div>`).join('')}
-    <div class="pp-sum"><span>Пора платить: <b class="num">${money(pp.dueNow)}</b></span><span>Позже по договору: <b class="num">${money(pp.later)}</b></span></div>
-    ${pp.hasPlan && pp.mismatch > 0 ? `<div class="err">График больше бюджета на ${money(pp.mismatch)}.</div>` : ''}
-    ${pp.hasPlan && pp.mismatch < 0 ? `<div class="hint">В графике не распределено ${money(-pp.mismatch)} — они считаются к оплате после приёмки.</div>` : ''}
-  </div>`;
-}
-
-function renderPayments() {
-  const box = $('#payments');
-  const t = state.tasks.get(state.drawer?.id);
-  if (!box || !t) return;
-  const pays = [...(t.payments || [])].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  const rest = restOf(t);
-  const keep = { d: $('#p-date')?.value, a: $('#p-amount')?.value, n: $('#p-note')?.value };
-  box.innerHTML = `<h3>Фактические платежи</h3>
-    <div class="money3">
-      <div><span class="k">Бюджет</span><span class="v">${money(budgetOf(t))}</span></div>
-      <div><span class="k">Оплачено</span><span class="v">${money(paidOf(t))}</span></div>
-      <div><span class="k">Остаток</span><span class="v ${rest < 0 ? 'neg' : ''}">${money(rest)}</span></div>
-    </div>
-    ${rest < 0 ? `<div class="err">Оплачено больше бюджета на ${money(-rest)}.</div>` : ''}
-    ${pays.length ? `<div class="plist">${pays.map(p => `<div class="prow"><span class="num">${fmtDate(p.date)}</span><span class="n">${esc(p.note || 'платёж')}</span><span class="num">${money(p.amount)}</span>
-      <button class="btn ghostbtn sm" data-act="del-payment" data-pid="${esc(p.id)}" type="button" aria-label="Удалить платёж">✕</button></div>`).join('')}</div>` : '<div class="hint">Платежей ещё не было.</div>'}
-    <div class="padd" data-transient>
-      <div class="f"><label for="p-date">Дата</label><input id="p-date" type="date" value="${esc(keep.d || todayStr())}"></div>
-      <div class="f"><label for="p-amount">Сумма, ₽</label><input id="p-amount" inputmode="decimal" placeholder="50 000" value="${esc(keep.a || '')}"></div>
-      <div class="f"><label for="p-note">Комментарий</label><input id="p-note" placeholder="Аванс 30%" maxlength="120" value="${esc(keep.n || '')}"></div>
-      <button class="btn" data-act="add-payment" type="button">Внести</button>
-    </div>
-    <span class="hint">Платёж сохраняется сразу.</span>`;
-}
-
-/* ---------- message to the contractor ---------- */
-function renderMessage(kind) {
-  const box = $('#msg-box');
-  const t = state.tasks.get(state.drawer?.id);
-  if (!box || !t) return;
-  const c = contractorOf(t);
-  const M = window.Messages;
-  kind = kind || state.msgKind || M.suggest(t, state.today);
-  state.msgKind = kind;
-  const signature = loadLocal('signature', '');
-  const msg = M.build(kind, { task: t, project: projectOf(t), contractor: c, signature, today: state.today });
-  const can = { mail: !!c?.email, whatsapp: !!(c?.phone || /whatsapp/i.test(c?.messenger || '')), telegram: !!(c?.phone || /@|t\.me/.test(c?.messenger || '')) };
-  box.innerHTML = `${c ? '' : '<div class="note-box">У карточки нет подрядчика — текст можно скопировать, но отправить некому.</div>'}
-    <div class="tpl-row">${M.TEMPLATES.map(x => `<button class="btn sm ${x.id === kind ? 'on' : ''}" type="button" data-act="msg-kind" data-kind="${x.id}">${esc(x.label)}</button>`).join('')}</div>
-    <div class="f"><label for="msg-subject">Тема (для почты)</label><input id="msg-subject" value="${esc(msg.subject)}" maxlength="200"></div>
-    <div class="f"><label for="msg-text">Текст — можно поправить перед отправкой</label><textarea id="msg-text" rows="11">${esc(msg.text)}</textarea></div>
-    <div class="f"><label for="msg-sign">Подпись (запоминается)</label><input id="msg-sign" value="${esc(signature)}" maxlength="200" placeholder="С уважением, Иванов И.И., ГС ЭОМ/СС, +7 …"></div>
-    <div class="msg-acts">
-      <button class="btn primary" data-act="msg-copy" type="button">Копировать текст</button>
-      <button class="btn" data-act="msg-send" data-via="mail" type="button" ${can.mail ? '' : 'disabled title="У подрядчика не указана почта"'}>Открыть в почте</button>
-      <button class="btn" data-act="msg-send" data-via="whatsapp" type="button" ${can.whatsapp ? '' : 'disabled title="У подрядчика не указан телефон"'}>WhatsApp</button>
-      <button class="btn" data-act="msg-send" data-via="telegram" type="button" ${can.telegram ? '' : 'disabled title="Не указан ник Telegram или телефон"'}>Telegram</button>
-    </div>
-    <span class="hint">В WhatsApp текст подставится сам. В Telegram откроется чат с подрядчиком, а текст будет скопирован — вставьте его Ctrl+V.</span>`;
-}
-async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); return true; }
-  catch {
-    const ta = $('#msg-text');
-    if (ta) { ta.focus(); ta.select(); }
-    return false;
-  }
-}
-async function sendMessage(via) {
-  const t = state.tasks.get(state.drawer?.id);
-  if (!t) return;
-  const text = $('#msg-text').value, subject = $('#msg-subject').value;
-  if (via === 'telegram') await copyText(text);
-  const res = await api.openContact({ contractorId: t.contractorId, kind: via, subject, text });
-  if (!res.ok) return toast(res.message, true);
-  toast(via === 'telegram' ? 'Текст скопирован — вставьте его в чат (Ctrl+V)' : via === 'mail' ? 'Письмо открыто в почтовой программе' : 'Открыт WhatsApp');
-}
-
-/* ---------- 4.1: focus on a task — «Начать работу» starts a timer; the time is kept on the card ---------- */
-// One focus per computer user: { taskId, since }. Stopped by «Пауза», «Сдал на проверку», another focus or ✕.
-let focus = loadLocal('focus', null);
-if (focus) setTimeout(() => api.setQuiet?.(true), 0); // a focus kept from the last run keeps «Не беспокоить»
-const fmtSpent = min => (min >= 60 ? `${Math.floor(min / 60)} ч ${String(min % 60).padStart(2, '0')} мин` : `${min} мин`);
-const spentOf = (t, userId = null) => (Array.isArray(t?.timeLog) ? t.timeLog : []).filter(x => !userId || x.userId === userId)
-  .reduce((a, x) => a + Math.max(0, Math.round((Date.parse(x.to) - Date.parse(x.from)) / 60000)), 0);
-function focusBtn(t) {
-  const mine = focus?.taskId === t.id, spent = spentOf(t);
-  const can = ['in_progress', 'revision'].includes(t.status);
-  return `<span id="focus-slot" class="focus-slot">${can ? `<button class="btn sm ${mine ? 'on' : ''}" type="button" data-act="${mine ? 'focus-stop' : 'focus-start'}" data-id="${esc(t.id)}" title="${mine ? 'Остановить таймер' : 'Таймер работы над карточкой; время сохранится в карточке'}">${mine ? 'Пауза' : '▶ Фокус'}</button>` : ''}${spent ? `<span class="hint" title="Время по таймеру «Фокус»">затрачено ${fmtSpent(spent)}</span>` : ''}</span>`;
-}
-// The card stays as it is (unsaved edits too): only its focus button is redrawn.
-function refreshFocusSlot() { const slot = $('#focus-slot'), t = state.drawer?.kind === 'task' && state.tasks.get(state.drawer.id); if (slot && t) slot.outerHTML = focusBtn(t); }
-/* ---------- 56: a short introduction by role, once ---------- */
-// 4–5 hints over the real interface the first time a person opens Пульт with data; «Знакомство с Пультом»
-// in the menu shows it again. A hint whose element is not on the screen is skipped.
-function tourSteps() {
-  const me = state.me, gip = A.isGip(me), chief = A.isChief(me);
-  const search = { sel: '[data-act="open-search"]', title: 'Поиск — Ctrl+K', text: A.canCreateTasks(me) ? 'Ищет проекты, карточки и людей. Начните с «+», чтобы сразу завести карточку: «+ ЭОМ Корпус 3 до 15.12 @Орлов».' : 'Ищет проекты, карточки и людей. Недавно открытое — первым.' };
-  const msgs = { sel: '[data-act="msg-open"]', title: 'Сообщения', text: 'Чаты проектов, личные и групповые. Сразу уведомляем только о том, где нужны вы.' };
-  if (gip) return [
-    { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'С него удобно начинать: что ждёт вашей проверки, что просрочено, кто остался без работы.' },
-    { sel: '[data-act="review-queue"]', tab: 'day', title: 'Очередь проверки', text: 'Карточки «на проверке» подряд: «Принять» или «Вернуть с замечанием», клавиши A и R.' },
-    { sel: '#tabs [data-id="projects"]', title: 'Проекты', text: 'Страница проекта: сроки этапов, состав, исходные данные и письма. В Ганте — критический путь.' },
-    search, msgs];
-  if (chief) return [
-    { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'Ваша группа: что ждёт проверки, что горит, кто свободен.' },
-    { sel: '#tabs [data-id="kanban"]', title: 'Канбан', text: 'Перетаскивайте карточки между статусами; «Вид карточек» — что показывать на карточке.' },
-    search, msgs];
-  return [
-    { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'Ваши карточки на сегодня. «Начать» — и карточка в работе.' },
-    { sel: '#tabs [data-id="tasks"]', title: 'Все карточки', text: 'В карточке — «Начать работу», готовность и «Сдать на проверку». Несохранённое не потеряется: предложим восстановить.' },
-    search, msgs];
-}
-let tour = null;
-function tourDoneFor(id) { return !!loadLocal('tourDone', {})[id]; }
-function tourMarkDone() { const d = loadLocal('tourDone', {}); d[state.me.id] = new Date().toISOString(); saveLocal('tourDone', d); }
-function maybeStartTour() {
-  if (tour || SOLO || state.win.compact || !state.me || isEmpty() || tourDoneFor(state.me.id) || loadLocal('tourOff', false)) return;
-  clearTimeout(maybeStartTour._t);
-  maybeStartTour._t = setTimeout(() => { if (!state.drawer && !document.querySelector('.modal-back, .palette-back') && !tourDoneFor(state.me.id) && !loadLocal('tourOff', false)) startTour(); }, 900);
-}
-function startTour() {
-  tour = { i: 0, steps: tourSteps(), tab: state.tab };
-  drawTour();
-}
-function endTour() {
-  document.querySelector('.tour')?.remove();
-  document.querySelector('.tour-on')?.classList.remove('tour-on');
-  const back = tour?.tab;
-  if (tour) tourMarkDone();
-  tour = null;
-  // The hints may switch to «Мой день»: the tab the person had comes back.
-  if (back && state.tab !== back) { state.tab = back; renderNow(); }
-}
-function drawTour() {
-  document.querySelector('.tour')?.remove();
-  document.querySelector('.tour-on')?.classList.remove('tour-on');
-  if (!tour) return;
-  let st, el;
-  while (tour.i < tour.steps.length) {
-    st = tour.steps[tour.i];
-    if (st.tab && state.tab !== st.tab) { state.tab = st.tab; renderNow(); }
-    el = document.querySelector(st.sel);
-    if (el && el.offsetParent !== null) break;
-    tour.i++;
-  }
-  if (tour.i >= tour.steps.length) return endTour();
-  const n = tour.steps.length, last = tour.i === n - 1;
-  el.classList.add('tour-on');
-  el.scrollIntoView({ block: 'nearest' });
-  const box = document.createElement('div');
-  box.className = 'tour'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Знакомство с Пультом');
-  box.innerHTML = `<div class="tour-n hint">${tour.i + 1} из ${n}</div><b>${esc(st.title)}</b><p>${esc(st.text)}</p>
-    <div class="tour-acts"><button class="btn primary sm" type="button" data-tour="next">${last ? 'Понятно' : 'Далее'}</button>${last ? '' : '<button class="btn ghostbtn sm" type="button" data-tour="skip">Пропустить</button>'}</div>`;
-  document.body.append(box);
-  const r = el.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight;
-  const below = r.bottom + 10 + h < window.innerHeight;
-  box.style.top = `${below ? r.bottom + 10 : Math.max(8, r.top - h - 10)}px`;
-  box.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
-  box.querySelector('[data-tour="next"]').focus();
-}
-document.addEventListener('click', e => {
-  const b = e.target.closest?.('[data-tour]');
-  if (!b) return;
-  if (b.dataset.tour === 'skip') endTour(); else { tour.i++; drawTour(); }
-});
-document.addEventListener('keydown', e => { if (tour && e.key === 'Escape') { e.stopPropagation(); endTour(); } }, true);
-window.addEventListener('resize', () => { if (tour) drawTour(); });
-
-/* ---------- 55: notifications without noise ---------- */
-// Right away (a Windows notification when the window is not in front) only what needs me: a card assigned to me,
-// returned, waiting for my review, a message addressed to me. Everything else stays in the morning digest.
-// While a focus runs, notifications are held and shown together when it ends.
-let needSeen = loadLocal('needSeen', '');
-function needsMeNotify() {
-  const me = state.me.id;
-  const fresh = tasksArr().filter(t => unread(t) && t.notify[me] > needSeen);
-  const top = fresh.reduce((m, t) => (t.notify[me] > m ? t.notify[me] : m), needSeen);
-  // The first run on this computer only takes the mark: no burst about everything unread so far.
-  if (!needSeen) { needSeen = top || new Date().toISOString(); saveLocal('needSeen', needSeen); return; }
-  if (!fresh.length) return;
-  needSeen = top; saveLocal('needSeen', needSeen);
-  const why = t => (t.status === 'review' ? 'ждёт вашей проверки' : t.status === 'revision' ? 'вернули на доработку'
-    : (t.comments || []).at(-1)?.ts === t.notify[me] ? 'новое сообщение' : 'назначено вам');
-  const one = t => `${marksText(t)} · ${projectOf(t)?.name || ''}: ${why(t)}`;
-  api.notifyMe?.(fresh.length === 1 ? one(fresh[0]) : `Нужно ваше внимание (${fresh.length}): ${fresh.slice(0, 3).map(one).join('; ')}${fresh.length > 3 ? '…' : ''}`, fresh.length === 1 ? `task:${fresh[0].id}` : 'day');
-}
-function focusQuiet(on) {
-  const held = api.setQuiet?.(on) || [];
-  if (!on && held.length) toast(`Пока шёл фокус: ${held.length} ${plural(held.length, 'уведомление', 'уведомления', 'уведомлений')} — ${held.at(-1).slice(0, 120)}`);
-}
-async function focusStart(id) {
-  if (focus?.taskId === id) return;
-  if (focus) await focusStop({ quiet: true });
-  focus = { taskId: id, since: new Date().toISOString() };
-  saveLocal('focus', focus); renderFocus(); focusQuiet(true);
-}
-// Writes the stretch to the card (≥ 1 min). quiet: no toast (another focus starts or the card is handed in).
-async function focusStop({ quiet = false } = {}) {
-  if (!focus) return;
-  const f = focus; focus = null; saveLocal('focus', null); renderFocus(); focusQuiet(false);
-  const t = state.tasks.get(f.taskId), to = new Date().toISOString();
-  const min = Math.round((Date.parse(to) - Date.parse(f.since)) / 60000);
-  if (!t || min < 1 || !state.me) return;
-  const timeLog = [...(Array.isArray(t.timeLog) ? t.timeLog : []), { userId: state.me.id, from: f.since, to }].slice(-500);
-  await write(op.update('tasks', t.id, { timeLog }), quiet ? '' : `${marksText(t)}: +${fmtSpent(min)}`, { undo: false });
-}
-function focusAfterQuick(id, quick) {
-  if (['start', 'resume', 'reopen'].includes(quick)) focusStart(id);
-  else if (focus?.taskId === id) focusStop({ quiet: true });
-}
-function renderFocus() {
-  let el = document.getElementById('focus-bar');
-  const t = focus && state.tasks.get(focus.taskId);
-  if (!t || SOLO) { el?.remove(); clearInterval(renderFocus.tick); return; }
-  if (!el) { el = document.createElement('div'); el.id = 'focus-bar'; el.className = 'focus-bar'; el.setAttribute('role', 'status'); document.body.append(el); }
-  el.innerHTML = `<span class="fb-dot"></span><button class="fb-t" type="button" data-act="open-task" data-id="${esc(t.id)}" title="Открыть карточку"><b>${esc(marksText(t))}</b> <span class="hint">${esc(projectOf(t)?.name || '')}</span></button>
-    <span class="fb-time num" id="fb-time"></span>
-    <button class="btn sm" type="button" data-act="focus-stop" title="Остановить таймер, время сохранится в карточке">Пауза</button>${state.win.compact ? '' : '<button class="btn ghostbtn sm" type="button" data-act="toggle-compact" title="Свернуть Пульт в маленький виджет поверх окон — таймер останется на виду">Свернуть</button>'}`;
-  el.classList.toggle('in-compact', !!state.win.compact);
-  const tick = () => { const s = Math.max(0, Math.floor((Date.now() - Date.parse(focus?.since || Date.now())) / 1000)); const n = document.getElementById('fb-time'); if (n) n.textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
-  tick(); clearInterval(renderFocus.tick); renderFocus.tick = setInterval(tick, 1000);
 }
 
 // Card header as a drawing title block (штамп): object, marks, people, deadline, status, revision — and the actions.
@@ -5651,6 +4771,1220 @@ function celebrateAccept(id) {
   }, 400);
 }
 
+/* ---------- 50: a new card suggests its dates and executor ---------- */
+// Dates: a ПД section takes the project's «Стадия П», a РД section «Стадия Р» — while the dates were not typed by hand.
+// Executor: the best fit by section and load (the picker's own order) is offered with one click, never set silently.
+function smartDefaults() {
+  const box_hide = () => { const b = $('#smart-hint'); if (b) b.hidden = true; };
+  if (state.drawer?.kind !== 'task' || state.drawer.id) return;
+  const p = state.projects.get($('#t-project')?.value || ''), ref = $('#t-doc')?.value || '';
+  const key = ref.startsWith('pd:') ? 'p' : ref.startsWith('rd:') ? 'r' : '';
+  const ph = key && (p?.phases || []).find(x => x.key === key);
+  const st = $('#t-start'), fin = $('#t-finish');
+  const notes = [];
+  if (ph && st && fin && !st.dataset.typed && !fin.dataset.typed && (isDate(ph.start) || isDate(ph.finish))) {
+    const start = isDate(ph.start) ? (ph.start > state.today ? ph.start : state.today) : st.value;
+    const finish = isDate(ph.finish) ? ph.finish : fin.value;
+    // A stage already over gives nothing to take: the card would finish before it starts.
+    if (finish && start && finish < start) { box_hide(); return; }
+    if (st.value !== start || fin.value !== finish) { st.value = start; fin.value = finish; updateShiftBox(); }
+    notes.push(`Сроки — из этапа «${L.phaseLabel(key)}» проекта${isDate(ph.finish) ? ` (до ${fmtDate(ph.finish)})` : ''}.`);
+  }
+  const execBox = $('#dform .exec-pick[data-pick="exec"]'), marks = selectedMarks();
+  let pick = null;
+  if (execBox && !execBox.querySelector('input[type="hidden"]').value && marks.length) {
+    // Someone whose own direction it is first; otherwise any fitting one — but not the GIP, who «fits» everything.
+    const cands = execCandidates(marks, true);
+    pick = cands.find(x => x.own) || cands.find(x => x.fit && !A.isGip(refUser(x.ref))) || null;
+  }
+  let box = $('#smart-hint');
+  if (!box) {
+    const anchor = $('#t-finish')?.closest('.f');
+    if (!anchor) return;
+    anchor.insertAdjacentHTML('afterend', '<div class="f wide smart-hint" id="smart-hint" hidden></div>');
+    box = $('#smart-hint');
+  }
+  const pickHtml = pick ? `<span>Подходит по разделу: <b>${esc(pick.name)}</b>${pick.n ? ` · в работе ${pick.n}` : ' · сейчас свободен'}</span> <button class="btn sm" type="button" data-act="smart-exec" data-ref="${esc(pick.ref)}">Назначить исполнителем</button>` : '';
+  box.innerHTML = notes.map(n => `<span>${esc(n)}</span>`).join('') + pickHtml;
+  box.hidden = !notes.length && !pick;
+}
+document.addEventListener('input', e => { if (e.target.id === 't-start' || e.target.id === 't-finish') e.target.dataset.typed = '1'; });
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'drawer-wide': () => { setDrawerFull(!drawerPrefs.full); },
+  'task-step': ({ el }) => { stepTask(Number(el.dataset.dir)); },
+  'new-task': ({ el }) => { setCreateMenu(false); openTask(null, { projectId: el.dataset.project }); },
+  'dtab': ({ id }) => { setDrawerTab(id); },
+  'request-close': () => { requestClose(); },
+  'discard': () => { flushTaskDraft(); closeDrawer(); },
+  'draft-restore': () => { restoreTaskDraft(); },
+  'draft-drop': () => { dropTaskDraft(draftKeyOf(state.drawer)); $('#confirm-slot').innerHTML = ''; },
+  'save-close': () => { $('#dform').requestSubmit(); },
+  'save-stay': () => { saveStay(); },
+  'cancel-delete': () => { $('#confirm-slot').innerHTML = ''; },
+  'quick': ({ el }) => { el.disabled = true; submitTask(el.dataset.q).finally(() => { el.disabled = false; }); },
+});
+// Warns in the card when the chosen person has no direction for some of the marks.
+/* ---------- 4.1: «Кто делает» — responsible in the team, executor (staff or outside), one optional co-executor ----------
+   Stored: ownerId; contractorId (an outside executor) or execUserId (a staff one); coExecRef 'u:<id>' | 'c:<id>'.
+   Staff executor and co-executor also go into coOwnerIds, so visibility and rights stay as before. */
+const refUser = r => (String(r || '').startsWith('u:') ? state.users.get(r.slice(2)) || null : null);
+const refContractor = r => (String(r || '').startsWith('c:') ? state.contractors.get(r.slice(2)) || null : null);
+const refName = r => refUser(r)?.name || refContractor(r)?.name || '';
+// Before 4.1 staff co-owners stood in coOwnerIds: the first becomes the executor (when there is no contractor) or the co-executor.
+function legacyCo(t) {
+  if (t.execUserId !== undefined || t.coExecRef !== undefined) return [];
+  return (t.coOwnerIds || []).filter(id => id !== t.ownerId && state.users.has(id));
+}
+const execRefOf = t => (t.contractorId ? 'c:' + t.contractorId : t.execUserId ? 'u:' + t.execUserId : !t.contractorId && legacyCo(t)[0] ? 'u:' + legacyCo(t)[0] : '');
+const coExecRefOf = t => (t.coExecRef !== undefined ? t.coExecRef : (() => { const l = legacyCo(t); const rest = t.contractorId ? l : l.slice(1); return rest[0] ? 'u:' + rest[0] : ''; })());
+// Older co-owners beyond the two new fields are kept (and listed) so saving never drops them.
+function legacyExtra(t) { const l = legacyCo(t); return t.contractorId ? l.slice(1) : l.slice(2); }
+function legacyCoHtml(t) {
+  const extra = legacyExtra(t).map(id => state.users.get(id)).filter(Boolean);
+  return extra.length ? `<div class="hint legacy-co" data-ids="${esc(extra.map(u => u.id).join(','))}">Ещё работают по карточке (из прежней версии): ${esc(extra.map(u => u.name).join(', '))}</div>` : '';
+}
+// Executor of a card for lists and the Gantt: { kind: 'staff'|'contractor', name, phone } or null.
+function executorOf(t) {
+  const c = contractorOf(t);
+  if (c) return { kind: 'contractor', name: c.name, phone: c.phone || '', c };
+  const u = t.execUserId ? state.users.get(t.execUserId) : (t.coExecRef === undefined ? state.users.get(legacyCo(t)[0] || '') : null);
+  return u ? { kind: 'staff', name: u.name, phone: u.phone || '', u } : null;
+}
+// Filters «Все исполнители / Без исполнителя / <who>»: a contractor id (as before 4.1) or 'u:<staff id>'.
+const execMatch = (t, f) => !f || (f === '__none' ? !executorOf(t) : f.startsWith('u:') ? executorOf(t)?.u?.id === f.slice(2) : t.contractorId === f);
+const execStaff = () => liveUsers().filter(u => tasksArr().some(t => executorOf(t)?.u?.id === u.id)).sort(byName);
+const execFilterOpts = (opt, sel) => `${opt('', 'Все исполнители', sel)}${opt('__none', 'Без исполнителя', sel)}${execStaff().length ? `<optgroup label="Штатные">${execStaff().map(u => opt('u:' + u.id, u.name, sel)).join('')}</optgroup><optgroup label="Внештатные">` : ''}${contractorsArr().map(c => opt(c.id, c.name, sel)).join('')}${execStaff().length ? '</optgroup>' : ''}`;
+const execLine = t => { const e = executorOf(t), co = coExecRefOf(t) ? refName(coExecRefOf(t)) : ''; return e ? `${esc(e.name)}${co ? ` <span class="hint">+ ${esc(co)}</span>` : ''}` : ''; };
+function execCandidates(marks, onlyFit) {
+  const can = new Set(A.assignableOwners(state.me, liveUsers()).map(u => u.id));
+  const load = { u: id => tasksArr().filter(t => ACTIVE.has(t.status) && (t.execUserId === id || hasOwner(t, id))).length, c: id => tasksArr().filter(t => t.contractorId === id && ACTIVE.has(t.status)).length };
+  // `own`: the section is in the person's own directions / specialty — such people come first; the GIP (not limited) after them.
+  const ownDir = u => marks.some(m => (u.directions || []).includes(A.directionOfMark(m)?.id));
+  const staff = liveUsers().filter(u => can.has(u.id)).map(u => ({ ref: 'u:' + u.id, name: u.name, sub: `штатный · ${A.ROLES[u.role]?.label || ''}${A.directionLabels(u).length ? ' · ' + A.directionLabels(u).join(', ') : ''}`, fit: !A.profileGaps(u, { sections: marks }).length, own: ownDir(u), n: load.u(u.id) }));
+  const outside = contractorsArr().map(c => { const n = marks.length ? L.matchCount(c, marks) : 0; return { ref: 'c:' + c.id, name: c.name, sub: `внештатный${c.specialty ? ' · ' + c.specialty : ''}`, fit: !marks.length || n > 0, own: n > 0, n: load.c(c.id) }; });
+  const all = [...staff, ...outside];
+  return (onlyFit && marks.length ? all.filter(x => x.fit) : all).sort((a, b) => (b.own - a.own) || (b.fit - a.fit) || a.n - b.n || a.name.localeCompare(b.name, 'ru'));
+}
+function execPickerHtml(key, label, hint, ref) {
+  return `<div class="f exec-pick" data-pick="${key}"><label for="t-${key}-q">${label} <span class="hint">${hint}</span></label>
+    <div class="ep-box"><input id="t-${key}-q" class="ep-q" autocomplete="off" placeholder="Начните вводить фамилию или название…" value="${esc(refName(ref))}" role="combobox" aria-expanded="false" aria-controls="t-${key}-list">
+      <button class="btn ghostbtn sm ep-clear" type="button" data-act="ep-clear" data-pick="${key}" title="Убрать"${ref ? '' : ' hidden'}>×</button>
+      <input type="hidden" name="${key}Ref" value="${esc(ref)}"><div class="ep-list" id="t-${key}-list" role="listbox" hidden></div></div></div>`;
+}
+function execPickersRefresh() { for (const box of $$('#dform .exec-pick')) epRender(box, false); updateOwnerWarn(); }
+function epRender(box, open = true) {
+  const q = box.querySelector('.ep-q'), list = box.querySelector('.ep-list');
+  const ref = box.querySelector('input[type="hidden"]').value;
+  const text = q.value.trim().toLowerCase(), current = refName(ref).toLowerCase();
+  const items = execCandidates(selectedMarks(), $('#exec-fit')?.checked).filter(x => !text || text === current || x.name.toLowerCase().includes(text)).slice(0, 40);
+  list.innerHTML = items.map((x, i) => `<button type="button" role="option" class="ep-opt${x.ref === ref ? ' sel' : ''}${i === 0 ? ' act' : ''}" data-act="ep-pick" data-pick="${box.dataset.pick}" data-ref="${esc(x.ref)}"><b>${esc(x.name)}</b>${x.fit ? '' : ' <span class="chip tone-warn">не по профилю</span>'}<span class="hint">${esc(x.sub)} · в работе ${x.n}</span></button>`).join('')
+    || `<div class="hint ep-none">${$('#exec-fit')?.checked ? 'Подходящих по специальности нет — снимите галку «Только подходящие».' : 'Никого не нашлось.'}</div>`;
+  list.hidden = !open; q.setAttribute('aria-expanded', String(open));
+}
+function epSet(key, ref) {
+  const box = $(`#dform .exec-pick[data-pick="${key}"]`);
+  if (!box) return;
+  box.querySelector('input[type="hidden"]').value = ref;
+  box.querySelector('.ep-q').value = refName(ref);
+  box.querySelector('.ep-clear').hidden = !ref;
+  box.querySelector('.ep-list').hidden = true;
+  updateOwnerWarn();
+}
+document.addEventListener('focusin', e => { const box = e.target.closest?.('.exec-pick'); if (box && e.target.matches('.ep-q')) { e.target.select(); epRender(box, true); } });
+document.addEventListener('input', e => { const box = e.target.closest?.('.exec-pick'); if (box && e.target.matches('.ep-q')) epRender(box, true); });
+document.addEventListener('keydown', e => {
+  const box = e.target.closest?.('.exec-pick');
+  if (!box || !e.target.matches('.ep-q')) return;
+  const opts = $$('.ep-opt', box), i = opts.findIndex(o => o.classList.contains('act'));
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (box.querySelector('.ep-list').hidden) epRender(box, true); const j = Math.max(0, Math.min(opts.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))); opts.forEach((o, k) => o.classList.toggle('act', k === j)); opts[j]?.scrollIntoView({ block: 'nearest' }); }
+  else if (e.key === 'Enter' && !box.querySelector('.ep-list').hidden) { e.preventDefault(); if (opts[i]) epSet(box.dataset.pick, opts[i].dataset.ref); }
+  else if (e.key === 'Escape' && !box.querySelector('.ep-list').hidden) { e.preventDefault(); e.stopPropagation(); epSet(box.dataset.pick, box.querySelector('input[type="hidden"]').value); }
+});
+document.addEventListener('focusout', e => {
+  const box = e.target.closest?.('.exec-pick');
+  if (!box) return;
+  setTimeout(() => { if (!box.contains(document.activeElement)) epSet(box.dataset.pick, box.querySelector('input[type="hidden"]').value); }, 150);
+});
+// Staff ids on the card besides the responsible one: executor, co-executor and the older co-owners that were kept.
+function formOwners() {
+  const owner = $('#t-owner')?.value || '';
+  const exec = val('execRef'), co = val('coexecRef');
+  const legacy = ($('#dform .legacy-co')?.dataset.ids || '').split(',').filter(Boolean);
+  return [owner, refUser(exec)?.id, refUser(co)?.id, ...legacy].filter((v, i, a) => v && a.indexOf(v) === i);
+}
+function formGaps() {
+  const marks = selectedMarks();
+  return formOwners().map(id => state.users.get(id)).filter(Boolean)
+    .map(u => ({ u, g: A.profileGaps(u, { sections: marks }) })).filter(x => x.g.length).map(x => A.profileMessage(x.u, x.g));
+}
+function updateAbsenceWarn() {
+  const box = $('#abs-warn');
+  if (!box) return;
+  const hits = A.absenceHits({ ownerId: $('#t-owner')?.value, coOwnerIds: formOwners().slice(1), start: val('start'), finish: val('finish') }, liveUsers());
+  box.hidden = !hits.length;
+  box.textContent = hits.length ? `Внимание: ${hits.map(h => A.absenceText(h) + (h.onFinish ? ' — на эти дни приходится финиш' : '')).join('; ')}.` : '';
+}
+function updateOwnerWarn() {
+  updateAbsenceWarn();
+  const box = $('#owner-warn');
+  if (!box) return;
+  const texts = formGaps();
+  box.hidden = !texts.length;
+  $('#owner-warn-text').textContent = texts.join(' ');
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'ep-pick': ({ el }) => { epSet(el.dataset.pick, el.dataset.ref); },
+  'ep-clear': ({ el }) => { epSet(el.dataset.pick, ''); $(`#t-${el.dataset.pick}-q`)?.focus(); },
+  'smart-exec': ({ el }) => { epSet('exec', el.dataset.ref); execPickersRefresh(); smartDefaults(); scheduleTaskDraft({ target: el }); },
+});
+// The task's place in the composition: a section/volume of ПД or a set of РД.
+function compPlaceOf(t) {
+  return t?.id ? placeIndex().get(t.id) || null : null;
+}
+// «Марка» in the task card: no checkbox grid any more. A section of the composition shows where it sits;
+// an assignment shows from whom to whom; any other task gets one text field (marks are optional there).
+function marksField(t) {
+  const marks = sectionsOf(t), hidden = `<input type="hidden" name="marksExtra" value="${esc(marks.join(', '))}">`;
+  if (t.kind === 'assign') {
+    const from = state.tasks.get(t.parentId), to = (t.toTaskIds || []).map(id => state.tasks.get(id)).filter(Boolean);
+    return `<div class="f wide asg-box">${hidden}<div class="asg-h"><b>Задание смежнику</b> <button class="btn ghostbtn sm" type="button" data-act="techcard" data-sec="assign" title="Откуда берутся задания — техкарта">? техкарта</button></div>
+      <div class="asg-route"><span>от</span> ${from ? `<button class="linkbtn" type="button" data-act="open-task" data-id="${esc(from.id)}">${esc(marksText(from))}${from.title ? ' · ' + esc(from.title) : ''}</button>` : '<span class="hint">раздел удалён</span>'}
+        <span>→</span> ${to.map(x => `<button class="linkbtn" type="button" data-act="open-task" data-id="${esc(x.id)}">${esc(marksText(x))}${x.title ? ' · ' + esc(x.title) : ''}</button>`).join(', ') || '<span class="hint">получатель удалён</span>'}</div>
+      <div class="fgrid asg-off"><label class="chk"><input type="checkbox" name="official"${t.official ? ' checked' : ''}> Оформляется официально</label>
+        <div class="f"><label for="t-off-no">Номер задания</label><input id="t-off-no" name="officialNo" value="${esc(t.officialNo || '')}" maxlength="40" placeholder="ЗД-ОВ-03"></div>
+        <div class="f"><label for="t-off-by">Подписывает</label><input id="t-off-by" name="officialBy" value="${esc(t.officialBy || '')}" maxlength="80" placeholder="ГИП, главспец ОВ"></div></div>
+      <span class="hint">Получатель видит это задание у себя как входящее. Пока задание не выдано, смежник ждёт его${state.tasks.get(t.toTaskIds?.[0])?.dependsOn?.includes(t.id) ? ' — срок его старта связан с этим заданием' : ''}.</span></div>`;
+  }
+  return taskAssignsBlock(t) + `<div class="f wide" id="t-doc-box">${docFieldHtml(t.projectId, t)}</div>`;
+}
+// «Раздел» of a card: chosen from the project composition (ПД volumes and РД sections not yet taken by another
+// card). Without a composition — a code typed by hand. Without a section — a task with an explanation
+// (согласование, сбор ИРД). The composition itself is edited on the project's «Состав» tab.
+function docFieldHtml(projectId, t, typed = null) {
+  const p = state.projects.get(projectId), comp = p?.composition;
+  const place = t.projectId === projectId ? compPlaceOf(t) : null;
+  const marks = typed ?? sectionsOf(t);
+  // Suggestions: ПД sections (ПП РФ № 87) and РД sections (ГОСТ Р 21.101 and practice).
+  const known = [...new Map([...Composition.BASES.nonprod.sections.flatMap(([, abbr, title, , subs]) => [[abbr, title], ...(subs || []).map(([a, tl]) => [a, tl])]),
+    ...MARK_GROUPS.flatMap(g => g.marks), ...Object.entries(Composition.RD_MARKS).map(([m, [tl]]) => [m, tl])]).entries()];
+  const freeInput = (show, value) => `<div class="doc-free"${show ? '' : ' hidden'}><input id="t-marks-extra" name="marksExtra" value="${esc(value)}" placeholder="Шифр раздела: ЭОМ, ИОС1, АР…" maxlength="200" autocomplete="off" aria-label="Шифр раздела" list="marks-dl">
+    <datalist id="marks-dl">${known.map(([c, n]) => `<option value="${esc(c)}">${esc(n)}</option>`).join('')}</datalist>
+    <span class="hint">Несколько — через запятую.</span></div>`;
+  if (!comp) {
+    return `<label for="t-marks-extra">Раздел</label>${freeInput(true, marks.join(', '))}
+      <span class="hint">${p ? 'У проекта нет состава документации — разделы можно выбрать из списка, если сформировать состав на вкладке проекта «Состав».' : 'Сначала выберите проект.'} Без раздела — задача с уточнением (согласование, сбор ИРД).</span>`;
+  }
+  const taken = id => id && id !== t.id && state.tasks.has(id);
+  const vols = Composition.volumes(comp, p.code || ''), rds = Composition.rdRows(comp, p.code || '');
+  const cur = place?.ref || (marks.length ? 'free' : '');
+  const opt = (v, l, dis = false) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(l)}</option>`;
+  const pdOpts = vols.map(v => { const n = comp.nodes.find(x => x.id === v.id); return opt('pd:' + v.id, `${v.abbr || v.code} · ${v.title}${taken(n?.taskId) ? ' — уже есть карточка' : ''}`, taken(n?.taskId)); }).join('');
+  const rdOpts = rds.map(r => opt('rd:' + r.id, `${r.mark} · ${r.title}${taken(r.item.taskId) ? ' — уже есть карточка' : ''}`, taken(r.item.taskId))).join('');
+  return `<label for="t-doc">Раздел</label>
+    <select id="t-doc" name="docRef">${opt('', '— без раздела: задача (согласование, сбор ИРД…)')}
+      ${pdOpts ? `<optgroup label="Проектная документация · стадия П">${pdOpts}</optgroup>` : ''}${rdOpts ? `<optgroup label="Рабочая документация · стадия Р">${rdOpts}</optgroup>` : ''}
+      <optgroup label="Другое">${opt('free', 'Свой раздел — вписать шифр…')}</optgroup></select>
+    ${freeInput(cur === 'free', place ? '' : marks.join(', '))}
+    <span class="hint">${place ? `Том ${esc(String(place.tom))} · ${esc(place.code)}. ` : ''}Разделы берутся из состава проекта (вкладка «Состав»).</span>`;
+}
+// Codes of the chosen composition section, for directions and contractor suggestions (ИОС1 → ЭС, ЭН, ЭОМ, ЭО).
+function docRefSections(projectId, ref) {
+  const p = state.projects.get(projectId), comp = p?.composition;
+  if (!comp || !ref) return [];
+  const [kind, id] = ref.split(':');
+  if (kind === 'pd') { const v = Composition.volumes(comp, p.code || '').find(x => x.id === id); return v ? normalizeMarks(v.node.marks?.length ? v.node.marks : [v.abbr]) : []; }
+  if (kind === 'rd') { const r = Composition.rdRows(comp, p.code || '').find(x => x.id === id); return r ? normalizeMarks([r.mark]) : []; }
+  return [];
+}
+// The composition with this card linked to `ref` (and unlinked from where it was). null — nothing to change.
+function compWithLink(projectId, taskId, ref) {
+  const p = state.projects.get(projectId), comp = p?.composition;
+  if (!comp) return null;
+  const next = JSON.parse(JSON.stringify(comp));
+  let changed = false;
+  for (const n of next.nodes || []) if (n.taskId === taskId && 'pd:' + n.id !== ref) { n.taskId = ''; changed = true; }
+  for (const x of next.rd || []) if (x.taskId === taskId && 'rd:' + x.id !== ref) { x.taskId = ''; changed = true; }
+  const [kind, id] = (ref || '').split(':');
+  const target = kind === 'pd' ? (next.nodes || []).find(n => n.id === id) : kind === 'rd' ? (next.rd || []).find(x => x.id === id) : null;
+  if (target && target.taskId !== taskId) { target.taskId = taskId; changed = true; }
+  return changed ? next : null;
+}
+// In a section's card: its outgoing assignments (subtasks) and the incoming ones it waits for.
+function taskAssignsBlock(t) {
+  const { out, inc } = assignsOf(t);
+  if (!out.length && !inc.length) return '';
+  const line = (x, dir) => { const other = dir === 'out' ? (x.toTaskIds || []).map(id => state.tasks.get(id)).filter(Boolean).map(marksText).join(', ') : marksText(state.tasks.get(x.parentId) || {});
+    return `<li><button class="linkbtn" type="button" data-act="open-task" data-id="${esc(x.id)}">${dir === 'out' ? '→' : '←'} ${esc(other || x.title)}</button> ${statusChip(x)} <span class="hint">${x.finish ? 'до ' + fmtDate(x.finish) : ''} · ${esc((x.note || '').slice(0, 90))}${(x.note || '').length > 90 ? '…' : ''}</span></li>`; };
+  return `<div class="f wide asg-list">${out.length ? `<span class="lbl">Исходящие задания (${out.length})</span><ul>${out.map(x => line(x, 'out')).join('')}</ul>` : ''}
+    ${inc.length ? `<span class="lbl">Входящие задания (${inc.length})</span><ul>${inc.map(x => line(x, 'in')).join('')}</ul>` : ''}</div>`;
+}
+function marksPicker(selected) {
+  const known = new Set(MARK_GROUPS.flatMap(g => g.marks.map(m => m[0])));
+  const custom = selected.filter(m => !known.has(m));
+  const groups = MARK_GROUPS.map(g => `<fieldset class="mk-group" data-dir="${esc(g.dir || '')}"><legend>${esc(g.title)}</legend><div class="mk-grid">${g.marks.map(([code, name]) =>
+    `<label class="mk" title="${esc(name)}"><input type="checkbox" name="mark" value="${esc(code)}"${selected.includes(code) ? ' checked' : ''}><span class="code">${esc(code)}</span><small>${esc(name)}</small></label>`).join('')}</div></fieldset>`).join('');
+  return `<div class="f wide marks-f">
+    <div class="mk-head"><span class="lbl req" id="marks-lbl">Разделы</span><span class="hint" id="marks-count"></span></div>
+    <div class="mk-tools" data-transient><input id="mk-search" type="search" placeholder="Найти раздел: ЭО, вент, пожар…" autocomplete="off">
+      <button class="btn ghostbtn sm" type="button" data-act="mk-all" id="mk-all"></button></div>
+    <div class="mk-groups" role="group" aria-labelledby="marks-lbl">${groups}</div>
+    <label for="t-marks-extra">Другие разделы, через запятую</label>
+    <input id="t-marks-extra" name="marksExtra" value="${esc(custom.join(', '))}" placeholder="ЭОМ1, АИИС КУЭ" maxlength="200" autocomplete="off">
+  </div>`;
+}
+// Shows only the directions of the chosen responsible person (plus groups with ticked marks); search looks everywhere.
+function applyMarksFilter() {
+  const box = $('#dform .mk-groups');
+  if (!box) return;
+  const q = ($('#mk-search')?.value || '').trim().toLowerCase();
+  const owner = state.users?.get($('#t-owner')?.value);
+  const own = new Set(owner && !A.isGip(owner) ? owner.directions || [] : []);
+  const limit = !state.drawer?.allMarks && own.size > 0 && !q;
+  let hiddenGroups = 0;
+  for (const g of $$('.mk-group', box)) {
+    let any = false;
+    for (const l of $$('.mk', g)) {
+      const hit = !q || l.textContent.toLowerCase().includes(q);
+      l.hidden = !hit;
+      any ||= hit;
+    }
+    const keep = any && (!limit || own.has(g.dataset.dir) || $$('input:checked', g).length > 0);
+    g.hidden = !keep;
+    if (!keep && any) hiddenGroups++;
+  }
+  const btn = $('#mk-all');
+  if (btn) {
+    btn.hidden = !(own.size && !q);
+    btn.textContent = state.drawer?.allMarks ? 'Только направления ответственного' : `Все направления${hiddenGroups ? ` (+${hiddenGroups})` : ''}`;
+  }
+}
+function selectedMarks() {
+  const doc = $('#t-doc');
+  if (doc && doc.value && doc.value !== 'free') return docRefSections(val('projectId'), doc.value);
+  if (doc && !doc.value) return [];
+  const checked = $$('#dform input[name="mark"]:checked').map(i => i.value);
+  return normalizeMarks([...checked, ...splitMarks(val('marksExtra'))]);
+}
+function onMarksChanged() {
+  const list = selectedMarks();
+  const el = $('#dform .mk-groups') && $('#marks-count');
+  if (el) el.textContent = list.length ? `выбрано ${list.length}: ${list.join(', ')}` : 'ничего не выбрано';
+  const own = $('#t-owner');
+  if (own && !own.disabled) { const v = own.value; own.innerHTML = ownerOptions(v, list); own.value = v; }
+  execPickersRefresh();
+  updateOwnerWarn();
+  applyMarksFilter();
+  smartDefaults();
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'mk-all': () => { state.drawer.allMarks = !state.drawer.allMarks; applyMarksFilter(); },
+});
+/* ---------- card discussion ---------- */
+function renderTalk() {
+  const box = $('#talk-box'), t = state.tasks.get(state.drawer?.id);
+  if (!box || !t) return;
+  const draft = $('#talk-text')?.value || '', typing = document.activeElement?.id === 'talk-text';
+  if (talkEdit && $('#talk-edit')) talkEdit.text = $('#talk-edit').value; // keep the edit through a re-render
+  if (talkEdit && !(t.comments || []).some(c => c.id === talkEdit.cid)) talkEdit = null;
+  const editingNow = document.activeElement?.id === 'talk-edit';
+  const list = t.comments || [];
+  const when = ts => new Date(ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  box.innerHTML = `<div class="talk">${list.length ? list.map(c => `<div class="msg-item${c.userId === state.me?.id ? ' mine' : ''}${c.kind === 'submit' ? ' submit' : ''}">
+      <div class="msg-h"><b>${esc(c.user || '—')}</b>${c.kind === 'submit' ? '<span class="chip tone-review">сдал на проверку</span>' : ''}<span class="hint">${when(c.ts)}${c.editedAt ? ' · изменено' : ''}</span>${c.userId === state.me?.id && talkEdit?.cid !== c.id ? `<button class="edit-msg" type="button" data-act="talk-edit" data-cid="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>
+      ${talkEdit?.cid === c.id ? `<div class="msg-edit"><textarea id="talk-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(talkEdit.text)}</textarea>
+        <div class="row-in"><button class="btn primary sm" type="button" data-act="talk-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="talk-edit-cancel">Отмена</button><span class="hint">Ctrl+Enter — сохранить, Esc — отмена</span></div></div>`
+        : `<div class="msg-t">${esc(c.text)}</div>`}${thankBtn(t, c)}</div>`).join('') : '<div class="hint">Обсуждения пока нет. Здесь видят друг друга ответственные по карточке и их руководители.</div>'}</div>
+    <div class="talk-new"><textarea id="talk-text" rows="2" maxlength="2000" placeholder="Написать… (Ctrl+Enter — отправить)">${esc(draft)}</textarea>
+      <button class="btn primary" type="button" data-act="talk-send">Отправить</button></div>`;
+  const tl = box.querySelector('.talk'); tl.scrollTop = tl.scrollHeight;
+  if (typing) { const ta = $('#talk-text'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  if (editingNow) { const ta = $('#talk-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
+}
+// «Спасибо» under a colleague's message: one per person; the author sees the count and it adds up on their card.
+function thankBtn(t, c) {
+  if (!game) return '';
+  const n = (c.thanks || []).length, mine = (c.thanks || []).includes(state.me?.id), own = c.userId === state.me?.id;
+  if (own) return n ? `<div class="thanks-row"><span class="thanks-n" title="Вас поблагодарили">♥ спасибо: ${n}</span></div>` : '';
+  if (!c.userId) return '';
+  return `<div class="thanks-row"><button class="thanks-btn${mine ? ' on' : ''}" type="button" data-act="thank" data-task="${esc(t.id)}" data-cid="${esc(c.id)}" aria-pressed="${mine}" title="${mine ? 'Убрать спасибо' : 'Поблагодарить — например, за помощь или быструю проверку'}">♥ Спасибо${n ? ` · ${n}` : ''}</button></div>`;
+}
+async function thank(taskId, cid) {
+  const res = await api.thankComment(taskId, cid);
+  if (!res?.ok) return toast(res?.message || 'Не удалось.', true);
+  await refresh();
+  renderTalk();
+  if (res.on) toast('Спасибо отправлено');
+}
+// The field is emptied before sending: the card re-renders while the message is saved, and it must not
+// come back with the old text. On failure the text is put back.
+async function sendComment() {
+  const el = $('#talk-text'), id = state.drawer?.id;
+  if (!el || !id || !el.value.trim()) return;
+  const text = el.value;
+  el.value = '';
+  const res = await api.addComment(id, text);
+  if (!res?.ok) { const cur = $('#talk-text'); if (cur && !cur.value) cur.value = text; return toast(res?.message || 'Не удалось отправить.', true); }
+  await refresh();
+  renderTalk();
+}
+// Editing one's own message in a card discussion: inline, Ctrl+Enter saves, Esc cancels.
+let talkEdit = null; // { cid, text }
+function talkEditStart(cid) {
+  const c = (state.tasks.get(state.drawer?.id)?.comments || []).find(x => x.id === cid);
+  if (!c || c.userId !== state.me?.id) return;
+  talkEdit = { cid, text: c.text };
+  renderTalk();
+  const ta = $('#talk-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+async function talkEditSave() {
+  const ta = $('#talk-edit'), id = state.drawer?.id;
+  if (!talkEdit || !ta || !id) return;
+  const text = ta.value.trim();
+  if (!text) return toast('Сообщение не может быть пустым.', true);
+  const res = await api.editComment(id, talkEdit.cid, text);
+  if (!res?.ok) return toast(res?.message || 'Не удалось сохранить.', true);
+  talkEdit = null;
+  await refresh();
+  renderTalk();
+}
+function talkEditCancel() { talkEdit = null; renderTalk(); }
+
+// Status changes are actions (buttons in the card header, the status cell, the kanban), not a free list.
+const QUICK = {
+  start: { to: 'in_progress', label: 'Начать работу', okMsg: 'Карточка в работе' },
+  submit: { to: 'review', label: 'Сдал на проверку', okMsg: 'Отмечено: сдано на проверку' },
+  remarks: { to: 'revision', label: 'Выдать замечания', okMsg: 'Замечания выданы — карточка на доработке' },
+  accept: { to: 'done', label: 'Принять работу', okMsg: 'Работа принята' },
+  pause: { to: 'paused', label: 'Приостановить', okMsg: 'Карточка приостановлена' },
+  resume: { to: 'in_progress', label: 'Возобновить', okMsg: 'Работа возобновлена' },
+  reopen: { to: 'in_progress', label: 'Вернуть в работу', okMsg: 'Карточка снова в работе' },
+};
+// Which actions a status offers. A specialist only submits own work.
+function quickKeys(status) {
+  const map = { not_started: ['start', 'pause'], in_progress: ['submit', 'pause'], revision: ['submit', 'pause'], review: ['accept', 'remarks'], paused: ['resume'], done: ['reopen'] };
+  const keys = map[status] || ['start'];
+  return isSpec() ? keys.filter(k => k === 'submit' || (k === 'start' && status === 'not_started')) : keys;
+}
+const quickFor = (from, to) => Object.keys(QUICK).find(k => QUICK[k].to === to && quickKeys(from).includes(k));
+
+function taskMainPanel(t, isNew) {
+  const projects = [...state.projects.values()].filter(p => !p.archived || p.id === t.projectId).sort(byName);
+  const marks = sectionsOf(t);
+  return `
+    ${!projects.length ? '<div class="note-box">Сначала добавьте проект — карточка всегда относится к проекту.</div>' : ''}
+    <div class="fgrid">
+      <div class="f wide"><label class="req" for="t-project">Проект</label><select id="t-project" name="projectId">${selOpts(projects, t.projectId, '— выберите —')}</select></div>
+      ${marksField(t)}
+      <fieldset class="f wide who-box"><legend>Кто делает</legend>
+        <div class="who-grid">
+          <div class="f"><label class="req" for="t-owner" title="${A.isGip(state.me) ? 'ГИП может спустить карточку любому главспецу или специалисту.' : A.isChief(state.me) ? 'Главспец спускает карточки только своим специалистам.' : 'Карточку спустил вам руководитель.'}">Ответственный в команде</label><select id="t-owner" name="ownerId">${ownerOptions(t.ownerId || state.me?.id, marks)}</select></div>
+          ${execPickerHtml('exec', 'Исполнитель', 'штатный или внештатный', execRefOf(t))}
+          ${execPickerHtml('coexec', 'Соисполнитель', 'необязательно', coExecRefOf(t))}
+        </div>
+        <label class="chk sm-chk exec-fit"><input type="checkbox" id="exec-fit"${loadLocal('execFit', true) ? ' checked' : ''}> Только подходящие по специальности</label>
+        ${legacyCoHtml(t)}
+        <div class="warnline soft" id="abs-warn" hidden></div>
+        <div class="warnline" id="owner-warn" hidden><span id="owner-warn-text"></span>
+          <label class="chk"><input type="checkbox" id="t-profile-ok" name="profileOk"${t.profileOk ? ' checked' : ''}> Всё равно назначить</label></div>
+      </fieldset>
+      <div class="f"><label for="t-start">Старт работ</label><input id="t-start" name="start" type="date" value="${esc(t.start || '')}"></div>
+      <div class="f"><label for="t-finish">Плановый финиш</label><input id="t-finish" name="finish" type="date" value="${esc(t.finish || '')}" data-orig="${esc(isNew ? '' : t.finish || '')}"></div>
+      <div class="f wide shift" id="shift-box" hidden>
+        <div class="shift-h">Срок переносится: <b id="shift-text"></b></div>
+        <div class="fgrid">
+          <div class="f"><label class="req" for="t-shift-reason">Причина переноса</label><select id="t-shift-reason" name="shiftReason"><option value="">— выберите —</option>${Object.entries(SHIFT_REASONS).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
+          <div class="f"><label for="t-shift-note">Комментарий</label><input id="t-shift-note" name="shiftNote" maxlength="200" placeholder="Например: заказчик сменил ТУ"></div>
+        </div>
+        <span class="hint">Переносы по вине исполнителя не сдвигают его контрольный срок и учитываются в надёжности.</span>
+      </div>
+      <div class="f"><span class="lbl">Статус</span>${isNew ? `<label class="chk"><input type="checkbox" id="t-start-now" name="startNow"> Сразу в работу</label><input type="hidden" id="t-status" name="status" value="not_started">`
+        : `<div class="status-ro">${statusChip(t)}<input type="hidden" id="t-status" name="status" value="${esc(t.status)}"></div><span class="hint">Меняется кнопками в шапке карточки. «Срок сорван» ставится сам.</span>`}</div>
+      <div class="f"><label for="t-ready">Готовность, %</label>
+        <div class="ready-in"><input type="range" id="t-ready-r" min="${L.READY_MIN}" max="${L.READY_MAX}" step="5" value="${L.readinessManual(t.status) ? L.readiness(t) : L.READY_MIN}" data-transient aria-label="Готовность, ползунок">
+          <input id="t-ready" name="readiness" type="number" min="${L.READY_MIN}" max="${L.READY_MAX}" step="1" value="${L.readinessManual(t.status) ? L.readiness(t) : ''}"></div>
+        <span class="hint" id="ready-hint"></span></div>
+      ${canMoney() ? `<div class="f"><label for="t-budget">Бюджет, ₽</label><input id="t-budget" name="budget" inputmode="decimal" value="${t.budget ? esc(String(t.budget).replace('.', ',')) : ''}" placeholder="150 000"></div>` : ''}
+      <details class="f wide more"${t.title || t.note || t.folder ? ' open' : ''}><summary>Дополнительно: уточнение, папка раздела, примечание</summary><div class="fgrid">
+        <div class="f wide"><label for="t-title">Уточнение</label><input id="t-title" name="title" value="${esc(t.title || '')}" placeholder="Корпус 2, стадия Р" maxlength="120"></div>
+        <div class="f wide"><label for="t-folder">Папка раздела</label>
+          <div class="row-in"><input id="t-folder" name="folder" value="${esc(t.folder || '')}" placeholder="\\\\server\\Проекты\\0425-24\\ЭОМ" maxlength="400">
+            <button class="btn" data-act="pick-task-folder" type="button">Выбрать…</button>${projectOf(t)?.folder ? '<button class="btn ghostbtn" data-act="suggest-task-folder" type="button" title="Папка проекта + раздел">Из папки проекта</button>' : ''}</div>
+          <span class="hint">Чертежи и файлы раздела. Кнопка «📁 Папка» в шапке карточки откроет её в Проводнике.</span></div>
+        <div class="f wide"><label for="t-note">Примечание</label><textarea id="t-note" name="note" maxlength="2000">${esc(t.note || '')}</textarea></div>
+      </div></details>
+      ${taskFilesHtml(t)}
+    </div>`;
+}
+function renderMessage(kind) {
+  const box = $('#msg-box');
+  const t = state.tasks.get(state.drawer?.id);
+  if (!box || !t) return;
+  const c = contractorOf(t);
+  const M = window.Messages;
+  kind = kind || state.msgKind || M.suggest(t, state.today);
+  state.msgKind = kind;
+  const signature = loadLocal('signature', '');
+  const msg = M.build(kind, { task: t, project: projectOf(t), contractor: c, signature, today: state.today });
+  const can = { mail: !!c?.email, whatsapp: !!(c?.phone || /whatsapp/i.test(c?.messenger || '')), telegram: !!(c?.phone || /@|t\.me/.test(c?.messenger || '')) };
+  box.innerHTML = `${c ? '' : '<div class="note-box">У карточки нет подрядчика — текст можно скопировать, но отправить некому.</div>'}
+    <div class="tpl-row">${M.TEMPLATES.map(x => `<button class="btn sm ${x.id === kind ? 'on' : ''}" type="button" data-act="msg-kind" data-kind="${x.id}">${esc(x.label)}</button>`).join('')}</div>
+    <div class="f"><label for="msg-subject">Тема (для почты)</label><input id="msg-subject" value="${esc(msg.subject)}" maxlength="200"></div>
+    <div class="f"><label for="msg-text">Текст — можно поправить перед отправкой</label><textarea id="msg-text" rows="11">${esc(msg.text)}</textarea></div>
+    <div class="f"><label for="msg-sign">Подпись (запоминается)</label><input id="msg-sign" value="${esc(signature)}" maxlength="200" placeholder="С уважением, Иванов И.И., ГС ЭОМ/СС, +7 …"></div>
+    <div class="msg-acts">
+      <button class="btn primary" data-act="msg-copy" type="button">Копировать текст</button>
+      <button class="btn" data-act="msg-send" data-via="mail" type="button" ${can.mail ? '' : 'disabled title="У подрядчика не указана почта"'}>Открыть в почте</button>
+      <button class="btn" data-act="msg-send" data-via="whatsapp" type="button" ${can.whatsapp ? '' : 'disabled title="У подрядчика не указан телефон"'}>WhatsApp</button>
+      <button class="btn" data-act="msg-send" data-via="telegram" type="button" ${can.telegram ? '' : 'disabled title="Не указан ник Telegram или телефон"'}>Telegram</button>
+    </div>
+    <span class="hint">В WhatsApp текст подставится сам. В Telegram откроется чат с подрядчиком, а текст будет скопирован — вставьте его Ctrl+V.</span>`;
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch {
+    const ta = $('#msg-text');
+    if (ta) { ta.focus(); ta.select(); }
+    return false;
+  }
+}
+async function sendMessage(via) {
+  const t = state.tasks.get(state.drawer?.id);
+  if (!t) return;
+  const text = $('#msg-text').value, subject = $('#msg-subject').value;
+  if (via === 'telegram') await copyText(text);
+  const res = await api.openContact({ contractorId: t.contractorId, kind: via, subject, text });
+  if (!res.ok) return toast(res.message, true);
+  toast(via === 'telegram' ? 'Текст скопирован — вставьте его в чат (Ctrl+V)' : via === 'mail' ? 'Письмо открыто в почтовой программе' : 'Открыт WhatsApp');
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'thank': ({ el }) => { thank(el.dataset.task, el.dataset.cid); },
+  'msg-kind': ({ el }) => { renderMessage(el.dataset.kind); },
+  'msg-copy': () => { copyText($('#msg-text').value).then(ok => toast(ok ? 'Текст скопирован' : 'Текст выделен — нажмите Ctrl+C')); },
+  'msg-send': ({ el }) => { el.disabled = true; sendMessage(el.dataset.via).finally(() => { el.disabled = false; }); },
+  'talk-send': () => { sendComment(); },
+  'talk-edit': ({ el }) => { talkEditStart(el.dataset.cid); },
+  'talk-edit-save': () => { talkEditSave(); },
+  'talk-edit-cancel': () => { talkEditCancel(); },
+});
+/* ---------- 4.1.1 (item 39): files of a card — dropped from Explorer, a screenshot pasted with Ctrl+V ---------- */
+const canFiles = () => typeof api.attachBytes === 'function';
+function taskFilesHtml(t) {
+  if (!canFiles()) return '';
+  const files = Array.isArray(t.files) ? t.files : [];
+  return `<div class="f wide tf" id="tf-box"><span class="lbl">Файлы${files.length ? ` <span class="hint">${files.length}</span>` : ''}</span>
+    <div class="tf-list">${files.map(f => `<span class="aq-file tf-file">${icon('file')}<button class="linkbtn" type="button" data-act="tf-open" data-fid="${esc(f.id)}" title="Открыть">${esc(f.name)}</button> <span class="hint">${fileSize(f.size)}</span><button class="btn ghostbtn sm" type="button" data-act="tf-del" data-fid="${esc(f.id)}" title="Убрать из карточки" aria-label="Убрать">×</button></span>`).join('')}</div>
+    <div class="tf-drop">${t.id ? 'Перетащите сюда файлы из Проводника или нажмите <b>Ctrl+V</b>, чтобы вставить скриншот' : 'Сохраните карточку — потом сюда можно будет перетаскивать файлы'}</div></div>`;
+}
+async function attachToTask(taskId, fileList) {
+  const t = state.tasks.get(taskId);
+  if (!t || !canFiles()) return;
+  const added = [];
+  for (const f of [...fileList].slice(0, 20)) {
+    if (!f || !f.size) continue;
+    const name = f.name && f.name !== 'image.png' ? f.name : `Скриншот ${new Date().toLocaleString('ru-RU').replace(/[:.,]/g, '-').replace(/\s+/g, ' ')}.png`;
+    const r = await api.attachBytes(t.projectId, name, new Uint8Array(await f.arrayBuffer()));
+    if (r?.ok) added.push(r.file); else toast(r?.message || `Не удалось приложить «${name}».`, true);
+  }
+  if (!added.length) return;
+  const cur = state.tasks.get(taskId);
+  await write(op.update('tasks', taskId, { files: [...(Array.isArray(cur.files) ? cur.files : []), ...added] }), `${marksText(t)}: ${added.length === 1 ? `приложен «${added[0].name}»` : `приложено файлов: ${added.length}`}`);
+  refreshTaskFiles();
+}
+// The open card shows its file list without losing what is typed in the form.
+function refreshTaskFiles() { const box = $('#tf-box'), t = state.drawer?.kind === 'task' && state.tasks.get(state.drawer.id); if (box && t) box.outerHTML = taskFilesHtml(t); }
+const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+const fileTarget = e => {
+  if (e.target.closest?.('#dform') && state.drawer?.kind === 'task' && state.drawer.id) return state.drawer.id;
+  return e.target.closest?.('[data-kb-id]')?.dataset.kbId || e.target.closest?.('.tl-bar[data-bar]')?.dataset.bar || '';
+};
+document.addEventListener('dragover', e => {
+  if (!hasFiles(e) || !canFiles()) return;
+  const id = fileTarget(e);
+  $$('.file-over').forEach(x => x.classList.remove('file-over'));
+  if (!id) return;
+  e.preventDefault(); e.stopPropagation();
+  e.dataTransfer.dropEffect = 'copy';
+  (e.target.closest('#tf-box, #dform, [data-kb-id], .tl-bar') || e.target).classList.add('file-over');
+}, true);
+document.addEventListener('dragleave', e => { if (hasFiles(e) && !e.relatedTarget) $$('.file-over').forEach(x => x.classList.remove('file-over')); }, true);
+document.addEventListener('drop', e => {
+  if (!hasFiles(e) || !canFiles()) return;
+  $$('.file-over').forEach(x => x.classList.remove('file-over'));
+  const id = fileTarget(e);
+  if (!id) return;
+  e.preventDefault(); e.stopPropagation();
+  attachToTask(id, e.dataTransfer.files);
+}, true);
+document.addEventListener('paste', e => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length || !canFiles() || state.drawer?.kind !== 'task' || !state.drawer.id) return;
+  e.preventDefault();
+  attachToTask(state.drawer.id, files);
+});
+
+function historyLine(h) {
+  if (h.type === 'finish') {
+    const d = dayNum(h.to) - dayNum(h.from);
+    return `<b>Срок перенесён</b> ${fmtDate(h.from)} → ${fmtDate(h.to)} (${d >= 0 ? '+' : ''}${d} дн.) · ${esc(SHIFT_REASONS[h.reason] || SHIFT_REASONS.other)}${h.note ? ` · «${esc(h.note)}»` : ''}`;
+  }
+  const lbl = s => (s ? STATUSES[s]?.label || s : 'создана');
+  return h.from ? `<b>${esc(lbl(h.to))}</b> <span class="hint">(было: ${esc(lbl(h.from))})</span>${h.note ? ` · «${esc(h.note)}»` : ''}` : `<b>Карточка создана</b> · ${esc(lbl(h.to))}`;
+}
+function taskTimePanel(t, isNew) {
+  const summary = isNew ? '' : (() => {
+    const sh = L.shiftsOf(t), rs = L.reviewStats(t, state.today);
+    const lt = L.lateness(t, state.today);
+    const cells = [
+      ['Переносов срока', sh.count ? `${sh.count} · ${sh.days >= 0 ? '+' : ''}${sh.days} дн.` : 'не было'],
+      ['Первоначальный срок', fmtDate(sh.original)],
+      ['Контрольный срок исполнителя', fmtDate(sh.contractorDeadline)],
+      ['Кругов замечаний', String(rs.rounds)],
+      ['На проверке у вас', days(rs.chiefDays)],
+      ['На доработке у исполнителя', days(rs.contractorDays)],
+    ];
+    return `<div class="sub0"><div class="kv">${cells.map(([k, v]) => `<div><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>
+      ${lt && lt.late ? `<div class="err">${lt.final ? `Сдано на ${days(lt.late)} позже контрольного срока.` : `Просрочка от контрольного срока: ${days(lt.late)}.`}</div>` : ''}</div>`;
+  })();
+  const hist = isNew ? '' : (() => {
+    const list = L.historyOf(t).slice().reverse();
+    return `<div class="sub"><h3>История</h3>${list.length ? `<ol class="hist">${list.map(h => `<li><span class="num hint">${fmtDate(h.date)}</span><span>${historyLine(h)}</span></li>`).join('')}</ol>`
+      : '<div class="hint">История пишется с момента обновления программы: переносы сроков и смены статусов.</div>'}</div>`;
+  })();
+  const issues = isNew ? [] : L.dependencyIssues(t, state.tasks, state.today);
+  return `${summary}
+    <div class="sub"><h3>Зависит от (смежные разделы)</h3>
+      ${issues.length ? `<div class="err">${issues.map(i => esc(i.text)).join('<br>')}</div>` : ''}
+      <div id="dep-box"></div>
+      <span class="hint">Например: СС ждёт задание от ЭОМ. На диаграмме Ганта связь показана стрелкой; если смежник срывает срок, карточка попадёт в «Под угрозой».</span></div>
+    <div class="sub"><h3>Контрольные точки</h3><div id="ms-box"></div>
+      <button class="btn sm" data-act="ms-add" type="button">+ Контрольная точка</button>
+      <span class="hint">Например: выдача заданий смежникам, промежуточная сдача, согласование с заказчиком.</span></div>
+    <div class="sub"><h3>Изменения (ревизии)</h3><div id="rev-box"></div>
+      <button class="btn sm" data-act="rev-add" type="button">+ Изменение</button>
+      <span class="hint">Учёт выпусков: «Изм. 1 — по замечаниям экспертизы». Последнее изменение видно в штампе карточки и на странице для заказчика.</span></div>
+    ${hist}`;
+}
+// Candidates: other cards of the same project that would not create a loop.
+function renderDeps() {
+  const box = $('#dep-box');
+  if (!box || !state.draft) return;
+  const selfId = state.drawer.id || '__new';
+  const projectId = val('projectId');
+  const byId = new Map(state.tasks);
+  const chosen = state.draft.dependsOn.filter(id => state.tasks.has(id));
+  const label = x => `${marksText(x)} · ${executorOf(x)?.name || 'нет исполнителя'} · до ${fmtDate(x.finish)}`;
+  const options = [...state.tasks.values()]
+    .filter(x => x.id !== selfId && x.projectId === projectId && !chosen.includes(x.id) && !(state.drawer.id && L.wouldCycle(state.drawer.id, x.id, byId)))
+    .sort(sortByDeadline);
+  box.innerHTML = `${chosen.length ? `<div class="dep-list">${chosen.map(id => {
+      const x = state.tasks.get(id), tm = timing(x);
+      return `<div class="dep-row">${marksHtml(x)}<span class="dep-who">${esc(executorOf(x)?.name || 'нет исполнителя')}</span>
+        <span class="due ${tm.cls}">${x.status === 'done' ? 'принят' : esc(tm.text)}</span>
+        <button class="btn ghostbtn sm" data-act="dep-del" data-id="${esc(id)}" type="button" aria-label="Убрать зависимость">✕</button></div>`;
+    }).join('')}</div>` : '<div class="hint">Зависимостей нет.</div>'}
+    ${options.length ? `<select id="dep-add" data-transient aria-label="Добавить зависимость"><option value="">+ Добавить: эта карточка ждёт…</option>${options.map(x => `<option value="${esc(x.id)}">${esc(label(x))}</option>`).join('')}</select>`
+      : `<div class="hint">${projectId ? 'В проекте нет других карточек, от которых можно зависеть.' : 'Сначала выберите проект.'}</div>`}`;
+}
+
+function renderMilestones() {
+  const box = $('#ms-box');
+  if (!box) return;
+  const list = state.draft.milestones;
+  box.innerHTML = list.length ? `<div class="ms-list">${list.map((m, i) => {
+    const late = !m.done && isDate(m.date) && m.date < state.today;
+    return `<div class="ms-row ${m.done ? 'done' : ''} ${late ? 'late' : ''}">
+      <input type="checkbox" data-ms="${i}" data-k="done" ${m.done ? 'checked' : ''} aria-label="Выполнена">
+      <input data-ms="${i}" data-k="title" value="${esc(m.title || '')}" placeholder="Название" maxlength="120" aria-label="Название контрольной точки">
+      <input type="date" data-ms="${i}" data-k="date" value="${esc(m.date || '')}" aria-label="Дата">
+      <button class="btn ghostbtn sm" data-act="ms-del" data-i="${i}" type="button" aria-label="Удалить">✕</button>
+    </div>`;
+  }).join('')}</div>` : '<div class="hint">Контрольных точек нет.</div>';
+  if (isSpec()) $$('#ms-box input:not([data-k="done"])').forEach(el => { el.disabled = true; });
+}
+
+function renderRevisions() {
+  const box = $('#rev-box');
+  if (!box || !state.draft) return;
+  const list = state.draft.revisions;
+  box.innerHTML = list.length ? `<div class="rev-list">${list.map((r, i) => `<div class="rev-row">
+      <span class="rev-no">Изм.&nbsp;<input data-rev="${i}" data-k="no" value="${esc(r.no)}" maxlength="6" aria-label="Номер изменения" inputmode="numeric"></span>
+      <input type="date" data-rev="${i}" data-k="date" value="${esc(r.date || '')}" aria-label="Дата изменения">
+      <input data-rev="${i}" data-k="note" value="${esc(r.note || '')}" placeholder="Что изменено и почему" maxlength="200" aria-label="Содержание изменения">
+      <button class="btn ghostbtn sm" data-act="rev-del" data-i="${i}" type="button" aria-label="Удалить">✕</button></div>`).join('')}</div>`
+    : '<div class="hint">Изменений не было — выпуск первоначальный.</div>';
+}
+function addRevision() {
+  const list = state.draft.revisions;
+  const next = list.reduce((m, r) => Math.max(m, parseInt(r.no, 10) || 0), 0) + 1;
+  list.push({ id: newId(), no: String(next), date: todayStr(), note: '' });
+  renderRevisions();
+  $$('#rev-box [data-k="note"]').at(-1)?.focus();
+}
+function cleanRevisions() {
+  const out = [];
+  for (const r of state.draft.revisions || []) {
+    const no = String(r.no || '').trim(), note = String(r.note || '').trim();
+    if (!no && !note) continue;
+    if (!no) return { error: 'Укажите номер изменения.' };
+    if (r.date && !isDate(r.date)) return { error: 'Проверьте даты изменений.' };
+    out.push({ id: r.id || newId(), no, date: r.date || todayStr(), note });
+  }
+  return { list: out };
+}
+async function openTaskFolder(id) {
+  const res = await api.openTaskFolder(id);
+  if (!res.ok) toast(res.message, true);
+}
+async function pickTaskFolder() {
+  const res = await api.pickFolder(val('folder') || projectOf({ projectId: val('projectId') })?.folder || '');
+  if (res?.path) $('#t-folder').value = res.path;
+}
+function suggestTaskFolder() {
+  const p = projectOf({ projectId: val('projectId') });
+  if (!p?.folder) return toast('У проекта не указана папка.', true);
+  const m = selectedMarks()[0] || '';
+  $('#t-folder').value = p.folder.replace(/[\\/]+$/, '') + (p.folder.includes('/') && !p.folder.includes('\\') ? '/' : '\\') + m;
+}
+
+function taskMoneyPanel(t, isNew) {
+  return `
+    <div class="sub0"><h3 class="h3">Договор и документы</h3>
+      <div class="fgrid">
+        <div class="f"><label for="t-contract">Договор №</label><input id="t-contract" name="contractNo" value="${esc(t.contractNo || '')}" maxlength="60" placeholder="15/24-П"></div>
+        <div class="f"><label for="t-contract-date">от</label><input id="t-contract-date" name="contractDate" type="date" value="${esc(t.contractDate || '')}"></div>
+        <label class="chk"><input type="checkbox" name="invoiceReceived" ${t.invoiceReceived ? 'checked' : ''}> Счёт получен${t.invoiceDate ? ` <span class="hint">${fmtDate(t.invoiceDate)}</span>` : ''}</label>
+        <label class="chk"><input type="checkbox" name="actSigned" ${t.actSigned ? 'checked' : ''}> Акт подписан${t.actDate ? ` <span class="hint">${fmtDate(t.actDate)}</span>` : ''}</label>
+      </div>
+    </div>
+    <div class="sub"><h3>График платежей по договору</h3>
+      <div class="tpl-row"><span class="hint">Шаблон:</span>
+        <button class="btn sm" data-act="plan-tpl" data-tpl="30-70" type="button">Аванс 30% + 70% после приёмки</button>
+        <button class="btn sm" data-act="plan-tpl" data-tpl="50-50" type="button">50% + 50%</button>
+        <button class="btn sm" data-act="plan-tpl" data-tpl="100" type="button">100% после приёмки</button>
+      </div>
+      <div id="plan-box"></div>
+      <button class="btn sm" data-act="plan-add" type="button">+ Платёж в график</button>
+      <div id="plan-preview"></div>
+    </div>
+    ${isNew ? '<p class="hint">Фактические платежи можно будет вносить после сохранения карточки.</p>' : '<div class="sub" id="payments"></div>'}`;
+}
+const planValue = r => (r.pct !== null && r.pct !== undefined && r.pct !== '' ? `${String(r.pct).replace('.', ',')}%` : r.amount ? String(r.amount).replace('.', ',') : '');
+function renderPlanRows() {
+  const box = $('#plan-box');
+  if (!box) return;
+  const list = state.draft.plan;
+  box.innerHTML = list.length ? `<div class="plan-list">${list.map((r, i) => `<div class="plan-row">
+      <input data-pl="${i}" data-k="title" value="${esc(r.title || '')}" placeholder="Аванс" maxlength="80" aria-label="Назначение платежа">
+      <input data-pl="${i}" data-k="value" value="${esc(planValue(r))}" placeholder="30% или 50 000" inputmode="decimal" aria-label="Сумма или процент">
+      <select data-pl="${i}" data-k="trigger" aria-label="Когда платить">${Object.entries(PAY_TRIGGERS).map(([k, l]) => `<option value="${k}"${(r.trigger || 'accepted') === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <input type="date" data-pl="${i}" data-k="date" value="${esc(r.date || '')}" ${r.trigger === 'date' ? '' : 'hidden'} aria-label="Дата платежа">
+      <button class="btn ghostbtn sm" data-act="plan-del" data-i="${i}" type="button" aria-label="Удалить">✕</button>
+    </div>`).join('')}</div>` : '<div class="hint">Графика нет — весь остаток считается к оплате после приёмки.</div>';
+}
+// Live preview from the form: budget, status and start may be edited but not saved yet.
+function renderPlanPreview() {
+  const box = $('#plan-preview');
+  if (!box || !state.draft) return;
+  const saved = state.drawer.id ? state.tasks.get(state.drawer.id) : {};
+  const budget = parseMoney(val('budget'));
+  const t = { ...saved, budget: Number.isNaN(budget) ? 0 : budget, status: val('status') || saved?.status, start: val('start'), plan: state.draft.plan, payments: saved?.payments || [] };
+  const pp = L.paymentPlan(t, state.today);
+  const stateChip = r => ({ paid: '<span class="chip tone-ok">оплачено</span>', due: '<span class="chip tone-warn">пора платить</span>', upcoming: '<span class="chip tone-idle">позже</span>' }[r.state]);
+  box.innerHTML = `<div class="plan-prev">
+    ${pp.rows.map(r => `<div class="pp-row ${r.virtual ? 'virtual' : ''}"><span>${esc(r.title || 'Платёж')}<span class="hint"> · ${esc(PAY_TRIGGERS[r.trigger] || '')}${r.dueDate ? ` ${fmtDate(r.dueDate)}` : ''}</span></span>
+      <span class="num">${r.paid > 0 && r.paid < r.amount ? `<span class="hint">оплачено ${money(r.paid)} из </span>` : ''}${money(r.amount)}</span>${stateChip(r)}</div>`).join('')}
+    <div class="pp-sum"><span>Пора платить: <b class="num">${money(pp.dueNow)}</b></span><span>Позже по договору: <b class="num">${money(pp.later)}</b></span></div>
+    ${pp.hasPlan && pp.mismatch > 0 ? `<div class="err">График больше бюджета на ${money(pp.mismatch)}.</div>` : ''}
+    ${pp.hasPlan && pp.mismatch < 0 ? `<div class="hint">В графике не распределено ${money(-pp.mismatch)} — они считаются к оплате после приёмки.</div>` : ''}
+  </div>`;
+}
+
+function renderPayments() {
+  const box = $('#payments');
+  const t = state.tasks.get(state.drawer?.id);
+  if (!box || !t) return;
+  const pays = [...(t.payments || [])].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const rest = restOf(t);
+  const keep = { d: $('#p-date')?.value, a: $('#p-amount')?.value, n: $('#p-note')?.value };
+  box.innerHTML = `<h3>Фактические платежи</h3>
+    <div class="money3">
+      <div><span class="k">Бюджет</span><span class="v">${money(budgetOf(t))}</span></div>
+      <div><span class="k">Оплачено</span><span class="v">${money(paidOf(t))}</span></div>
+      <div><span class="k">Остаток</span><span class="v ${rest < 0 ? 'neg' : ''}">${money(rest)}</span></div>
+    </div>
+    ${rest < 0 ? `<div class="err">Оплачено больше бюджета на ${money(-rest)}.</div>` : ''}
+    ${pays.length ? `<div class="plist">${pays.map(p => `<div class="prow"><span class="num">${fmtDate(p.date)}</span><span class="n">${esc(p.note || 'платёж')}</span><span class="num">${money(p.amount)}</span>
+      <button class="btn ghostbtn sm" data-act="del-payment" data-pid="${esc(p.id)}" type="button" aria-label="Удалить платёж">✕</button></div>`).join('')}</div>` : '<div class="hint">Платежей ещё не было.</div>'}
+    <div class="padd" data-transient>
+      <div class="f"><label for="p-date">Дата</label><input id="p-date" type="date" value="${esc(keep.d || todayStr())}"></div>
+      <div class="f"><label for="p-amount">Сумма, ₽</label><input id="p-amount" inputmode="decimal" placeholder="50 000" value="${esc(keep.a || '')}"></div>
+      <div class="f"><label for="p-note">Комментарий</label><input id="p-note" placeholder="Аванс 30%" maxlength="120" value="${esc(keep.n || '')}"></div>
+      <button class="btn" data-act="add-payment" type="button">Внести</button>
+    </div>
+    <span class="hint">Платёж сохраняется сразу.</span>`;
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'open-task-folder': ({ e, id }) => { e.stopPropagation(); openTaskFolder(id); },
+  'pick-task-folder': () => { pickTaskFolder(); },
+  'suggest-task-folder': () => { suggestTaskFolder(); },
+  'rev-add': () => { addRevision(); },
+  'rev-del': ({ el }) => { state.draft.revisions.splice(Number(el.dataset.i), 1); renderRevisions(); },
+  'dep-del': ({ id }) => { state.draft.dependsOn = state.draft.dependsOn.filter(x => x !== id); renderDeps(); },
+  'tf-open': ({ el }) => { const t = state.tasks.get(state.drawer?.id); if (t) api.attachOpen(t.projectId, el.dataset.fid).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть файл.', true); }); },
+  'tf-del': ({ el }) => { const t = state.tasks.get(state.drawer?.id); if (t) write(op.update('tasks', t.id, { files: (t.files || []).filter(f => f.id !== el.dataset.fid) }), 'Файл убран из карточки').then(refreshTaskFiles); },
+  'ms-add': ({ id }) => { state.draft.milestones.push({ id: newId(), title: '', date: '', done: false }); renderMilestones(); $$('#ms-box [data-k="title"]').at(-1)?.focus(); },
+  'ms-del': ({ el }) => { state.draft.milestones.splice(Number(el.dataset.i), 1); renderMilestones(); },
+  'plan-add': ({ id }) => { state.draft.plan.push({ id: newId(), title: '', amount: 0, trigger: 'accepted' }); renderPlanRows(); renderPlanPreview(); },
+  'plan-del': ({ el }) => { state.draft.plan.splice(Number(el.dataset.i), 1); renderPlanRows(); renderPlanPreview(); },
+  'plan-tpl': ({ el }) => { applyPlanTemplate(el.dataset.tpl); },
+});
+/* ---------- roles: header markup, user switch, team ---------- */
+// data-role-hide="spec" — hidden from specialists; "gip" — shown to the GIP only.
+function roleAllows(spec) {
+  if (spec === 'gip') return A.isGip(state.me);
+  if (spec === 'spec') return !isSpec();
+  return true;
+}
+const liveUsers = () => [...(state.users?.values() || [])];
+const usersByRole = r => liveUsers().filter(u => u.role === r).sort(byName);
+const userTag = u => `${A.ROLES[u.role]?.label || ''}${A.directionLabels(u).length ? ' · ' + A.directionLabels(u).join(', ') : ''}`;
+
+function setUserMenu(open) {
+  const menu = $('#user-menu');
+  if (open) {
+    const item = u => `<button role="menuitem" type="button" data-act="switch-user" data-id="${esc(u.id)}"${u.id === state.me?.id ? ' aria-current="true"' : ''}>
+      <b>${esc(u.name)}</b><small>${esc(userTag(u))}</small></button>`;
+    if (state.remote) {
+      menu.innerHTML = `<div class="menu-h">${esc(state.me?.name || '')}</div><p class="role-hint">${esc(userTag(state.me || {}))} · общая база ${esc(state.remote.url || '')}, вход «${esc(state.remote.login || '')}»</p>
+        <button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Связь, пароль${A.isGip(state.me) ? ', кто может входить' : ''}</small></button>`;
+      menu.hidden = !open; $('#btn-user').setAttribute('aria-expanded', String(open)); return;
+    }
+    menu.innerHTML = [['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
+      .map(([r, l]) => usersByRole(r).length ? `<div class="menu-h">${l}</div>${usersByRole(r).map(item).join('')}` : '').join('')
+      + '<p class="role-hint">Локальная версия: вход без пароля, роли разделяют интерфейс, но не защищают файл данных.</p>'
+      + (api.serverInfo ? '<button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Общая база команды: подключиться или перенести</small></button>' : '');
+  }
+  menu.hidden = !open;
+  $('#btn-user').setAttribute('aria-expanded', String(open));
+  if (open) menu.querySelector('[aria-current]')?.focus();
+}
+// «Свой вид» (3.6): each person on this computer keeps their own tab, columns, sorting, folded blocks, Gantt and
+// office settings. Switching the user stores the current set under the old user and brings back the new one's.
+const VIEW_KEYS = ['tab', 'cols', 'sort', 'folded', 'gantt', 'kbLanes', 'office', 'overview', 'peopleMode', 'presets', 'dense', 'teamCollapsed', 'progWeight', 'quietDays', 'tabOrder', 'nav', 'scroll'];
+function swapView(fromId, toId) {
+  try {
+    if (fromId) localStorage.setItem('glavspec.view:' + fromId, JSON.stringify(Object.fromEntries(VIEW_KEYS.map(k => [k, localStorage.getItem('glavspec.' + k)]))));
+    const saved = JSON.parse(localStorage.getItem('glavspec.view:' + toId) || 'null');
+    if (!saved) return false; // first visit: keep the current view as a start
+    for (const k of VIEW_KEYS) { if (saved[k] == null) localStorage.removeItem('glavspec.' + k); else localStorage.setItem('glavspec.' + k, saved[k]); }
+    return true;
+  } catch { return false; }
+}
+async function switchUser(id) {
+  setUserMenu(false);
+  if (id === state.me?.id) return;
+  if (state.drawer) closeDrawer();
+  const from = state.me?.id;
+  const res = await api.switchUser(id);
+  if (!res?.ok) return toast(res?.message || 'Не удалось сменить пользователя.', true);
+  const u = state.users.get(id);
+  const msg = `Вы вошли как ${u ? u.name : 'другой пользователь'} — ${A.titleFor(u)}`;
+  if (swapView(from, id)) { try { sessionStorage.setItem('glavspec.toast', msg + ' · свой вид восстановлен'); } catch { /* optional */ } api.reloadWindow(); return; }
+  toast(msg);
+}
+
+function ownerStats(uid) {
+  const list = tasksArr().filter(t => hasOwner(t, uid));
+  const active = list.filter(t => L.ACTIVE.has(t.status));
+  return { total: list.length, active: active.length, overdue: active.filter(t => timing(t).overdue).length, review: list.filter(t => t.status === 'review').length };
+}
+// Tree: GIP → chiefs → their specialists. Specialists without a chief hang under «Без главспеца».
+const teamCollapsed = new Set(loadLocal('teamCollapsed', []));
+function toggleTeamNode(id) {
+  if (teamCollapsed.has(id)) teamCollapsed.delete(id); else teamCollapsed.add(id);
+  saveLocal('teamCollapsed', [...teamCollapsed]);
+  renderNow();
+}
+function viewTeam() {
+  const gip = A.isGip(state.me);
+  const visible = gip ? liveUsers() : liveUsers().filter(u => u.id === state.me.id || (u.role === 'specialist' && u.chiefId === state.me.id));
+  const subsOf = id => visible.filter(u => u.role === 'specialist' && u.chiefId === id).sort(byName);
+  const budgetCell = u => u.role === 'chief' ? (gip
+    ? `<label class="chk"><input type="checkbox" data-act="toggle-budget" data-id="${esc(u.id)}"${u.canSeeBudget ? ' checked' : ''}> видит бюджет</label>`
+    : (u.canSeeBudget ? 'видит бюджет' : 'бюджет скрыт')) : u.role === 'gip' ? 'полный доступ' : 'без бюджета';
+  // depth: 0 GIP, 1 chief, 2 specialist; `kids` — ids under this node, for branch totals and collapsing.
+  const row = (u, depth, kids = [], last = false, trunk = false) => {
+    const own = ownerStats(u.id);
+    const branch = kids.reduce((a, id) => { const x = ownerStats(id); return { active: a.active + x.active, overdue: a.overdue + x.overdue, review: a.review + x.review }; }, own);
+    const s = kids.length && u.role === 'chief' ? branch : own;
+    const open = !teamCollapsed.has(u.id);
+    const toggle = kids.length ? `<button class="tree-tg" type="button" data-act="team-toggle" data-id="${esc(u.id)}" aria-expanded="${open}" title="${open ? 'Свернуть' : 'Развернуть'}">${open ? '▾' : '▸'}</button>` : '<span class="tree-tg ph"></span>';
+    const addSub = gip && u.role === 'chief' ? `<button class="btn ghostbtn sm" data-act="new-user" data-role="specialist" data-chief="${esc(u.id)}" type="button" title="Добавить специалиста в группу">+ специалист</button>` : '';
+    return `<tr class="tree d${depth}${last ? ' last' : ''}${trunk ? ' trunk' : ''}" style="--d:${depth}">
+      <td><div class="tree-cell" style="--d:${depth}">${toggle}<span class="tree-dot r-${u.role}"></span><span class="kicons">${userIcons(u)}</span>
+        <span><b>${esc(userLabel(u))}</b>${kids.length && u.role === 'chief' ? `<div class="hint">в группе ${kids.length + 1} · цифры по группе</div>` : ''}</span></div></td>
+      <td>${esc(userTag(u))}</td>
+      <td class="r num">${s.active}</td><td class="r num${s.overdue ? ' neg' : ''}">${s.overdue}</td><td class="r num">${s.review}</td>
+      <td>${budgetCell(u)}</td>
+      <td class="nowrap">${addSub}${gip ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</td></tr>`;
+  };
+  // `lastChief`: no sibling below, so the GIP's line stops at this chief.
+  const chiefBranch = (c, depth, lastChief = true) => {
+    const subs = subsOf(c.id);
+    return row(c, depth, subs.map(x => x.id), lastChief) + (teamCollapsed.has(c.id) ? '' : subs.map((x, i) => row(x, depth + 1, [], i === subs.length - 1, !lastChief)).join(''));
+  };
+  let body;
+  if (gip) {
+    const chiefs = visible.filter(u => u.role === 'chief').sort(byName);
+    const orphans = visible.filter(u => u.role === 'specialist' && !chiefs.some(c => c.id === u.chiefId)).sort(byName);
+    const gips = visible.filter(u => u.role === 'gip').sort(byName);
+    const top = gips[0];
+    const under = chiefs.map((c, i) => chiefBranch(c, 1, i === chiefs.length - 1 && !orphans.length)).join('')
+      + (orphans.length ? `<tr class="tree d1 last orphan-h" style="--d:1"><td colspan="7"><div class="tree-cell" style="--d:1"><span class="tree-tg ph"></span><span class="hint">Без главспеца — ${orphans.length}: назначьте руководителя в карточке сотрудника</span></div></td></tr>`
+        + orphans.map((x, i) => row(x, 2, [], i === orphans.length - 1)).join('') : '');
+    body = (top ? row(top, 0, chiefs.map(c => c.id).concat(orphans.map(o => o.id))) : '')
+      + (top && teamCollapsed.has(top.id) ? '' : under)
+      + gips.slice(1).map(g => row(g, 0)).join('');
+  } else {
+    body = chiefBranch(state.me, 0);
+  }
+  return `<section class="panel team">
+    <div class="panel-h"><h3>Структура команды</h3><span class="spacer"></span>${gip ? '<button class="btn primary sm" data-act="new-user" type="button">+ Сотрудник</button>' : ''}</div>
+    ${tip('team', gip ? 'Структура: ГИП → главспецы → их специалисты. Цифры у главспеца — по всей его группе. Подрядчики (внештатные) — ниже на этой же вкладке.'
+      : 'Вы и ваши специалисты. Состав команды и доступ к бюджету меняет ГИП.', 'team-hint')}
+    <div class="tablewrap"><table class="tree-tbl"><thead><tr><th>Сотрудник</th><th>Роль и направления</th><th class="r">В работе</th><th class="r">Сорвано</th><th class="r">На проверке</th><th>Бюджет</th><th></th></tr></thead>
+    <tbody>${body}</tbody></table></div>
+    ${visible.some(u => u.role === 'specialist') ? '' : `<div class="empty-hint">${gip
+      ? '<b>Специалистов пока нет.</b> Нажмите «+ Сотрудник» или «+ специалист» в строке главспеца — каждому сразу создаётся свой пульт. Затем карточки можно спускать им, а здесь будет видна загрузка группы.'
+      : '<b>В вашей группе пока нет специалистов.</b> Их добавляет ГИП; после этого вы сможете спускать им карточки и видеть их работу здесь.'}</div>`}</section>`;
+}
+async function toggleBudget(id, on) {
+  const u = state.users.get(id);
+  if (!u) return;
+  await write(op.update('users', id, { canSeeBudget: on }), on ? `${u.name} теперь видит бюджет` : `${u.name} больше не видит бюджет`);
+}
+
+function openUser(id, role = 'specialist', chiefId = '') {
+  const chief = chiefId && state.users.get(chiefId);
+  const u = id ? state.users.get(id) : { role: A.ROLES[role] ? role : 'specialist', chiefId: chief ? chiefId : '', directions: chief ? [...(chief.directions || [])] : [] };
+  if (!u) return toast('Сотрудник не найден.', true);
+  state.drawer = { kind: 'user', id };
+  const chiefs = usersByRole('chief');
+  const owned = id ? [...state.tasks.values()].filter(t => hasOwner(t, id)).length : 0;
+  drawerShell({
+    title: id ? 'Штатный сотрудник' : 'Новый сотрудник',
+    body: `${id ? '' : kindSwitch('staff')}<div class="fgrid">
+      <div class="f wide"><label class="req" for="u-name">Имя</label><input id="u-name" name="name" value="${esc(u.name || '')}" maxlength="120" placeholder="Иванов И. И."></div>
+      <div class="f"><label for="u-role">Роль</label><select id="u-role" name="role"${id === state.me.id ? ' disabled' : ''}>
+        ${Object.entries(A.ROLES).map(([r, x]) => `<option value="${r}"${u.role === r ? ' selected' : ''}>${x.label}</option>`).join('')}</select></div>
+      <div class="f" data-for-role="specialist"><label for="u-chief">Главспец</label><select id="u-chief" name="chiefId">
+        <option value="">— не назначен —</option>${chiefs.map(c => `<option value="${esc(c.id)}"${u.chiefId === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="f wide" data-for-role="chief specialist"><span class="lbl">Направления</span><div class="chk-row">
+        ${A.DIRECTIONS.map(d => `<label class="chk"><input type="checkbox" name="dir" value="${d.id}"${(u.directions || []).includes(d.id) ? ' checked' : ''}> ${esc(d.label)}</label>`).join('')}</div></div>
+      <div class="f wide" data-for-role="chief"><label class="chk"><input type="checkbox" name="canSeeContacts"${u.canSeeContacts ? ' checked' : ''}> Видит заказчиков и их контакты (кабинет заказчика)</label></div>
+      <div class="f wide" data-for-role="chief"><label class="chk"><input type="checkbox" name="canSeeBudget"${u.canSeeBudget ? ' checked' : ''}> Видит бюджет и оплаты своих карточек</label></div>
+      <div class="f"><label for="u-phone">Телефон</label><input id="u-phone" name="phone" type="tel" value="${esc(u.phone || '')}" maxlength="40"></div>
+      <div class="f"><label for="u-email">Почта</label><input id="u-email" name="email" type="email" value="${esc(u.email || '')}" maxlength="120"></div>
+      <div class="f"><label for="u-msg">Мессенджер</label><input id="u-msg" name="messenger" value="${esc(u.messenger || '')}" maxlength="120"></div>
+      <div class="f"><label for="u-bday">День рождения</label><input id="u-bday" name="birthday" type="date" value="${esc(u.birthday || '')}"><span class="hint">В «Офисе» в этот день — колпак. Год не показывается.</span></div>
+    </div>
+    <p class="hint">${id ? 'Пульт сотрудника' : 'Пульт для сотрудника создаётся автоматически'}: войти в него — щелчок по имени в заголовке программы.</p>
+    <div class="err" id="form-err" hidden></div>
+    ${id ? `<p class="hint">Карточек на сотруднике: ${owned}.</p>` : ''}`,
+    footer: `<button class="btn primary" type="submit">${id ? 'Сохранить' : 'Добавить'}</button>
+      <button class="btn" data-act="discard" type="button">Отмена</button>
+      <span class="spacer"></span>
+      ${id && id !== state.me.id ? '<button class="btn danger" data-act="ask-delete" type="button">Удалить</button>' : ''}`,
+  });
+  syncUserForm();
+  markClean();
+  if (!id) $('#u-name').focus();
+}
+function syncUserForm() {
+  const role = $('#u-role')?.value;
+  $$('[data-for-role]').forEach(el => { el.hidden = !el.dataset.forRole.split(' ').includes(role); });
+}
+async function submitUser() {
+  const { id } = state.drawer;
+  const role = id === state.me.id ? state.me.role : val('role');
+  const data = { name: val('name'), role, directions: $$('input[name="dir"]:checked').map(i => i.value), phone: val('phone'), email: val('email'), messenger: val('messenger'), birthday: isDate(val('birthday')) ? val('birthday') : '' };
+  if (!data.name) return formError('Укажите имя сотрудника.', '', 'name');
+  if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.', '', 'email');
+  if (!A.ROLES[role]) return formError('Выберите роль.', '', 'role');
+  data.chiefId = role === 'specialist' ? val('chiefId') : '';
+  data.canSeeBudget = role === 'chief' && checked('canSeeBudget');
+  data.canSeeContacts = role === 'chief' && checked('canSeeContacts');
+  if (role === 'gip') data.directions = [];
+  if (id && role !== 'chief' && state.users.get(id)?.role === 'chief' && usersByRole('specialist').some(s => s.chiefId === id))
+    return formError('У этого главспеца есть специалисты — сначала переведите их к другому главспецу.');
+  const left = id ? [...state.tasks.values()].filter(t => hasOwner(t, id) && t.status !== 'done' && A.profileGaps({ ...state.users.get(id), ...data }, t).length).length : 0;
+  const ok = id ? await write(op.update('users', id, data), left ? `Сохранено. Внимание: карточек не по профилю — ${left}, они в сводке` : 'Сотрудник сохранён')
+    : await write(op.set('users', newId(), { ...data, createdAt: new Date().toISOString() }), `${data.name}: штатный сотрудник добавлен, пульт создан`);
+  if (ok) closeDrawer();
+  return ok;
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'user-menu': () => { setUserMenu($('#user-menu').hidden); },
+  'switch-user': ({ id }) => { switchUser(id); },
+  'server': () => { setUserMenu(false); setFileMenu(false); serverDialog(); },
+  'open-user': ({ id }) => { openUser(id); },
+  'new-user': ({ el }) => { setCreateMenu(false); openUser(null, el.dataset.role, el.dataset.chief); },
+  'team-toggle': ({ id }) => { toggleTeamNode(id); },
+});
+/* ---------- weekly summary for management ---------- */
+function weeklyText(list = tasksArr()) {
+  const today = state.today, from = addDays(today, -6), next = addDays(today, 7);
+  const line = t => `• ${projectOf(t)?.name || '—'} — ${marksText(t)}${t.title ? ' (' + t.title + ')' : ''}${ownerOf(t) ? ', ' + ownerOf(t).name : ''}${contractorOf(t) ? ', ' + contractorOf(t).name : ''}`;
+  const inWeek = d => d && d >= from && d <= today;
+  const accepted = list.filter(t => t.status === 'done' && inWeek(L.reviewStats(t, today).accepted));
+  const submitted = list.filter(t => (t.history || []).some(h => h.type === 'status' && h.to === 'review' && inWeek(h.date)) && !accepted.includes(t));
+  const shifted = list.flatMap(t => (t.history || []).filter(h => h.type === 'finish' && inWeek(h.date)).map(h => ({ t, h })));
+  const overdue = list.filter(t => timing(t).overdue);
+  const coming = list.filter(t => L.ACTIVE.has(t.status) && !timing(t).overdue && isDate(t.finish) && t.finish >= today && t.finish <= next).sort(sortByDeadline);
+  const review = list.filter(t => t.status === 'review');
+  const sec = (title, items, fmt = line) => items.length ? `\n${title} (${items.length}):\n${items.map(fmt).join('\n')}\n` : '';
+  const head = `Сводка за неделю ${fmtDate(from)}–${fmtDate(today)}${state.me ? ' · ' + state.me.name : ''}\n`
+    + `В работе ${list.filter(t => L.ACTIVE.has(t.status)).length}, сорвано ${overdue.length}, на проверке ${review.length}.\n`;
+  return head
+    + sec('Принято', accepted)
+    + sec('Сдано на проверку', submitted)
+    + sec('Перенесены сроки', shifted, ({ t, h }) => `${line(t)}: ${fmtDate(h.from)} → ${fmtDate(h.to)}${h.reason ? ' — ' + (SHIFT_REASONS[h.reason] || h.reason).toLowerCase() : ''}${h.note ? ' (' + h.note + ')' : ''}`)
+    + sec('Срок сорван', overdue, t => `${line(t)} — ${timing(t).text}`)
+    + sec('Сдача на следующей неделе', coming, t => `${line(t)} — до ${fmtDate(t.finish)}`)
+    + sec('Ждут проверки', review);
+}
+function openWeekly() {
+  setFileMenu(false);
+  const root = document.createElement('div');
+  root.className = 'modal-back';
+  root.innerHTML = `<div class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+    <h2 id="mtitle">Сводка за неделю</h2>
+    <p class="hint">Текст можно поправить перед отправкой. Деньги в сводку не попадают.</p>
+    <textarea id="wk-text" class="wk-text" rows="16">${esc(weeklyText())}</textarea>
+    <div class="modal-f"><button class="btn primary" type="button" data-m="copy">Копировать</button><button class="btn" type="button" data-m="cancel">Закрыть</button></div></div>`;
+  document.body.append(root);
+  const close = () => root.remove();
+  root.addEventListener('click', e => {
+    if (e.target === root || e.target.dataset.m === 'cancel') close();
+    if (e.target.dataset.m === 'copy') copyText($('#wk-text').value).then(ok => toast(ok ? 'Сводка скопирована — вставьте в мессенджер или почту' : 'Текст выделен — нажмите Ctrl+C'));
+  });
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  $('#wk-text').focus();
+}
+
+/* ---------- absences of staff (vacation, sick leave) ---------- */
+function openAbsences(uid) {
+  const u = state.users.get(uid);
+  if (!u || !A.canEditAbsences(state.me, u)) return toast('Отсутствия этого сотрудника ведут ГИП или его главспец.', true);
+  let rows = clone(A.absencesOf(u).length ? u.absences : []);
+  const root = document.createElement('div');
+  root.className = 'modal-back';
+  const draw = () => {
+    root.querySelector('#abs-rows').innerHTML = rows.length ? rows.map((a, i) => `<div class="abs-row" data-i="${i}">
+      <select data-k="kind">${Object.entries(A.ABSENCE_KINDS).map(([k, l]) => `<option value="${k}"${a.kind === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
+      <input type="date" data-k="from" value="${esc(a.from || '')}" aria-label="С"><span>—</span><input type="date" data-k="to" value="${esc(a.to || '')}" aria-label="По">
+      <input data-k="note" value="${esc(a.note || '')}" placeholder="Комментарий" maxlength="100">
+      <button class="btn ghostbtn sm" type="button" data-m="del" data-i="${i}" title="Удалить">✕</button></div>`).join('') : '<div class="hint">Отсутствий не отмечено.</div>';
+  };
+  root.innerHTML = `<form class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
+    <h2 id="mtitle">Отсутствия: ${esc(u.name)}</h2>
+    <p class="hint">Отпуска и больничные. Программа предупредит, если срок карточки сотрудника попадает на эти дни, и покажет их на диаграмме Ганта.</p>
+    <div id="abs-rows"></div>
+    <button class="btn sm" type="button" data-m="add">+ Добавить период</button>
+    <div class="err" id="m-err" hidden></div>
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div>
+  </form>`;
+  document.body.append(root);
+  draw();
+  const close = () => root.remove();
+  root.addEventListener('input', e => { const r = e.target.closest('.abs-row'); if (r) rows[Number(r.dataset.i)][e.target.dataset.k] = e.target.value; });
+  root.addEventListener('click', e => {
+    const m = e.target.dataset.m;
+    if (e.target === root || m === 'cancel') close();
+    if (m === 'add') { rows.push({ id: newId(), kind: 'vacation', from: todayStr(), to: addDays(todayStr(), 13), note: '' }); draw(); }
+    if (m === 'del') { rows.splice(Number(e.target.dataset.i), 1); draw(); }
+  });
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  root.querySelector('form').addEventListener('submit', async e => {
+    e.preventDefault(); e.stopPropagation();
+    const bad = rows.find(a => !isDate(a.from) || !isDate(a.to) || a.to < a.from);
+    if (bad) { const i = rows.indexOf(bad); return modalErr(root, '#m-err', 'Проверьте даты: «по» не раньше «с».', `.abs-row[data-i="${i}"] [data-k="${isDate(bad.from) ? 'to' : 'from'}"]`); }
+    const list = rows.map(a => ({ id: a.id || newId(), kind: a.kind, from: a.from, to: a.to, note: (a.note || '').trim() })).sort((a, b) => a.from.localeCompare(b.from));
+    if (await write(op.update('users', uid, { absences: list }), `Отсутствия сохранены: ${u.name}`)) close();
+  });
+}
+const upcomingAbsences = u => A.absencesOf(u).filter(a => a.to >= state.today);
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'absences': ({ id }) => { openAbsences(id); },
+});
+/* ---------- message to the contractor ---------- */
+
+/* ---------- 4.1: focus on a task — «Начать работу» starts a timer; the time is kept on the card ---------- */
+// One focus per computer user: { taskId, since }. Stopped by «Пауза», «Сдал на проверку», another focus or ✕.
+let focus = loadLocal('focus', null);
+if (focus) setTimeout(() => api.setQuiet?.(true), 0); // a focus kept from the last run keeps «Не беспокоить»
+const fmtSpent = min => (min >= 60 ? `${Math.floor(min / 60)} ч ${String(min % 60).padStart(2, '0')} мин` : `${min} мин`);
+const spentOf = (t, userId = null) => (Array.isArray(t?.timeLog) ? t.timeLog : []).filter(x => !userId || x.userId === userId)
+  .reduce((a, x) => a + Math.max(0, Math.round((Date.parse(x.to) - Date.parse(x.from)) / 60000)), 0);
+function focusBtn(t) {
+  const mine = focus?.taskId === t.id, spent = spentOf(t);
+  const can = ['in_progress', 'revision'].includes(t.status);
+  return `<span id="focus-slot" class="focus-slot">${can ? `<button class="btn sm ${mine ? 'on' : ''}" type="button" data-act="${mine ? 'focus-stop' : 'focus-start'}" data-id="${esc(t.id)}" title="${mine ? 'Остановить таймер' : 'Таймер работы над карточкой; время сохранится в карточке'}">${mine ? 'Пауза' : '▶ Фокус'}</button>` : ''}${spent ? `<span class="hint" title="Время по таймеру «Фокус»">затрачено ${fmtSpent(spent)}</span>` : ''}</span>`;
+}
+// The card stays as it is (unsaved edits too): only its focus button is redrawn.
+function refreshFocusSlot() { const slot = $('#focus-slot'), t = state.drawer?.kind === 'task' && state.tasks.get(state.drawer.id); if (slot && t) slot.outerHTML = focusBtn(t); }
+/* ---------- 56: a short introduction by role, once ---------- */
+// 4–5 hints over the real interface the first time a person opens Пульт with data; «Знакомство с Пультом»
+// in the menu shows it again. A hint whose element is not on the screen is skipped.
+function tourSteps() {
+  const me = state.me, gip = A.isGip(me), chief = A.isChief(me);
+  const search = { sel: '[data-act="open-search"]', title: 'Поиск — Ctrl+K', text: A.canCreateTasks(me) ? 'Ищет проекты, карточки и людей. Начните с «+», чтобы сразу завести карточку: «+ ЭОМ Корпус 3 до 15.12 @Орлов».' : 'Ищет проекты, карточки и людей. Недавно открытое — первым.' };
+  const msgs = { sel: '[data-act="msg-open"]', title: 'Сообщения', text: 'Чаты проектов, личные и групповые. Сразу уведомляем только о том, где нужны вы.' };
+  if (gip) return [
+    { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'С него удобно начинать: что ждёт вашей проверки, что просрочено, кто остался без работы.' },
+    { sel: '[data-act="review-queue"]', tab: 'day', title: 'Очередь проверки', text: 'Карточки «на проверке» подряд: «Принять» или «Вернуть с замечанием», клавиши A и R.' },
+    { sel: '#tabs [data-id="projects"]', title: 'Проекты', text: 'Страница проекта: сроки этапов, состав, исходные данные и письма. В Ганте — критический путь.' },
+    search, msgs];
+  if (chief) return [
+    { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'Ваша группа: что ждёт проверки, что горит, кто свободен.' },
+    { sel: '#tabs [data-id="kanban"]', title: 'Канбан', text: 'Перетаскивайте карточки между статусами; «Вид карточек» — что показывать на карточке.' },
+    search, msgs];
+  return [
+    { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'Ваши карточки на сегодня. «Начать» — и карточка в работе.' },
+    { sel: '#tabs [data-id="tasks"]', title: 'Все карточки', text: 'В карточке — «Начать работу», готовность и «Сдать на проверку». Несохранённое не потеряется: предложим восстановить.' },
+    search, msgs];
+}
+let tour = null;
+function tourDoneFor(id) { return !!loadLocal('tourDone', {})[id]; }
+function tourMarkDone() { const d = loadLocal('tourDone', {}); d[state.me.id] = new Date().toISOString(); saveLocal('tourDone', d); }
+function maybeStartTour() {
+  if (tour || SOLO || state.win.compact || !state.me || isEmpty() || tourDoneFor(state.me.id) || loadLocal('tourOff', false)) return;
+  clearTimeout(maybeStartTour._t);
+  maybeStartTour._t = setTimeout(() => { if (!state.drawer && !document.querySelector('.modal-back, .palette-back') && !tourDoneFor(state.me.id) && !loadLocal('tourOff', false)) startTour(); }, 900);
+}
+function startTour() {
+  tour = { i: 0, steps: tourSteps(), tab: state.tab };
+  drawTour();
+}
+function endTour() {
+  document.querySelector('.tour')?.remove();
+  document.querySelector('.tour-on')?.classList.remove('tour-on');
+  const back = tour?.tab;
+  if (tour) tourMarkDone();
+  tour = null;
+  // The hints may switch to «Мой день»: the tab the person had comes back.
+  if (back && state.tab !== back) { state.tab = back; renderNow(); }
+}
+function drawTour() {
+  document.querySelector('.tour')?.remove();
+  document.querySelector('.tour-on')?.classList.remove('tour-on');
+  if (!tour) return;
+  let st, el;
+  while (tour.i < tour.steps.length) {
+    st = tour.steps[tour.i];
+    if (st.tab && state.tab !== st.tab) { state.tab = st.tab; renderNow(); }
+    el = document.querySelector(st.sel);
+    if (el && el.offsetParent !== null) break;
+    tour.i++;
+  }
+  if (tour.i >= tour.steps.length) return endTour();
+  const n = tour.steps.length, last = tour.i === n - 1;
+  el.classList.add('tour-on');
+  el.scrollIntoView({ block: 'nearest' });
+  const box = document.createElement('div');
+  box.className = 'tour'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Знакомство с Пультом');
+  box.innerHTML = `<div class="tour-n hint">${tour.i + 1} из ${n}</div><b>${esc(st.title)}</b><p>${esc(st.text)}</p>
+    <div class="tour-acts"><button class="btn primary sm" type="button" data-tour="next">${last ? 'Понятно' : 'Далее'}</button>${last ? '' : '<button class="btn ghostbtn sm" type="button" data-tour="skip">Пропустить</button>'}</div>`;
+  document.body.append(box);
+  const r = el.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight;
+  const below = r.bottom + 10 + h < window.innerHeight;
+  box.style.top = `${below ? r.bottom + 10 : Math.max(8, r.top - h - 10)}px`;
+  box.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+  box.querySelector('[data-tour="next"]').focus();
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest?.('[data-tour]');
+  if (!b) return;
+  if (b.dataset.tour === 'skip') endTour(); else { tour.i++; drawTour(); }
+});
+document.addEventListener('keydown', e => { if (tour && e.key === 'Escape') { e.stopPropagation(); endTour(); } }, true);
+window.addEventListener('resize', () => { if (tour) drawTour(); });
+
+/* ---------- 55: notifications without noise ---------- */
+// Right away (a Windows notification when the window is not in front) only what needs me: a card assigned to me,
+// returned, waiting for my review, a message addressed to me. Everything else stays in the morning digest.
+// While a focus runs, notifications are held and shown together when it ends.
+let needSeen = loadLocal('needSeen', '');
+function needsMeNotify() {
+  const me = state.me.id;
+  const fresh = tasksArr().filter(t => unread(t) && t.notify[me] > needSeen);
+  const top = fresh.reduce((m, t) => (t.notify[me] > m ? t.notify[me] : m), needSeen);
+  // The first run on this computer only takes the mark: no burst about everything unread so far.
+  if (!needSeen) { needSeen = top || new Date().toISOString(); saveLocal('needSeen', needSeen); return; }
+  if (!fresh.length) return;
+  needSeen = top; saveLocal('needSeen', needSeen);
+  const why = t => (t.status === 'review' ? 'ждёт вашей проверки' : t.status === 'revision' ? 'вернули на доработку'
+    : (t.comments || []).at(-1)?.ts === t.notify[me] ? 'новое сообщение' : 'назначено вам');
+  const one = t => `${marksText(t)} · ${projectOf(t)?.name || ''}: ${why(t)}`;
+  api.notifyMe?.(fresh.length === 1 ? one(fresh[0]) : `Нужно ваше внимание (${fresh.length}): ${fresh.slice(0, 3).map(one).join('; ')}${fresh.length > 3 ? '…' : ''}`, fresh.length === 1 ? `task:${fresh[0].id}` : 'day');
+}
+function focusQuiet(on) {
+  const held = api.setQuiet?.(on) || [];
+  if (!on && held.length) toast(`Пока шёл фокус: ${held.length} ${plural(held.length, 'уведомление', 'уведомления', 'уведомлений')} — ${held.at(-1).slice(0, 120)}`);
+}
+async function focusStart(id) {
+  if (focus?.taskId === id) return;
+  if (focus) await focusStop({ quiet: true });
+  focus = { taskId: id, since: new Date().toISOString() };
+  saveLocal('focus', focus); renderFocus(); focusQuiet(true);
+}
+// Writes the stretch to the card (≥ 1 min). quiet: no toast (another focus starts or the card is handed in).
+async function focusStop({ quiet = false } = {}) {
+  if (!focus) return;
+  const f = focus; focus = null; saveLocal('focus', null); renderFocus(); focusQuiet(false);
+  const t = state.tasks.get(f.taskId), to = new Date().toISOString();
+  const min = Math.round((Date.parse(to) - Date.parse(f.since)) / 60000);
+  if (!t || min < 1 || !state.me) return;
+  const timeLog = [...(Array.isArray(t.timeLog) ? t.timeLog : []), { userId: state.me.id, from: f.since, to }].slice(-500);
+  await write(op.update('tasks', t.id, { timeLog }), quiet ? '' : `${marksText(t)}: +${fmtSpent(min)}`, { undo: false });
+}
+function focusAfterQuick(id, quick) {
+  if (['start', 'resume', 'reopen'].includes(quick)) focusStart(id);
+  else if (focus?.taskId === id) focusStop({ quiet: true });
+}
+function renderFocus() {
+  let el = document.getElementById('focus-bar');
+  const t = focus && state.tasks.get(focus.taskId);
+  if (!t || SOLO) { el?.remove(); clearInterval(renderFocus.tick); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'focus-bar'; el.className = 'focus-bar'; el.setAttribute('role', 'status'); document.body.append(el); }
+  el.innerHTML = `<span class="fb-dot"></span><button class="fb-t" type="button" data-act="open-task" data-id="${esc(t.id)}" title="Открыть карточку"><b>${esc(marksText(t))}</b> <span class="hint">${esc(projectOf(t)?.name || '')}</span></button>
+    <span class="fb-time num" id="fb-time"></span>
+    <button class="btn sm" type="button" data-act="focus-stop" title="Остановить таймер, время сохранится в карточке">Пауза</button>${state.win.compact ? '' : '<button class="btn ghostbtn sm" type="button" data-act="toggle-compact" title="Свернуть Пульт в маленький виджет поверх окон — таймер останется на виду">Свернуть</button>'}`;
+  el.classList.toggle('in-compact', !!state.win.compact);
+  const tick = () => { const s = Math.max(0, Math.floor((Date.now() - Date.parse(focus?.since || Date.now())) / 1000)); const n = document.getElementById('fb-time'); if (n) n.textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+  tick(); clearInterval(renderFocus.tick); renderFocus.tick = setInterval(tick, 1000);
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'tour': () => { setFileMenu(false); endTour(); startTour(); },
+  'focus-start': ({ el }) => { closeCardMenu(); focusStart(el.dataset.id).then(refreshFocusSlot); },
+  'focus-stop': () => { closeCardMenu(); focusStop().then(refreshFocusSlot); },
+});
 /* ---------- project: composition by Decree 87 and data for the customer page ---------- */
 const PROTO_STATUS = [['work', 'в работе'], ['wait', 'ждём от заказчика'], ['done', 'готово']];
 // Kinds of what the GIP asks the customer for: source data (ТУ, letters, approvals…) and decisions.
@@ -5855,6 +6189,331 @@ const PD_NEW = { milestones: () => ({ id: newId(), title: '', date: '', done: fa
   payments: () => ({ id: newId(), title: '', sum: '', cond: '', status: 'upcoming', date: '' }), bills: () => ({ id: newId(), title: '', date: '', status: 'to_pay', due: '' }) };
 const draftList = key => key.split('.').reduce((o, k) => o[k], state.draft);
 
+async function customerPage(format) {
+  const id = state.drawer?.id;
+  if (!id) return;
+  const ok = await submitSimple(true);
+  if (!ok) return;
+  try {
+    const res = await api.customerPage(id, { format, font: brandFont });
+    if (res.canceled) return;
+    if (!res.ok) return toast(res.message, true);
+    if (res.viaBrowser) return toast('Страница открылась в браузере — в окне печати выберите «Сохранить как PDF».');
+    toast(`Сохранено: ${res.name}`, false, { label: 'Открыть', run: api.openLastReport });
+  } catch (e) { toast('Не удалось сохранить страницу: ' + (e?.message || e), true); }
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'ird-request': ({ el }) => { const x = state.draft.ird[Number(el.dataset.i)]; if (x?.title) { irdAsk(x); renderCustomer(); toast('Запрос добавлен в «Нужно от заказчика». Сохраните проект — заказчик увидит его на странице.'); } },
+  'ird-request-all': () => { const list = irdAskable(); list.forEach(irdAsk); renderCustomer(); toast(`Запрошено: ${list.length}. Сохраните проект — заказчик увидит запросы на странице.`); },
+  'ird-letter': () => { navigator.clipboard.writeText(irdLetterText()).then(() => toast('Текст письма-запроса скопирован — вставьте в письмо или на бланк.'), () => toast('Не удалось скопировать.', true)); },
+  'ird-techcard': ({ id }) => { state.draft.ird.push(...Techcard.SOURCE_DATA.filter(([t]) => !state.draft.ird.some(x => x.title.trim().toLowerCase() === t.toLowerCase())).map(([title, who]) => ({ id: newId(), title, kind: irdKindOf(title), who: who === 'Изыскатели' ? '«Тандем»' : who.replace('Заказчик / технолог', 'Заказчик'), status: 'plan', due: '', note: '' }))); renderCustomer(); },
+  'pd-add': ({ el }) => { draftList(el.dataset.list).push(PD_NEW[el.dataset.list]()); renderCustomer(); },
+  'pd-del': ({ el }) => { draftList(el.dataset.list).splice(Number(el.dataset.i), 1); renderCustomer(); },
+  'cust-page': ({ el }) => { customerPage(el.dataset.format); },
+  'req-attach': ({ el }) => { const x = state.draft?.requests?.[Number(el.dataset.i)], pid = state.drawer?.id; if (x && pid) api.attachAdd(pid).then(r => { if (r?.ok) { x.files = [...(x.files || []), r.file]; renderCustomer(); toast('Файл приложен — сохраните проект, и заказчик увидит его в кабинете.'); } else if (r && !r.canceled) toast(r.message, true); }); },
+  'req-unattach': ({ el }) => { const x = state.draft?.requests?.[Number(el.dataset.i)]; if (x) { x.files = (x.files || []).filter((_, k) => k !== Number(el.dataset.k)); renderCustomer(); } },
+  'att-open': ({ el }) => { const pid = state.drawer?.id; if (pid) api.attachOpen(pid, el.dataset.fid).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть', true); }); },
+  'cust-sec': ({ el }) => { custSec = el.dataset.v; saveLocal('custSec', custSec); custNav(); },
+  'ask-customer': ({ id }) => { const pr = state.projects.get(id); if (pr) askCustomer(pr); },
+});
+// «Состав по ПП № 87»: a tree of sections → subsections → books → parts; leaves become cards.
+function renderComposition() {
+  const box = $('#comp-box'), d = state.draft;
+  if (!box || !d) return;
+  const p = state.projects.get(state.drawer.id) || {};
+  const code = (val('code') || p.code || '').trim();
+  if (!d.composition) {
+    box.innerHTML = `<div class="comp-empty"><h3>Генератор состава проекта</h3><p>Проектная документация — по Постановлению Правительства РФ № 87 (ред. от 21.10.2025). К её разделам программа предложит разделы рабочей документации (основные комплекты по ГОСТ Р 21.101-2026 и принятые на практике). Всё можно выключить, переименовать, добавить своё.</p>
+      <p><b>Вид объекта:</b></p><div class="comp-bases">${Object.entries(Composition.BASES).map(([k, b]) => `<button class="btn" type="button" data-act="comp-base" data-v="${k}"><b>${esc(b.label)}</b><small>${b.sections.length} разделов${k === 'nonprod' ? ', ТХ — по заданию' : ''}</small></button>`).join('')}</div></div>`;
+    return;
+  }
+  const comp = d.composition;
+  const rows = Composition.rowsFor(comp, code);
+  const vols = new Set(Composition.volumes(comp, code).map(v => v.id));
+  const owners = A.assignableOwners(state.me, liveUsers()).filter(u => u.role !== 'gip' || A.isGip(state.me)).sort(byName);
+  const ownerSel = (attr, cur) => `<select ${attr} data-k="ownerId"><option value="">— вы —</option>${owners.map(u => `<option value="${esc(u.id)}"${u.id === cur ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`;
+  const contrSel = (attr, cur) => `<select ${attr} data-k="contractorId"><option value="">—</option>${contractorsArr().map(c => `<option value="${esc(c.id)}"${c.id === cur ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`;
+  const cardCell = (taskId, isVol) => { const t = taskId ? state.tasks.get(taskId) : null; return t ? `<button class="linkbtn" type="button" data-act="open-task" data-id="${esc(t.id)}">${statusChip(t)}</button>` : isVol ? '<span class="hint">нет</span>' : ''; };
+  const pdPending = rows.filter(r => vols.has(r.node.id) && !(r.node.taskId && state.tasks.has(r.node.taskId))).length;
+  const rdList = comp.rd || [];
+  const rdRows = new Map(Composition.rdRows(comp, code).map(r => [r.id, r]));
+  const rdPending = [...rdRows.values()].filter(r => !(r.item.taskId && state.tasks.has(r.item.taskId))).length;
+  const groups = Composition.rdGroups(comp);
+  const pdOptions = cur => {
+    const own = cur && !groups.some(g => g.node.id === cur) ? comp.nodes.find(n => n.id === cur) : null; // e.g. a switched-off section
+    return `<option value="">— вне разделов ПД —</option>${own ? `<option value="${esc(own.id)}" selected>${esc(own.abbr || own.title)} (выключен)</option>` : ''}${groups.map(g => `<option value="${esc(g.node.id)}"${g.node.id === cur ? ' selected' : ''}>${esc(g.node.abbr)}</option>`).join('')}`;
+  };
+  const srcTag = src => src === 'gost' ? '<span class="src gost" title="Обозначение есть в таблице В.1 ГОСТ Р 21.101-2026">ГОСТ</span>' : '<span class="src" title="Принято на практике, в таблице ГОСТ Р 21.101-2026 не найдено">практика</span>';
+
+  box.innerHTML = `<div class="cust-top"><span class="hint">База ПД: ${esc(Composition.BASES[comp.base]?.label || '')}. Обозначения — от шифра проекта${code ? ` «${esc(code)}»` : ' (шифр не задан — впишите на вкладке «Основное»)'}.</span><span class="spacer"></span>
+      <button class="btn" type="button" data-act="comp-export" data-format="sp">Состав ПД → Word</button><button class="btn" type="button" data-act="comp-export" data-format="vok"${rdRows.size ? '' : ' disabled title="В составе РД пока нет разделов — добавьте их ниже"'}>ВОК → Word</button><button class="btn ghostbtn" type="button" data-act="comp-export" data-format="xlsx">Excel</button></div>
+    <div class="comp-opts">
+      <label>Нумерация томов ПД <select data-copt="numbering.pd">${Object.entries(Composition.NUMBERING.pd).map(([k, l]) => `<option value="${k}"${Composition.numberingOf(comp).pd === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <label>РД <select data-copt="numbering.rd">${Object.entries(Composition.NUMBERING.rd).map(([k, l]) => `<option value="${k}"${Composition.numberingOf(comp).rd === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <label class="chk" title="Задания смежникам по техкарте станут подзадачами разделов; прямые задания задают старт получателя"><input type="checkbox" data-copt="links.pd"${comp.links?.pd !== false ? ' checked' : ''}> Задания по техкарте в ПД</label>
+      <label class="chk"><input type="checkbox" data-copt="links.rd"${comp.links?.rd !== false ? ' checked' : ''}> в РД</label>
+      <button class="btn ghostbtn sm" type="button" data-act="techcard" data-sec="assign">? техкарта</button></div>
+
+    <section class="comp-part"><div class="comp-h"><h3>1. Проектная документация · ПП РФ № 87</h3><span class="hint">Томов: ${vols.size}</span><span class="spacer"></span>${pdPending ? `<span class="hint">При сохранении будет создано задач: ${pdPending}</span>` : ''}</div>
+    <div class="tablewrap"><table class="comp-t"><thead><tr><th>Раздел · подраздел · книга · часть</th><th>Обозначение</th><th>Том</th><th>Ответственный</th><th>Подрядчик</th><th>Задача</th><th>Вкл.</th><th></th></tr></thead><tbody>
+    ${rows.map(r => {
+      const n = r.node, child = Composition.CHILD[n.kind], v = vols.has(n.id);
+      return `<tr class="ck-${n.kind}${r.disabled ? ' off' : ''}${v ? ' vol' : ''}">
+        <td><div class="comp-name" style="--d:${r.depth}"><span class="comp-k">${Composition.KINDS[n.kind]}${n.kind === 'section' ? ' ' + (n.num ?? '') : ''}</span>${n.std ? `<span class="comp-title">${esc(n.title)}</span>` : `<input data-cn="${n.id}" data-k="title" value="${esc(n.title)}" placeholder="Название" maxlength="300">`}</div></td>
+        <td><input class="code-in" data-cn="${n.id}" data-k="code" value="${esc(n.code || '')}" placeholder="${esc(r.code)}" maxlength="80"></td>
+        <td><input class="sm-in" data-cn="${n.id}" data-k="tom" value="${esc(n.tom || '')}" placeholder="${esc(r.tom)}" maxlength="20"></td>
+        <td>${v ? ownerSel(`data-cn="${n.id}"`, n.ownerId) : ''}</td><td>${v ? contrSel(`data-cn="${n.id}"`, n.contractorId) : ''}</td><td>${cardCell(n.taskId, v)}</td>
+        <td><input type="checkbox" data-cn="${n.id}" data-k="on"${n.on !== false ? ' checked' : ''} aria-label="Включить"></td>
+        <td class="nowrap">${child ? `<button class="btn ghostbtn sm" type="button" data-act="comp-add" data-id="${n.id}" title="Добавить: ${Composition.KINDS[child].toLowerCase()}">+ ${Composition.KINDS[child].toLowerCase()}</button>` : ''}${n.std ? '' : `<button class="btn ghostbtn sm" type="button" data-act="comp-del" data-id="${n.id}" aria-label="Удалить">✕</button>`}</td></tr>`;
+    }).join('')}</tbody></table></div>
+    <div class="comp-foot"><button class="btn sm" type="button" data-act="comp-add" data-id="">+ свой раздел</button><span class="hint">Разделы постановления не удаляются — их можно выключить. Обозначение и том считаются сами; впишите своё, чтобы переопределить.</span></div></section>
+
+    <section class="comp-part"><div class="comp-h"><h3>2. Рабочая документация · основные комплекты</h3><span class="hint">Разделов: ${rdRows.size}</span><span class="spacer"></span>${rdPending ? `<span class="hint">При сохранении будет создано задач: ${rdPending}</span>` : ''}</div>
+    ${comp.rd ? '' : '<p class="hint">Состав рабочей документации ещё не сформирован. <button class="btn sm" type="button" data-act="comp-rd-suggest">Предложить по разделам ПД</button></p>'}
+    <div class="rd-groups">${groups.map(g => `<div class="rd-group"><span class="rd-pd"><b>${esc(g.node.abbr)}</b> ${esc(g.node.title)}</span><span class="rd-chips">${g.items.map(it => {
+      const here = rdList.some(x => x.pdId === g.node.id && Composition.markBase(x.mark) === it.mark);
+      const other = !here && rdList.some(x => Composition.markBase(x.mark) === it.mark);
+      return `<button class="rd-chip${here ? ' on' : ''}${other ? ' else' : ''}" type="button" data-act="rd-chip" data-pd="${esc(g.node.id)}" data-mark="${esc(it.mark)}" title="${esc(it.title)}${other ? ' — уже есть в другом разделе' : ''}">${here ? '✓ ' : '+ '}${esc(it.mark)}</button>`;
+    }).join('')}<button class="rd-chip own" type="button" data-act="rd-add" data-pd="${esc(g.node.id)}" title="Свой раздел РД к этому разделу ПД">+ своя</button></span></div>`).join('')}</div>
+    <div class="tablewrap"><table class="comp-t rd-t"><thead><tr><th></th><th>Том</th><th>Раздел РД</th><th>Наименование</th><th>К разделу ПД</th><th>Обозначение</th><th>Примечание</th><th>Ответственный</th><th>Подрядчик</th><th>Задача</th><th>Вкл.</th><th></th></tr></thead><tbody>
+    ${rdList.map((x, i) => { const r = rdRows.get(x.id), base = Composition.RD_MARKS[Composition.markBase(x.mark)];
+      const pdOff = x.pdId && !r && x.on !== false && x.mark;
+      return `<tr class="${x.on === false || pdOff ? 'off' : 'vol'}"${pdOff ? ' title="Раздел ПД, к которому относится этот раздел, выключен — в ВОК не попадёт"' : ''}><td class="nowrap"><button class="btn ghostbtn sm" type="button" data-act="rd-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'} aria-label="Выше">↑</button><button class="btn ghostbtn sm" type="button" data-act="rd-move" data-id="${x.id}" data-dir="1"${i < rdList.length - 1 ? '' : ' disabled'} aria-label="Ниже">↓</button></td>
+        <td><input class="sm-in" data-rd="${x.id}" data-k="tom" value="${esc(x.tom || '')}" placeholder="${esc(r?.tom || '')}" maxlength="20"></td>
+        <td class="nowrap"><input class="mark-in" data-rd="${x.id}" data-k="mark" value="${esc(x.mark)}" placeholder="ЭОМ" maxlength="20">${base ? srcTag(base[1]) : ''}</td>
+        <td><input data-rd="${x.id}" data-k="title" value="${esc(x.title || '')}" placeholder="${esc(base?.[0] || 'Наименование')}" maxlength="300"></td>
+        <td><select data-rd="${x.id}" data-k="pdId">${pdOptions(x.pdId)}</select></td>
+        <td><input class="code-in" data-rd="${x.id}" data-k="code" value="${esc(x.code || '')}" placeholder="${esc(r?.code || '')}" maxlength="80"></td>
+        <td><input class="note-in" data-rd="${x.id}" data-k="note" value="${esc(x.note || '')}" placeholder="Выдано, дата…" maxlength="60"></td>
+        <td>${ownerSel(`data-rd="${x.id}"`, x.ownerId)}</td><td>${contrSel(`data-rd="${x.id}"`, x.contractorId)}</td><td>${cardCell(x.taskId, true)}</td>
+        <td><input type="checkbox" data-rd="${x.id}" data-k="on"${x.on !== false ? ' checked' : ''} aria-label="Включить"></td>
+        <td><button class="btn ghostbtn sm" type="button" data-act="rd-del" data-id="${x.id}" aria-label="Удалить">✕</button></td></tr>`; }).join('') || '<tr><td colspan="12" class="hint">Отметьте разделы выше или добавьте свой раздел.</td></tr>'}</tbody></table></div>
+    <div class="comp-foot"><button class="btn sm" type="button" data-act="rd-add" data-pd="">+ свой раздел РД</button><span class="hint">Том — по порядку строк, обозначение — «шифр-раздел»; впишите своё, чтобы переопределить (например КЖ1.1). Примечание попадает в ВОК («Выдано», дата выдачи).</span></div></section>`;
+}
+function rdInsert(item) {
+  const comp = state.draft.composition, list = comp.rd || (comp.rd = []);
+  const order = new Map(Composition.walk(comp.nodes).map((r, i) => [r.node.id, i]));
+  const pos = id => (order.has(id) ? order.get(id) : Infinity);
+  let at = list.length;
+  if (item.pdId) { at = 0; list.forEach((x, i) => { if (pos(x.pdId) <= pos(item.pdId)) at = i + 1; }); }
+  list.splice(at, 0, item);
+}
+function rdChip(pdId, mark) {
+  const comp = state.draft.composition, list = comp.rd || (comp.rd = []);
+  const mine = list.filter(x => x.pdId === pdId && Composition.markBase(x.mark) === mark);
+  if (mine.length) {
+    if (mine.some(x => x.taskId && state.tasks.has(x.taskId))) return toast(`У раздела ${mark} есть карточка — уберите строку крестиком в таблице (карточка останется).`);
+    comp.rd = list.filter(x => !mine.includes(x));
+  } else rdInsert(rdNew(pdId, mark, Composition.RD_MARKS[mark]?.[0] || ''));
+  renderComposition();
+}
+function rdAdd(pdId) {
+  const item = rdNew(pdId);
+  rdInsert(item);
+  renderComposition();
+  document.querySelector(`[data-rd="${item.id}"][data-k="mark"]`)?.focus();
+}
+function rdDel(id) {
+  const x = rdItem(id);
+  if (!x) return;
+  if (x.taskId && state.tasks.has(x.taskId) && confirmCompDel !== id) { confirmCompDel = id; return toast('У раздела есть карточка — карточка останется. Нажмите ✕ ещё раз, чтобы убрать раздел из состава.'); }
+  confirmCompDel = null;
+  state.draft.composition.rd = state.draft.composition.rd.filter(y => y.id !== id);
+  renderComposition();
+}
+function rdMove(id, dir) {
+  const list = state.draft.composition.rd, i = list.findIndex(x => x.id === id), j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  renderComposition();
+}
+function compNode(id) { return state.draft.composition.nodes.find(n => n.id === id); }
+function compAdd(parentId) {
+  const nodes = state.draft.composition.nodes, parent = parentId ? compNode(parentId) : null;
+  const kind = parent ? Composition.CHILD[parent.kind] : 'section';
+  if (!kind) return;
+  const num = kind === 'section' ? Math.max(0, ...nodes.filter(n => n.kind === 'section').map(n => n.num || 0)) + 1 : undefined;
+  const node = { id: Composition.newId(), parentId: parentId || '', kind, num, abbr: kind === 'section' ? 'ИД' + num : '', title: '', on: true, marks: [], ownerId: '', contractorId: '' };
+  // Insert after the parent's last descendant so the flat list keeps the tree order.
+  const desc = new Set([parentId]);
+  let at = parentId ? nodes.findIndex(n => n.id === parentId) : nodes.length - 1;
+  for (let i = at + 1; i < nodes.length && parentId; i++) { if (desc.has(nodes[i].parentId)) { desc.add(nodes[i].id); at = i; } else if (!desc.has(nodes[i].id)) break; }
+  nodes.splice(at + 1, 0, node);
+  renderComposition();
+  document.querySelector(`[data-cn="${node.id}"][data-k="title"]`)?.focus();
+}
+function compDel(id) {
+  const nodes = state.draft.composition.nodes, drop = new Set([id]);
+  let grew = true;
+  while (grew) { grew = false; for (const n of nodes) if (!drop.has(n.id) && drop.has(n.parentId)) { drop.add(n.id); grew = true; } }
+  if ([...drop].some(x => compNode(x)?.taskId && state.tasks.has(compNode(x).taskId)) && !confirmCompDel) { confirmCompDel = id; return toast('У строки есть карточка — карточка останется. Нажмите ✕ ещё раз, чтобы убрать строку из состава.'); }
+  confirmCompDel = null;
+  state.draft.composition.nodes = nodes.filter(n => !drop.has(n.id));
+  renderComposition();
+}
+// Word lists need the names for the title page and the stamp; asked on each export, remembered on this computer.
+async function compExport(format) {
+  const id = state.drawer.id;
+  if (!(await submitSimple(true))) return;
+  let opts = {};
+  if (format !== 'xlsx') {
+    opts = await askDocNames(format);
+    if (!opts) return;
+  }
+  const res = await api.exportComposition(id, format, opts);
+  if (res.canceled) return;
+  if (!res.ok) return toast(res.message, true);
+  toast(`Сохранено: ${res.name}`, false, { label: 'Открыть', run: api.openLastReport });
+}
+// Timeline questionnaire («анкета сроков»): stages П, экспертиза, Р (after or parallel to expertise), надзор and
+// other contract dates. Shown when a project is created and from the project page («Сроки»). Resolves true when saved.
+function askTimeline(p) {
+  const ms = (p.milestones || []).map(m => ({ ...m }));
+  // All phases, as on «Для заказчика» (one list); «Договор» only for GIPs.
+  const gip = A.isGip(state.me);
+  // A new plan: expertise follows П and Р follows expertise (as before 4.1) until the user unticks it.
+  let phases = L.defaultPhases().map(d => { const was = (p.phases || []).find(x => x.key === d.key); return { ...d, ...(was || {}), ...(!was?.start && was?.chain === undefined && ['expertise', 'r'].includes(d.key) ? { chain: true } : {}) }; });
+  const shown = () => phases.map((ph, i) => ({ ph, i })).filter(x => gip || x.ph.key !== 'contract');
+  return new Promise(resolve => {
+    const root = document.createElement('div');
+    root.className = 'modal-back';
+    const msRow = (m, i) => `<div class="tq-ms" data-i="${i}"><input class="tq-ms-t" value="${esc(m.title || '')}" placeholder="Например: выдача ТУ, оплата аванса, сдача сметы" maxlength="120"><input class="tq-ms-d" type="date" value="${esc(m.date || '')}"><button class="btn ghostbtn sm" type="button" data-m="ms-del" aria-label="Убрать">✕</button></div>`;
+    root.innerHTML = `<form class="modal tq-modal" role="dialog" aria-modal="true" aria-labelledby="tltitle" novalidate><h2 id="tltitle">Сроки по договору · ${esc(p.name || '')}</h2>
+      <p class="hint">По этим срокам программа расставит предварительные даты разделов по волнам техкарты и сроки заданий смежникам. Можно заполнить потом: кнопка «Сроки» на странице проекта.</p>
+      <div id="tq-phases"></div>
+      <div class="tq-mode"><span class="lbl">Рабочая документация</span>
+        <label class="chk"><input type="radio" name="tq-mode" value="after"${p.rdMode !== 'parallel' ? ' checked' : ''}> после экспертизы</label>
+        <label class="chk"><input type="radio" name="tq-mode" value="parallel"${p.rdMode === 'parallel' ? ' checked' : ''}> параллельно с экспертизой</label>
+        <span class="hint" id="tq-hint"></span></div>
+      <div class="tq-ms-box"><span class="lbl">Иные сроки по договору</span><div id="tq-ms">${ms.map(msRow).join('')}</div><button class="btn sm" type="button" data-m="ms-add">+ срок</button></div>
+      <div class="err" id="tq-err" hidden></div>
+      <div class="modal-f"><button class="btn primary" type="submit">Сохранить сроки</button><button class="btn" type="button" data-m="cancel">Заполню потом</button></div></form>`;
+    document.body.append(root);
+    const q = sel => root.querySelector(sel);
+    const draw = () => {
+      const list = shown();
+      q('#tq-phases').innerHTML = phaseTableHtml(list.map(x => x.ph), (k, f) => `data-ph="${list[k].i}.${f}"`) + phaseGanttHtml(phases.filter(x => gip || x.key !== 'contract'), ms);
+    };
+    // «Р после экспертизы / параллельно»: sets the chain of Р and, for «параллельно», puts Р right after П.
+    const mode = () => {
+      const m = q('input[name="tq-mode"]:checked').value, r = phases.find(x => x.key === 'r'), pp = phases.find(x => x.key === 'p');
+      if (m === 'parallel' && r) {
+        const was = r.chain; r.chain = false;
+        if (isDate(pp?.finish) && (was || !isDate(r.start) || r.auto)) { const d = L.phaseDays(r); r.start = addDays(pp.finish, 1); if (d > 0) r.finish = addDays(r.start, d - 1); r.auto = true; }
+      }
+      if (m === 'after' && r) { r.chain = true; delete r.auto; }
+      phases = L.planPhases(phases);
+      q('#tq-hint').textContent = m === 'parallel' ? 'Р стартует сразу после П; замечания экспертизы правятся в обоих.' : 'Р стартует после положительного заключения.';
+    };
+    const close = r => { root.remove(); resolve(r); };
+    root.addEventListener('input', e => { const k = e.target.dataset.ph?.split('.'); if (k) { const x = phases[Number(k[0])]; x[k[1]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; } });
+    root.addEventListener('change', e => {
+      const k = e.target.dataset.ph?.split('.');
+      if (k) { const x = phases[Number(k[0])]; x[k[1]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; phases = L.planPhases(phases, Number(k[0]), k[1]); draw(); q(`[data-ph="${k[0]}.${k[1]}"]`)?.focus(); return; }
+      if (e.target.name === 'tq-mode') { mode(); draw(); }
+    });
+    root.addEventListener('click', e => {
+      const m = e.target.dataset.m;
+      if (e.target === root || m === 'cancel') close(false);
+      if (m === 'ms-add') { q('#tq-ms').insertAdjacentHTML('beforeend', msRow({}, Date.now())); q('#tq-ms .tq-ms:last-child .tq-ms-t').focus(); }
+      if (m === 'ms-del') e.target.closest('.tq-ms').remove();
+    });
+    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } });
+    mode(); draw();
+    q('[data-ph$=".start"]')?.focus();
+    q('form').addEventListener('submit', async e => {
+      e.preventDefault(); e.stopPropagation();
+      const err = (t, f) => modalErr(root, '#tq-err', t, f);
+      for (const x of phases) delete x.auto;
+      for (const [i, x] of phases.entries()) if (isDate(x.start) && isDate(x.finish) && x.finish < x.start) return err(`${L.phaseLabel(x.key)}: окончание раньше начала.`, `[data-ph="${i}.finish"]`);
+      // A non-GIP never sees «Договор»: it is kept as stored.
+      if (!gip) { const c = (p.phases || []).find(x => x.key === 'contract'); const i = phases.findIndex(x => x.key === 'contract'); if (i >= 0) phases[i] = c ? { ...c } : phases[i]; }
+      const old = new Map(ms.map(m => [m.id, m]));
+      const milestones = [...root.querySelectorAll('.tq-ms')].map(r => ({ title: r.querySelector('.tq-ms-t').value.trim(), date: r.querySelector('.tq-ms-d').value }))
+        .filter(m => m.title).map((m, i) => { const was = ms[i] && old.get(ms[i].id); return { id: was?.title === m.title ? was.id : newId(), title: m.title, date: m.date, done: !!(was?.title === m.title && was.done) }; });
+      const rdMode = q('input[name="tq-mode"]:checked').value;
+      const ok = await write(op.update('projects', p.id, { phases, milestones, rdMode }), 'Сроки проекта сохранены');
+      if (ok) { syncPhasesDraft(p.id, phases, milestones); close(true); }
+    });
+  });
+}
+function techcardBody(sec) {
+  const T = Techcard, lbl = k => k.replace(/^ИОС(\d)$/, 'ИОС $1');
+  // Sections are [num, abbr, title, …]; ИОС subsections are [abbr, title, marks].
+  const flat = Object.values(Composition.BASES).flatMap(b => b.sections.flatMap(x => [[x[1], x[2]], ...(x[4] || []).map(y => [y[0], y[1]])]));
+  const sectionTitle = k => flat.find(x => x[0] === k)?.[1] || '';
+  const tbl = (head, rows) => `<div class="tablewrap"><table class="tc-t"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  if (sec === 'stages') return `<ol class="tc-stages">${T.STAGES.map(([t, d]) => `<li><b>${esc(t)}</b><span class="hint">${esc(d)}</span></li>`).join('')}</ol>
+    <p class="hint">Стадия Р идёт после экспертизы или параллельно с ней — это выбирается в «Сроках» проекта.</p>`;
+  if (sec === 'source') return tbl(['Документ', 'Кто даёт', 'Кому нужен'], T.SOURCE_DATA.map(r => r.map(esc)));
+  if (sec === 'waves') {
+    const by = {};
+    for (const [k, w] of Object.entries(T.WAVES)) (by[w] ||= []).push(k);
+    return `<div class="tc-waves">${Object.keys(by).map(w => { const [a, b] = T.WAVE_WINDOW[w];
+      return `<div class="tc-wave"><div class="tc-wave-h"><b>Волна ${w}</b> <span class="hint">${esc(T.WAVE_NAMES[w])} · ${Math.round(a * 100)}–${Math.round(b * 100)} % срока стадии</span></div>
+      <div class="tc-bar"><i style="left:${a * 100}%;width:${(b - a) * 100}%"></i></div>
+      <div class="tc-keys">${by[w].map(k => `<span class="chip ${T.CRITICAL.includes(k) ? 'tone-work' : 'tone-idle'}" title="${esc(sectionTitle(k))}">${esc(lbl(k))}</span>`).join('')}</div></div>`; }).join('')}</div>
+      <p class="hint">Выделены разделы критического пути: ${T.CRITICAL.map(lbl).join(' → ')}. По этим окнам генератор ставит предварительные даты задач, если заданы сроки стадий П и Р.</p>`;
+  }
+  if (sec === 'assign') return `<p class="hint">При генерации состава каждое задание становится подзадачей раздела-источника и видно получателю как входящее. Задание «вперёд» (в раздел следующей волны) задаёт старт получателя: «начать после».</p>`
+    + tbl(['От', 'Кому', 'Что передаётся'], T.ASSIGN.map(([f, to, w]) => [esc(f === 'ИОС*' ? 'каждый ИОС' : lbl(f)), esc(to.map(x => (x === 'ИОС*' ? 'все ИОС' : lbl(x))).join(', ')), esc(w)]));
+  if (sec === 'rd') return `<p class="hint">Что генератор предлагает в рабочую документацию к разделу ПД (✓ — включено по умолчанию). Обозначения разделов РД — по ГОСТ Р 21.101-2026 и принятые на практике.</p>`
+    + tbl(['Раздел ПД', 'Разделы РД'], Object.entries(Composition.RD_SUGGEST).map(([k, list]) => [`<b>${esc(lbl(k))}</b>`, list.map(([m, on]) => `<span class="chip ${on ? 'tone-work' : 'tone-idle'}" title="${esc(Composition.RD_MARKS[m]?.[0] || '')}">${on ? '✓ ' : ''}${esc(m)}</span>`).join(' ')]));
+  if (sec === 'summary') return tbl(['Раздел', 'Что получает', 'Что отдаёт', 'Когда'], T.SUMMARY.map(r => r.map(esc)));
+  // 4.6 (item 10): for each section, briefly — what it gets from whom and what it gives to whom.
+  if (sec === 'bysec') {
+    const ALIAS = { ИОС1: 'ЭОМ', ИОС2: 'ВК · вода', ИОС3: 'ВК · канализация', ИОС4: 'ОВ, ТС, ИТП', ИОС5: 'СС', ИОС6: 'ГС' };
+    const name = k => `${lbl(k)}${ALIAS[k] ? ` <span class="hint">(${ALIAS[k]})</span>` : ''}`;
+    const short = k => esc(ALIAS[k] ? ALIAS[k].split(/[ ,·]/)[0] : lbl(k));
+    const keys = Object.keys(T.WAVES).filter(k => !['ИД', 'СМ', 'ПЗ'].includes(k));
+    const all = T.pairs(keys);
+    const one = k => {
+      const inc = all.filter(x => x.to === k), out = all.filter(x => x.from === k);
+      if (!inc.length && !out.length) return '';
+      const rows = (list, side) => list.map(x => `<li><b>${side === 'in' ? 'от ' : ''}${short(side === 'in' ? x.from : x.to)}</b> — ${esc(x.what)}</li>`).join('');
+      return `<div class="tc-sec" data-key="${esc(k)}"><h4>${name(k)} <span class="hint">· волна ${T.waveOf(k)}</span></h4>
+        ${inc.length ? `<div class="tc-io"><span class="tc-io-h">Получает</span><ul>${rows(inc, 'in')}</ul></div>` : ''}
+        ${out.length ? `<div class="tc-io"><span class="tc-io-h out">Выдаёт</span><ul>${rows(out, 'out')}</ul></div>` : ''}</div>`;
+    };
+    return `<p class="hint">Например: ОВ получает планировки от АР и сетку колонн от КР, выдаёт КР и АР отверстия и нагрузки, ЭОМ — электрические нагрузки. Из этих пар генератор делает задания-подзадачи.</p>
+      <div class="tc-secs">${keys.map(one).join('')}</div>`;
+  }
+  return '';
+}
+function openTechcard(sec = 'stages') {
+  $('.tc-back')?.remove();
+  setFileMenu(false);
+  const root = document.createElement('div');
+  root.className = 'modal-back tc-back';
+  const draw = s => {
+    root.innerHTML = `<div class="modal tc-modal" role="dialog" aria-modal="true" aria-labelledby="tctitle"><div class="tc-head"><h2 id="tctitle">Техкарта процесса проектирования</h2><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-m="close" aria-label="Закрыть">✕</button></div>
+      <nav class="tc-nav">${TC_SECS.map(([k, l]) => `<button class="btn sm${k === s ? ' primary' : ''}" type="button" data-m="sec" data-sec="${k}">${l}</button>`).join('')}</nav>
+      <div class="tc-body">${techcardBody(s)}</div>
+      <p class="hint tc-foot">Порядок волн и состав заданий — рабочая версия, будет уточняться.</p></div>`;
+  };
+  draw(TC_SECS.some(x => x[0] === sec) ? sec : 'stages');
+  document.body.append(root);
+  root.addEventListener('click', e => { const m = e.target.closest('[data-m]')?.dataset.m; if (e.target === root || m === 'close') root.remove(); if (m === 'sec') draw(e.target.closest('[data-m]').dataset.sec); });
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); root.remove(); } });
+  root.tabIndex = -1; root.focus();
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'project-timeline': ({ id }) => { const pr = state.projects.get(id); if (pr) askTimeline(pr).then(ok => ok && refresh()); },
+  'techcard': ({ el }) => { openTechcard(el.dataset.sec || 'stages'); },
+  'comp-base': ({ el }) => { state.draft.composition = Composition.fromBase(el.dataset.v); renderComposition(); },
+  'comp-add': ({ id }) => { compAdd(id); },
+  'comp-del': ({ id }) => { compDel(id); },
+  'comp-rd-suggest': () => { state.draft.composition.rd = Composition.rdDefaults(state.draft.composition); renderComposition(); },
+  'rd-chip': ({ el }) => { rdChip(el.dataset.pd, el.dataset.mark); },
+  'rd-add': ({ el }) => { rdAdd(el.dataset.pd); },
+  'rd-del': ({ id }) => { rdDel(id); },
+  'rd-move': ({ el, id }) => { rdMove(id, Number(el.dataset.dir)); },
+  'comp-export': ({ el }) => { compExport(el.dataset.format); },
+});
 /* ---------- customer cabinet (server): publication, access, messages ---------- */
 let cab = null;          // view from the main process: { allowed, configured, url, published, messages, lastSync, lastError }
 let cabCustomers = null; // customer accounts on the server, loaded when the «Для заказчика» tab is shown
@@ -6002,365 +6661,36 @@ function openCabinetSettings() {
   root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); save(root.querySelector('#c-url').value.trim(), root.querySelector('#c-key').value.trim()); });
 }
-async function customerPage(format) {
-  const id = state.drawer?.id;
-  if (!id) return;
-  const ok = await submitSimple(true);
-  if (!ok) return;
-  try {
-    const res = await api.customerPage(id, { format, font: brandFont });
-    if (res.canceled) return;
-    if (!res.ok) return toast(res.message, true);
-    if (res.viaBrowser) return toast('Страница открылась в браузере — в окне печати выберите «Сохранить как PDF».');
-    toast(`Сохранено: ${res.name}`, false, { label: 'Открыть', run: api.openLastReport });
-  } catch (e) { toast('Не удалось сохранить страницу: ' + (e?.message || e), true); }
-}
 
-// «Состав по ПП № 87»: a tree of sections → subsections → books → parts; leaves become cards.
-function renderComposition() {
-  const box = $('#comp-box'), d = state.draft;
-  if (!box || !d) return;
-  const p = state.projects.get(state.drawer.id) || {};
-  const code = (val('code') || p.code || '').trim();
-  if (!d.composition) {
-    box.innerHTML = `<div class="comp-empty"><h3>Генератор состава проекта</h3><p>Проектная документация — по Постановлению Правительства РФ № 87 (ред. от 21.10.2025). К её разделам программа предложит разделы рабочей документации (основные комплекты по ГОСТ Р 21.101-2026 и принятые на практике). Всё можно выключить, переименовать, добавить своё.</p>
-      <p><b>Вид объекта:</b></p><div class="comp-bases">${Object.entries(Composition.BASES).map(([k, b]) => `<button class="btn" type="button" data-act="comp-base" data-v="${k}"><b>${esc(b.label)}</b><small>${b.sections.length} разделов${k === 'nonprod' ? ', ТХ — по заданию' : ''}</small></button>`).join('')}</div></div>`;
-    return;
-  }
-  const comp = d.composition;
-  const rows = Composition.rowsFor(comp, code);
-  const vols = new Set(Composition.volumes(comp, code).map(v => v.id));
-  const owners = A.assignableOwners(state.me, liveUsers()).filter(u => u.role !== 'gip' || A.isGip(state.me)).sort(byName);
-  const ownerSel = (attr, cur) => `<select ${attr} data-k="ownerId"><option value="">— вы —</option>${owners.map(u => `<option value="${esc(u.id)}"${u.id === cur ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`;
-  const contrSel = (attr, cur) => `<select ${attr} data-k="contractorId"><option value="">—</option>${contractorsArr().map(c => `<option value="${esc(c.id)}"${c.id === cur ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`;
-  const cardCell = (taskId, isVol) => { const t = taskId ? state.tasks.get(taskId) : null; return t ? `<button class="linkbtn" type="button" data-act="open-task" data-id="${esc(t.id)}">${statusChip(t)}</button>` : isVol ? '<span class="hint">нет</span>' : ''; };
-  const pdPending = rows.filter(r => vols.has(r.node.id) && !(r.node.taskId && state.tasks.has(r.node.taskId))).length;
-  const rdList = comp.rd || [];
-  const rdRows = new Map(Composition.rdRows(comp, code).map(r => [r.id, r]));
-  const rdPending = [...rdRows.values()].filter(r => !(r.item.taskId && state.tasks.has(r.item.taskId))).length;
-  const groups = Composition.rdGroups(comp);
-  const pdOptions = cur => {
-    const own = cur && !groups.some(g => g.node.id === cur) ? comp.nodes.find(n => n.id === cur) : null; // e.g. a switched-off section
-    return `<option value="">— вне разделов ПД —</option>${own ? `<option value="${esc(own.id)}" selected>${esc(own.abbr || own.title)} (выключен)</option>` : ''}${groups.map(g => `<option value="${esc(g.node.id)}"${g.node.id === cur ? ' selected' : ''}>${esc(g.node.abbr)}</option>`).join('')}`;
-  };
-  const srcTag = src => src === 'gost' ? '<span class="src gost" title="Обозначение есть в таблице В.1 ГОСТ Р 21.101-2026">ГОСТ</span>' : '<span class="src" title="Принято на практике, в таблице ГОСТ Р 21.101-2026 не найдено">практика</span>';
-
-  box.innerHTML = `<div class="cust-top"><span class="hint">База ПД: ${esc(Composition.BASES[comp.base]?.label || '')}. Обозначения — от шифра проекта${code ? ` «${esc(code)}»` : ' (шифр не задан — впишите на вкладке «Основное»)'}.</span><span class="spacer"></span>
-      <button class="btn" type="button" data-act="comp-export" data-format="sp">Состав ПД → Word</button><button class="btn" type="button" data-act="comp-export" data-format="vok"${rdRows.size ? '' : ' disabled title="В составе РД пока нет разделов — добавьте их ниже"'}>ВОК → Word</button><button class="btn ghostbtn" type="button" data-act="comp-export" data-format="xlsx">Excel</button></div>
-    <div class="comp-opts">
-      <label>Нумерация томов ПД <select data-copt="numbering.pd">${Object.entries(Composition.NUMBERING.pd).map(([k, l]) => `<option value="${k}"${Composition.numberingOf(comp).pd === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
-      <label>РД <select data-copt="numbering.rd">${Object.entries(Composition.NUMBERING.rd).map(([k, l]) => `<option value="${k}"${Composition.numberingOf(comp).rd === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
-      <label class="chk" title="Задания смежникам по техкарте станут подзадачами разделов; прямые задания задают старт получателя"><input type="checkbox" data-copt="links.pd"${comp.links?.pd !== false ? ' checked' : ''}> Задания по техкарте в ПД</label>
-      <label class="chk"><input type="checkbox" data-copt="links.rd"${comp.links?.rd !== false ? ' checked' : ''}> в РД</label>
-      <button class="btn ghostbtn sm" type="button" data-act="techcard" data-sec="assign">? техкарта</button></div>
-
-    <section class="comp-part"><div class="comp-h"><h3>1. Проектная документация · ПП РФ № 87</h3><span class="hint">Томов: ${vols.size}</span><span class="spacer"></span>${pdPending ? `<span class="hint">При сохранении будет создано задач: ${pdPending}</span>` : ''}</div>
-    <div class="tablewrap"><table class="comp-t"><thead><tr><th>Раздел · подраздел · книга · часть</th><th>Обозначение</th><th>Том</th><th>Ответственный</th><th>Подрядчик</th><th>Задача</th><th>Вкл.</th><th></th></tr></thead><tbody>
-    ${rows.map(r => {
-      const n = r.node, child = Composition.CHILD[n.kind], v = vols.has(n.id);
-      return `<tr class="ck-${n.kind}${r.disabled ? ' off' : ''}${v ? ' vol' : ''}">
-        <td><div class="comp-name" style="--d:${r.depth}"><span class="comp-k">${Composition.KINDS[n.kind]}${n.kind === 'section' ? ' ' + (n.num ?? '') : ''}</span>${n.std ? `<span class="comp-title">${esc(n.title)}</span>` : `<input data-cn="${n.id}" data-k="title" value="${esc(n.title)}" placeholder="Название" maxlength="300">`}</div></td>
-        <td><input class="code-in" data-cn="${n.id}" data-k="code" value="${esc(n.code || '')}" placeholder="${esc(r.code)}" maxlength="80"></td>
-        <td><input class="sm-in" data-cn="${n.id}" data-k="tom" value="${esc(n.tom || '')}" placeholder="${esc(r.tom)}" maxlength="20"></td>
-        <td>${v ? ownerSel(`data-cn="${n.id}"`, n.ownerId) : ''}</td><td>${v ? contrSel(`data-cn="${n.id}"`, n.contractorId) : ''}</td><td>${cardCell(n.taskId, v)}</td>
-        <td><input type="checkbox" data-cn="${n.id}" data-k="on"${n.on !== false ? ' checked' : ''} aria-label="Включить"></td>
-        <td class="nowrap">${child ? `<button class="btn ghostbtn sm" type="button" data-act="comp-add" data-id="${n.id}" title="Добавить: ${Composition.KINDS[child].toLowerCase()}">+ ${Composition.KINDS[child].toLowerCase()}</button>` : ''}${n.std ? '' : `<button class="btn ghostbtn sm" type="button" data-act="comp-del" data-id="${n.id}" aria-label="Удалить">✕</button>`}</td></tr>`;
-    }).join('')}</tbody></table></div>
-    <div class="comp-foot"><button class="btn sm" type="button" data-act="comp-add" data-id="">+ свой раздел</button><span class="hint">Разделы постановления не удаляются — их можно выключить. Обозначение и том считаются сами; впишите своё, чтобы переопределить.</span></div></section>
-
-    <section class="comp-part"><div class="comp-h"><h3>2. Рабочая документация · основные комплекты</h3><span class="hint">Разделов: ${rdRows.size}</span><span class="spacer"></span>${rdPending ? `<span class="hint">При сохранении будет создано задач: ${rdPending}</span>` : ''}</div>
-    ${comp.rd ? '' : '<p class="hint">Состав рабочей документации ещё не сформирован. <button class="btn sm" type="button" data-act="comp-rd-suggest">Предложить по разделам ПД</button></p>'}
-    <div class="rd-groups">${groups.map(g => `<div class="rd-group"><span class="rd-pd"><b>${esc(g.node.abbr)}</b> ${esc(g.node.title)}</span><span class="rd-chips">${g.items.map(it => {
-      const here = rdList.some(x => x.pdId === g.node.id && Composition.markBase(x.mark) === it.mark);
-      const other = !here && rdList.some(x => Composition.markBase(x.mark) === it.mark);
-      return `<button class="rd-chip${here ? ' on' : ''}${other ? ' else' : ''}" type="button" data-act="rd-chip" data-pd="${esc(g.node.id)}" data-mark="${esc(it.mark)}" title="${esc(it.title)}${other ? ' — уже есть в другом разделе' : ''}">${here ? '✓ ' : '+ '}${esc(it.mark)}</button>`;
-    }).join('')}<button class="rd-chip own" type="button" data-act="rd-add" data-pd="${esc(g.node.id)}" title="Свой раздел РД к этому разделу ПД">+ своя</button></span></div>`).join('')}</div>
-    <div class="tablewrap"><table class="comp-t rd-t"><thead><tr><th></th><th>Том</th><th>Раздел РД</th><th>Наименование</th><th>К разделу ПД</th><th>Обозначение</th><th>Примечание</th><th>Ответственный</th><th>Подрядчик</th><th>Задача</th><th>Вкл.</th><th></th></tr></thead><tbody>
-    ${rdList.map((x, i) => { const r = rdRows.get(x.id), base = Composition.RD_MARKS[Composition.markBase(x.mark)];
-      const pdOff = x.pdId && !r && x.on !== false && x.mark;
-      return `<tr class="${x.on === false || pdOff ? 'off' : 'vol'}"${pdOff ? ' title="Раздел ПД, к которому относится этот раздел, выключен — в ВОК не попадёт"' : ''}><td class="nowrap"><button class="btn ghostbtn sm" type="button" data-act="rd-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'} aria-label="Выше">↑</button><button class="btn ghostbtn sm" type="button" data-act="rd-move" data-id="${x.id}" data-dir="1"${i < rdList.length - 1 ? '' : ' disabled'} aria-label="Ниже">↓</button></td>
-        <td><input class="sm-in" data-rd="${x.id}" data-k="tom" value="${esc(x.tom || '')}" placeholder="${esc(r?.tom || '')}" maxlength="20"></td>
-        <td class="nowrap"><input class="mark-in" data-rd="${x.id}" data-k="mark" value="${esc(x.mark)}" placeholder="ЭОМ" maxlength="20">${base ? srcTag(base[1]) : ''}</td>
-        <td><input data-rd="${x.id}" data-k="title" value="${esc(x.title || '')}" placeholder="${esc(base?.[0] || 'Наименование')}" maxlength="300"></td>
-        <td><select data-rd="${x.id}" data-k="pdId">${pdOptions(x.pdId)}</select></td>
-        <td><input class="code-in" data-rd="${x.id}" data-k="code" value="${esc(x.code || '')}" placeholder="${esc(r?.code || '')}" maxlength="80"></td>
-        <td><input class="note-in" data-rd="${x.id}" data-k="note" value="${esc(x.note || '')}" placeholder="Выдано, дата…" maxlength="60"></td>
-        <td>${ownerSel(`data-rd="${x.id}"`, x.ownerId)}</td><td>${contrSel(`data-rd="${x.id}"`, x.contractorId)}</td><td>${cardCell(x.taskId, true)}</td>
-        <td><input type="checkbox" data-rd="${x.id}" data-k="on"${x.on !== false ? ' checked' : ''} aria-label="Включить"></td>
-        <td><button class="btn ghostbtn sm" type="button" data-act="rd-del" data-id="${x.id}" aria-label="Удалить">✕</button></td></tr>`; }).join('') || '<tr><td colspan="12" class="hint">Отметьте разделы выше или добавьте свой раздел.</td></tr>'}</tbody></table></div>
-    <div class="comp-foot"><button class="btn sm" type="button" data-act="rd-add" data-pd="">+ свой раздел РД</button><span class="hint">Том — по порядку строк, обозначение — «шифр-раздел»; впишите своё, чтобы переопределить (например КЖ1.1). Примечание попадает в ВОК («Выдано», дата выдачи).</span></div></section>`;
-}
 // Working documentation rows: chips toggle a suggested mark for a section; own rows; order.
 const rdItem = id => (state.draft.composition.rd || []).find(x => x.id === id);
-function rdInsert(item) {
-  const comp = state.draft.composition, list = comp.rd || (comp.rd = []);
-  const order = new Map(Composition.walk(comp.nodes).map((r, i) => [r.node.id, i]));
-  const pos = id => (order.has(id) ? order.get(id) : Infinity);
-  let at = list.length;
-  if (item.pdId) { at = 0; list.forEach((x, i) => { if (pos(x.pdId) <= pos(item.pdId)) at = i + 1; }); }
-  list.splice(at, 0, item);
-}
 const rdNew = (pdId, mark = '', title = '') => ({ id: Composition.newId(), pdId, mark, title, on: true, code: '', tom: '', note: '', ownerId: '', contractorId: '', taskId: '' });
-function rdChip(pdId, mark) {
-  const comp = state.draft.composition, list = comp.rd || (comp.rd = []);
-  const mine = list.filter(x => x.pdId === pdId && Composition.markBase(x.mark) === mark);
-  if (mine.length) {
-    if (mine.some(x => x.taskId && state.tasks.has(x.taskId))) return toast(`У раздела ${mark} есть карточка — уберите строку крестиком в таблице (карточка останется).`);
-    comp.rd = list.filter(x => !mine.includes(x));
-  } else rdInsert(rdNew(pdId, mark, Composition.RD_MARKS[mark]?.[0] || ''));
-  renderComposition();
-}
-function rdAdd(pdId) {
-  const item = rdNew(pdId);
-  rdInsert(item);
-  renderComposition();
-  document.querySelector(`[data-rd="${item.id}"][data-k="mark"]`)?.focus();
-}
-function rdDel(id) {
-  const x = rdItem(id);
-  if (!x) return;
-  if (x.taskId && state.tasks.has(x.taskId) && confirmCompDel !== id) { confirmCompDel = id; return toast('У раздела есть карточка — карточка останется. Нажмите ✕ ещё раз, чтобы убрать раздел из состава.'); }
-  confirmCompDel = null;
-  state.draft.composition.rd = state.draft.composition.rd.filter(y => y.id !== id);
-  renderComposition();
-}
-function rdMove(id, dir) {
-  const list = state.draft.composition.rd, i = list.findIndex(x => x.id === id), j = i + dir;
-  if (i < 0 || j < 0 || j >= list.length) return;
-  [list[i], list[j]] = [list[j], list[i]];
-  renderComposition();
-}
-function compNode(id) { return state.draft.composition.nodes.find(n => n.id === id); }
-function compAdd(parentId) {
-  const nodes = state.draft.composition.nodes, parent = parentId ? compNode(parentId) : null;
-  const kind = parent ? Composition.CHILD[parent.kind] : 'section';
-  if (!kind) return;
-  const num = kind === 'section' ? Math.max(0, ...nodes.filter(n => n.kind === 'section').map(n => n.num || 0)) + 1 : undefined;
-  const node = { id: Composition.newId(), parentId: parentId || '', kind, num, abbr: kind === 'section' ? 'ИД' + num : '', title: '', on: true, marks: [], ownerId: '', contractorId: '' };
-  // Insert after the parent's last descendant so the flat list keeps the tree order.
-  const desc = new Set([parentId]);
-  let at = parentId ? nodes.findIndex(n => n.id === parentId) : nodes.length - 1;
-  for (let i = at + 1; i < nodes.length && parentId; i++) { if (desc.has(nodes[i].parentId)) { desc.add(nodes[i].id); at = i; } else if (!desc.has(nodes[i].id)) break; }
-  nodes.splice(at + 1, 0, node);
-  renderComposition();
-  document.querySelector(`[data-cn="${node.id}"][data-k="title"]`)?.focus();
-}
-function compDel(id) {
-  const nodes = state.draft.composition.nodes, drop = new Set([id]);
-  let grew = true;
-  while (grew) { grew = false; for (const n of nodes) if (!drop.has(n.id) && drop.has(n.parentId)) { drop.add(n.id); grew = true; } }
-  if ([...drop].some(x => compNode(x)?.taskId && state.tasks.has(compNode(x).taskId)) && !confirmCompDel) { confirmCompDel = id; return toast('У строки есть карточка — карточка останется. Нажмите ✕ ещё раз, чтобы убрать строку из состава.'); }
-  confirmCompDel = null;
-  state.draft.composition.nodes = nodes.filter(n => !drop.has(n.id));
-  renderComposition();
-}
 let confirmCompDel = null;
-// Word lists need the names for the title page and the stamp; asked on each export, remembered on this computer.
-async function compExport(format) {
-  const id = state.drawer.id;
-  if (!(await submitSimple(true))) return;
-  let opts = {};
-  if (format !== 'xlsx') {
-    opts = await askDocNames(format);
-    if (!opts) return;
-  }
-  const res = await api.exportComposition(id, format, opts);
-  if (res.canceled) return;
-  if (!res.ok) return toast(res.message, true);
-  toast(`Сохранено: ${res.name}`, false, { label: 'Открыть', run: api.openLastReport });
-}
-// Timeline questionnaire («анкета сроков»): stages П, экспертиза, Р (after or parallel to expertise), надзор and
-// other contract dates. Shown when a project is created and from the project page («Сроки»). Resolves true when saved.
-function askTimeline(p) {
-  const ms = (p.milestones || []).map(m => ({ ...m }));
-  // All phases, as on «Для заказчика» (one list); «Договор» only for GIPs.
-  const gip = A.isGip(state.me);
-  // A new plan: expertise follows П and Р follows expertise (as before 4.1) until the user unticks it.
-  let phases = L.defaultPhases().map(d => { const was = (p.phases || []).find(x => x.key === d.key); return { ...d, ...(was || {}), ...(!was?.start && was?.chain === undefined && ['expertise', 'r'].includes(d.key) ? { chain: true } : {}) }; });
-  const shown = () => phases.map((ph, i) => ({ ph, i })).filter(x => gip || x.ph.key !== 'contract');
-  return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    const msRow = (m, i) => `<div class="tq-ms" data-i="${i}"><input class="tq-ms-t" value="${esc(m.title || '')}" placeholder="Например: выдача ТУ, оплата аванса, сдача сметы" maxlength="120"><input class="tq-ms-d" type="date" value="${esc(m.date || '')}"><button class="btn ghostbtn sm" type="button" data-m="ms-del" aria-label="Убрать">✕</button></div>`;
-    root.innerHTML = `<form class="modal tq-modal" role="dialog" aria-modal="true" aria-labelledby="tltitle" novalidate><h2 id="tltitle">Сроки по договору · ${esc(p.name || '')}</h2>
-      <p class="hint">По этим срокам программа расставит предварительные даты разделов по волнам техкарты и сроки заданий смежникам. Можно заполнить потом: кнопка «Сроки» на странице проекта.</p>
-      <div id="tq-phases"></div>
-      <div class="tq-mode"><span class="lbl">Рабочая документация</span>
-        <label class="chk"><input type="radio" name="tq-mode" value="after"${p.rdMode !== 'parallel' ? ' checked' : ''}> после экспертизы</label>
-        <label class="chk"><input type="radio" name="tq-mode" value="parallel"${p.rdMode === 'parallel' ? ' checked' : ''}> параллельно с экспертизой</label>
-        <span class="hint" id="tq-hint"></span></div>
-      <div class="tq-ms-box"><span class="lbl">Иные сроки по договору</span><div id="tq-ms">${ms.map(msRow).join('')}</div><button class="btn sm" type="button" data-m="ms-add">+ срок</button></div>
-      <div class="err" id="tq-err" hidden></div>
-      <div class="modal-f"><button class="btn primary" type="submit">Сохранить сроки</button><button class="btn" type="button" data-m="cancel">Заполню потом</button></div></form>`;
-    document.body.append(root);
-    const q = sel => root.querySelector(sel);
-    const draw = () => {
-      const list = shown();
-      q('#tq-phases').innerHTML = phaseTableHtml(list.map(x => x.ph), (k, f) => `data-ph="${list[k].i}.${f}"`) + phaseGanttHtml(phases.filter(x => gip || x.key !== 'contract'), ms);
-    };
-    // «Р после экспертизы / параллельно»: sets the chain of Р and, for «параллельно», puts Р right after П.
-    const mode = () => {
-      const m = q('input[name="tq-mode"]:checked').value, r = phases.find(x => x.key === 'r'), pp = phases.find(x => x.key === 'p');
-      if (m === 'parallel' && r) {
-        const was = r.chain; r.chain = false;
-        if (isDate(pp?.finish) && (was || !isDate(r.start) || r.auto)) { const d = L.phaseDays(r); r.start = addDays(pp.finish, 1); if (d > 0) r.finish = addDays(r.start, d - 1); r.auto = true; }
-      }
-      if (m === 'after' && r) { r.chain = true; delete r.auto; }
-      phases = L.planPhases(phases);
-      q('#tq-hint').textContent = m === 'parallel' ? 'Р стартует сразу после П; замечания экспертизы правятся в обоих.' : 'Р стартует после положительного заключения.';
-    };
-    const close = r => { root.remove(); resolve(r); };
-    root.addEventListener('input', e => { const k = e.target.dataset.ph?.split('.'); if (k) { const x = phases[Number(k[0])]; x[k[1]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; } });
-    root.addEventListener('change', e => {
-      const k = e.target.dataset.ph?.split('.');
-      if (k) { const x = phases[Number(k[0])]; x[k[1]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; phases = L.planPhases(phases, Number(k[0]), k[1]); draw(); q(`[data-ph="${k[0]}.${k[1]}"]`)?.focus(); return; }
-      if (e.target.name === 'tq-mode') { mode(); draw(); }
-    });
-    root.addEventListener('click', e => {
-      const m = e.target.dataset.m;
-      if (e.target === root || m === 'cancel') close(false);
-      if (m === 'ms-add') { q('#tq-ms').insertAdjacentHTML('beforeend', msRow({}, Date.now())); q('#tq-ms .tq-ms:last-child .tq-ms-t').focus(); }
-      if (m === 'ms-del') e.target.closest('.tq-ms').remove();
-    });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } });
-    mode(); draw();
-    q('[data-ph$=".start"]')?.focus();
-    q('form').addEventListener('submit', async e => {
-      e.preventDefault(); e.stopPropagation();
-      const err = (t, f) => modalErr(root, '#tq-err', t, f);
-      for (const x of phases) delete x.auto;
-      for (const [i, x] of phases.entries()) if (isDate(x.start) && isDate(x.finish) && x.finish < x.start) return err(`${L.phaseLabel(x.key)}: окончание раньше начала.`, `[data-ph="${i}.finish"]`);
-      // A non-GIP never sees «Договор»: it is kept as stored.
-      if (!gip) { const c = (p.phases || []).find(x => x.key === 'contract'); const i = phases.findIndex(x => x.key === 'contract'); if (i >= 0) phases[i] = c ? { ...c } : phases[i]; }
-      const old = new Map(ms.map(m => [m.id, m]));
-      const milestones = [...root.querySelectorAll('.tq-ms')].map(r => ({ title: r.querySelector('.tq-ms-t').value.trim(), date: r.querySelector('.tq-ms-d').value }))
-        .filter(m => m.title).map((m, i) => { const was = ms[i] && old.get(ms[i].id); return { id: was?.title === m.title ? was.id : newId(), title: m.title, date: m.date, done: !!(was?.title === m.title && was.done) }; });
-      const rdMode = q('input[name="tq-mode"]:checked').value;
-      const ok = await write(op.update('projects', p.id, { phases, milestones, rdMode }), 'Сроки проекта сохранены');
-      if (ok) { syncPhasesDraft(p.id, phases, milestones); close(true); }
-    });
-  });
-}
 // Tech card as an in-app reference: the same model (techcard.js) the generator uses for assignments and waves.
 const TC_SECS = [['stages', 'Этапы'], ['source', 'Исходные данные'], ['waves', 'Волны ПД'], ['bysec', 'Кто кому что'], ['assign', 'Задания смежникам'], ['rd', 'ПД → РД'], ['summary', 'Сводные разделы']];
-function techcardBody(sec) {
-  const T = Techcard, lbl = k => k.replace(/^ИОС(\d)$/, 'ИОС $1');
-  // Sections are [num, abbr, title, …]; ИОС subsections are [abbr, title, marks].
-  const flat = Object.values(Composition.BASES).flatMap(b => b.sections.flatMap(x => [[x[1], x[2]], ...(x[4] || []).map(y => [y[0], y[1]])]));
-  const sectionTitle = k => flat.find(x => x[0] === k)?.[1] || '';
-  const tbl = (head, rows) => `<div class="tablewrap"><table class="tc-t"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-  if (sec === 'stages') return `<ol class="tc-stages">${T.STAGES.map(([t, d]) => `<li><b>${esc(t)}</b><span class="hint">${esc(d)}</span></li>`).join('')}</ol>
-    <p class="hint">Стадия Р идёт после экспертизы или параллельно с ней — это выбирается в «Сроках» проекта.</p>`;
-  if (sec === 'source') return tbl(['Документ', 'Кто даёт', 'Кому нужен'], T.SOURCE_DATA.map(r => r.map(esc)));
-  if (sec === 'waves') {
-    const by = {};
-    for (const [k, w] of Object.entries(T.WAVES)) (by[w] ||= []).push(k);
-    return `<div class="tc-waves">${Object.keys(by).map(w => { const [a, b] = T.WAVE_WINDOW[w];
-      return `<div class="tc-wave"><div class="tc-wave-h"><b>Волна ${w}</b> <span class="hint">${esc(T.WAVE_NAMES[w])} · ${Math.round(a * 100)}–${Math.round(b * 100)} % срока стадии</span></div>
-      <div class="tc-bar"><i style="left:${a * 100}%;width:${(b - a) * 100}%"></i></div>
-      <div class="tc-keys">${by[w].map(k => `<span class="chip ${T.CRITICAL.includes(k) ? 'tone-work' : 'tone-idle'}" title="${esc(sectionTitle(k))}">${esc(lbl(k))}</span>`).join('')}</div></div>`; }).join('')}</div>
-      <p class="hint">Выделены разделы критического пути: ${T.CRITICAL.map(lbl).join(' → ')}. По этим окнам генератор ставит предварительные даты задач, если заданы сроки стадий П и Р.</p>`;
-  }
-  if (sec === 'assign') return `<p class="hint">При генерации состава каждое задание становится подзадачей раздела-источника и видно получателю как входящее. Задание «вперёд» (в раздел следующей волны) задаёт старт получателя: «начать после».</p>`
-    + tbl(['От', 'Кому', 'Что передаётся'], T.ASSIGN.map(([f, to, w]) => [esc(f === 'ИОС*' ? 'каждый ИОС' : lbl(f)), esc(to.map(x => (x === 'ИОС*' ? 'все ИОС' : lbl(x))).join(', ')), esc(w)]));
-  if (sec === 'rd') return `<p class="hint">Что генератор предлагает в рабочую документацию к разделу ПД (✓ — включено по умолчанию). Обозначения разделов РД — по ГОСТ Р 21.101-2026 и принятые на практике.</p>`
-    + tbl(['Раздел ПД', 'Разделы РД'], Object.entries(Composition.RD_SUGGEST).map(([k, list]) => [`<b>${esc(lbl(k))}</b>`, list.map(([m, on]) => `<span class="chip ${on ? 'tone-work' : 'tone-idle'}" title="${esc(Composition.RD_MARKS[m]?.[0] || '')}">${on ? '✓ ' : ''}${esc(m)}</span>`).join(' ')]));
-  if (sec === 'summary') return tbl(['Раздел', 'Что получает', 'Что отдаёт', 'Когда'], T.SUMMARY.map(r => r.map(esc)));
-  // 4.6 (item 10): for each section, briefly — what it gets from whom and what it gives to whom.
-  if (sec === 'bysec') {
-    const ALIAS = { ИОС1: 'ЭОМ', ИОС2: 'ВК · вода', ИОС3: 'ВК · канализация', ИОС4: 'ОВ, ТС, ИТП', ИОС5: 'СС', ИОС6: 'ГС' };
-    const name = k => `${lbl(k)}${ALIAS[k] ? ` <span class="hint">(${ALIAS[k]})</span>` : ''}`;
-    const short = k => esc(ALIAS[k] ? ALIAS[k].split(/[ ,·]/)[0] : lbl(k));
-    const keys = Object.keys(T.WAVES).filter(k => !['ИД', 'СМ', 'ПЗ'].includes(k));
-    const all = T.pairs(keys);
-    const one = k => {
-      const inc = all.filter(x => x.to === k), out = all.filter(x => x.from === k);
-      if (!inc.length && !out.length) return '';
-      const rows = (list, side) => list.map(x => `<li><b>${side === 'in' ? 'от ' : ''}${short(side === 'in' ? x.from : x.to)}</b> — ${esc(x.what)}</li>`).join('');
-      return `<div class="tc-sec" data-key="${esc(k)}"><h4>${name(k)} <span class="hint">· волна ${T.waveOf(k)}</span></h4>
-        ${inc.length ? `<div class="tc-io"><span class="tc-io-h">Получает</span><ul>${rows(inc, 'in')}</ul></div>` : ''}
-        ${out.length ? `<div class="tc-io"><span class="tc-io-h out">Выдаёт</span><ul>${rows(out, 'out')}</ul></div>` : ''}</div>`;
-    };
-    return `<p class="hint">Например: ОВ получает планировки от АР и сетку колонн от КР, выдаёт КР и АР отверстия и нагрузки, ЭОМ — электрические нагрузки. Из этих пар генератор делает задания-подзадачи.</p>
-      <div class="tc-secs">${keys.map(one).join('')}</div>`;
-  }
-  return '';
-}
-function openTechcard(sec = 'stages') {
-  $('.tc-back')?.remove();
-  setFileMenu(false);
-  const root = document.createElement('div');
-  root.className = 'modal-back tc-back';
-  const draw = s => {
-    root.innerHTML = `<div class="modal tc-modal" role="dialog" aria-modal="true" aria-labelledby="tctitle"><div class="tc-head"><h2 id="tctitle">Техкарта процесса проектирования</h2><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-m="close" aria-label="Закрыть">✕</button></div>
-      <nav class="tc-nav">${TC_SECS.map(([k, l]) => `<button class="btn sm${k === s ? ' primary' : ''}" type="button" data-m="sec" data-sec="${k}">${l}</button>`).join('')}</nav>
-      <div class="tc-body">${techcardBody(s)}</div>
-      <p class="hint tc-foot">Порядок волн и состав заданий — рабочая версия, будет уточняться.</p></div>`;
-  };
-  draw(TC_SECS.some(x => x[0] === sec) ? sec : 'stages');
-  document.body.append(root);
-  root.addEventListener('click', e => { const m = e.target.closest('[data-m]')?.dataset.m; if (e.target === root || m === 'close') root.remove(); if (m === 'sec') draw(e.target.closest('[data-m]').dataset.sec); });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); root.remove(); } });
-  root.tabIndex = -1; root.focus();
-}
-// «Удалить все проекты» (GIP): every project with its cards goes to the trash in one batch.
-async function deleteAllProjects() {
-  setFileMenu(false);
-  const list = [...state.projects.values()];
-  if (!list.length) return toast('Проектов нет');
-  const n = [...state.tasks.values()].filter(t => state.projects.has(t.projectId)).length;
-  const sure = await confirmBox(`Переместить в корзину все проекты (${list.length}) и их карточки (${n})? 30 дней их можно восстановить из корзины.`, 'Удалить все');
-  if (!sure) return;
-  const at = new Date().toISOString(), ops = [];
-  for (const p of list) {
-    for (const t of state.tasks.values()) if (t.projectId === p.id) ops.push(op.update('tasks', t.id, { deletedAt: at, deletedWith: p.id }));
-    ops.push(op.update('projects', p.id, { deletedAt: at }));
-  }
-  state.openProjectId = null;
-  await write(ops, `В корзину: проектов ${list.length}, карточек ${n}`);
-}
-function confirmBox(text, yes = 'Да', no = 'Отмена') {
-  return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true"><p>${esc(text)}</p><div class="modal-f"><button class="btn danger solid" type="button" data-m="yes">${esc(yes)}</button><button class="btn" type="button" data-m="no">${esc(no)}</button></div></div>`;
-    document.body.append(root);
-    const close = r => { root.remove(); resolve(r); };
-    // Yes → true, the second button → false, dismissed (backdrop, Esc) → null.
-    root.addEventListener('click', e => { if (e.target === root) close(null); if (e.target.dataset.m === 'no') close(false); if (e.target.dataset.m === 'yes') close(true); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
-    root.querySelector('[data-m="no"]').focus();
-  });
-}
-async function askDocNames(format) {
-  const p = state.projects.get(state.drawer.id) || {};
-  const def = await api.docDefaults();
-  const saved = loadLocal('docNames', {});
-  const contact = p.contactId && state.users.get(p.contactId);
-  const gipUser = contact || (A.isGip(state.me) ? state.me : liveUsers().find(u => u.role === 'gip'));
-  const v = { customer: p.client || '', gip: saved.gip || gipUser?.name || '', developer: saved.developer || state.me?.name || '', director: saved.director || def.director || '', year: todayStr().slice(0, 4) };
-  return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    const f = (k, label, hint = '') => `<div class="f"><label for="dn-${k}">${label}</label><input id="dn-${k}" value="${esc(v[k])}" maxlength="${k === 'customer' ? 300 : 60}">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="dntitle" novalidate><h2 id="dntitle">${format === 'vok' ? 'Ведомость основных комплектов (РД)' : 'Состав проектной документации'}</h2>
-      <p class="hint">Обложка, титульный лист и штампы — из шаблона офиса. Номера листов и «Листов» Word пересчитает сам при открытии.${def.own.includes(format) ? ' Используется ваш шаблон из папки шаблонов.' : ''}</p>
-      ${f('customer', 'Заказчик', 'На обложке: «Заказчик – …»')}${f('gip', 'Главный инженер проекта', 'Титульный лист; в штамп — фамилия')}${f('developer', 'Разработал', 'В штамп — фамилия')}${f('director', 'Генеральный директор')}${f('year', 'Год')}
-      <div class="modal-f"><button class="btn primary" type="submit">Сохранить файл…</button><button class="btn" type="button" data-m="cancel">Отмена</button><button class="linkbtn" type="button" data-m="tpl">Свои шаблоны…</button></div></form>`;
-    document.body.append(root);
-    const close = r => { root.remove(); resolve(r); };
-    root.querySelector('#dn-customer').focus();
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); if (e.target.dataset.m === 'tpl') api.openTemplates(); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
-    root.querySelector('form').addEventListener('submit', e => {
-      e.preventDefault(); e.stopPropagation();
-      const out = Object.fromEntries(Object.keys(v).map(k => [k, root.querySelector('#dn-' + k).value.trim()]));
-      saveLocal('docNames', { gip: out.gip, developer: out.developer, director: out.director });
-      close(out);
-    });
-  });
-}
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'cab-remark': ({ id }) => { cabRemark(id); },
+  'cab-settings': () => { openCabinetSettings(); },
+  'cab-local-start': ({ el }) => { el.disabled = true; el.textContent = 'Запускаем…'; api.cabinetLocalStart().then(r => { if (!r.ok) { toast(r.message, true); el.disabled = false; el.textContent = 'Запустить кабинет на этом компьютере'; return; } cabCustomers = null; cabLoadErr = ''; toast(`Кабинет запущен${r.lan[0] ? ` · адрес для заказчиков: ${r.lan[0]}` : ''}`); }); },
+  'cab-local-stop': () => { api.cabinetLocalStop().then(r => { if (r.ok) { cabCustomers = null; toast('Кабинет на этом компьютере остановлен. Данные сохранены — при новом запуске всё вернётся.'); } }); },
+  'cab-publish': () => { cabPublish(); },
+  'cab-unpublish': () => { cabAction(api.cabinetUnpublish(state.drawer?.id), 'Снято с публикации: заказчик больше не видит проект'); },
+  'cab-open': () => { api.cabinetOpen(state.drawer?.id); },
+  'cab-add': () => { cabAdd(); },
+  'cab-link': () => { const cid = $('#cab-other').value, c = cabCustomer(cid); if (c) cabPatch(cid, { projectIds: [...c.projectIds, state.drawer.id] }, `${c.name}: проект добавлен`); },
+  'cab-unlink': ({ id }) => { const c = cabCustomer(id); if (c) cabPatch(id, { projectIds: c.projectIds.filter(x => x !== state.drawer.id) }, `${c.name} больше не видит проект`); },
+  'cab-reset': ({ id }) => { cabPatch(id, { resetPassword: true }, 'Новый пароль создан, старый больше не действует'); },
+  'cab-toggle': ({ id }) => { const c = cabCustomer(id); if (c) cabPatch(id, { disabled: !c.disabled }, c.disabled ? 'Вход открыт' : 'Вход закрыт'); },
+  'cab-reload': () => { cabLoadErr = ''; cabCustomers = null; loadCabCustomers(true); },
+  'cab-pw-hide': () => { cabPw = null; renderCabinetBox(); },
+  'cab-pw-copy': () => { if (cabPw) copyText(`Кабинет заказчика: ${cab.publicUrl || cab.url}\nЛогин: ${cabPw.login}\nПароль: ${cabPw.password}`).then(ok => toast(ok ? 'Скопировано — вставьте в письмо или мессенджер' : 'Не удалось скопировать', !ok)); },
+  'cab-read': ({ id }) => { api.cabinetRead([id]); },
+  'cab-got': ({ id }) => { cabMarkGot(id); },
+  'cab-read-all': () => { api.cabinetRead(cab.messages.filter(m => !m.read).map(m => m.id)); },
+  'cab-open-msg': ({ id }) => { const m = cab.messages.find(x => x.id === id); if (m) { api.cabinetRead([id]); if (state.projects.has(m.projectId)) openProject(m.projectId, 'cust'); } },
+});
 /* ---------- project & contractor ---------- */
 // The project's GIP: any GIP of the team; a project made before 4.1 may name someone else — kept in the list.
 function gipOptions(sel) {
@@ -6608,6 +6938,43 @@ async function pickFolder() {
   if (res?.path) $('#pr-folder').value = res.path;
 }
 
+// «Удалить все проекты» (GIP): every project with its cards goes to the trash in one batch.
+async function deleteAllProjects() {
+  setFileMenu(false);
+  const list = [...state.projects.values()];
+  if (!list.length) return toast('Проектов нет');
+  const n = [...state.tasks.values()].filter(t => state.projects.has(t.projectId)).length;
+  const sure = await confirmBox(`Переместить в корзину все проекты (${list.length}) и их карточки (${n})? 30 дней их можно восстановить из корзины.`, 'Удалить все');
+  if (!sure) return;
+  const at = new Date().toISOString(), ops = [];
+  for (const p of list) {
+    for (const t of state.tasks.values()) if (t.projectId === p.id) ops.push(op.update('tasks', t.id, { deletedAt: at, deletedWith: p.id }));
+    ops.push(op.update('projects', p.id, { deletedAt: at }));
+  }
+  state.openProjectId = null;
+  await write(ops, `В корзину: проектов ${list.length}, карточек ${n}`);
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'delete-all-projects': () => { deleteAllProjects(); },
+  'open-project-cust': ({ id }) => { openProject(id, 'cust'); },
+  'open-project': ({ id }) => { openProject(id); },
+  'open-project-tab': ({ el, id }) => { openProject(id, el.dataset.tab); },
+  'new-project': () => { setCreateMenu(false); openProject(null); },
+  'open-contractor': ({ id }) => { openContractor(id); },
+  'new-contractor': () => { setCreateMenu(false); openContractor(null); },
+  'archive': ({ id }) => { setArchived(id, true); },
+  'unarchive': ({ id }) => { setArchived(id, false); },
+  'open-folder': ({ id }) => { openFolder(id); },
+  'pick-folder': () => { pickFolder(); },
+  'ask-delete': () => { askDelete(); },
+  'do-delete': ({ el }) => { el.disabled = true; doDelete(); },
+  'add-payment': () => { addPayment(); },
+  'del-payment': ({ el }) => { delPayment(el.dataset.pid); },
+  'restore': ({ el, id }) => { restoreItem(el.dataset.col, id); },
+  'purge': ({ el, id }) => { purgeItem(el.dataset.col, id, el); },
+});
 /* ---------- file menu: reports & import ---------- */
 function setFileMenu(open) {
   const menu = $('#file-menu');
@@ -6811,6 +7178,58 @@ function stepZoom(dir) {
 const JOURNAL_PERIODS = [['1', 'Сегодня'], ['7', 'Неделя'], ['31', 'Месяц'], ['all', 'Всё время']];
 const JOURNAL_TYPES = [['all', 'Всё'], ['tasks', 'Карточки'], ['payments', 'Оплаты'], ['dates', 'Сроки'], ['projects', 'Проекты'], ['contractors', 'Исполнители']];
 const KIND_LABEL = { create: 'создано', update: 'изменено', trash: 'в корзину', restore: 'восстановлено', delete: 'удалено навсегда', 'restore-backup': 'восстановление' };
+
+async function autoBackupMenu() {
+  setFileMenu(false);
+  const cur = await api.autoBackupGet();
+  if (cur.dir) {
+    const off = await confirmBox(`Автокопия сохраняется раз в день в «${cur.dir}»${cur.last ? `, последняя — ${fmtDate(cur.last)}` : ''}${cur.error ? `. Последняя попытка не удалась: ${cur.error}` : ''}. Выключить или выбрать другую папку?`, 'Выключить', 'Другая папка…');
+    if (off === null) return;
+    if (off) { await api.autoBackupSet(true); return toast('Автокопия выключена'); }
+  }
+  const r = await api.autoBackupSet(false);
+  if (r.canceled) return;
+  toast(r.ok ? `Автокопия включена: ${r.dir}. Первая копия уже сохранена, дальше — раз в день, хранятся 14 последних.` : r.message, !r.ok);
+}
+async function backupSave() {
+  setFileMenu(false);
+  const res = await api.backupSave();
+  if (res.canceled) return;
+  if (!res.ok) return toast(res.message, true);
+  toast(`Копия сохранена: ${res.name} (карточек ${res.counts.tasks}, проектов ${res.counts.projects}, подрядчиков ${res.counts.contractors})`);
+}
+async function backupRestore() {
+  setFileMenu(false);
+  const res = await api.backupRestore();
+  if (res.canceled) return;
+  if (!res.ok) return toast(res.message, true);
+  undoStack.length = 0; // earlier undo steps refer to the replaced data
+  closeDrawer();
+  await refresh();
+  toast(`Данные восстановлены из копии: записей ${res.count}. Прежние данные сохранены в папке backups.`);
+}
+
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'file-menu': () => { setFileMenu($('#file-menu').hidden); },
+  'customer-pdf': () => { customerPdf(); },
+  'autobackup': () => { autoBackupMenu(); },
+  'set-font': ({ el }) => { brandFont = el.dataset.v === 'montserrat' ? 'montserrat' : 'golos'; saveLocal('brandFont', brandFont); applyBrandFont(); renderViewMenu(); if (document.querySelector('.settings-modal')) renderSettings(); },
+  'export': ({ el }) => { exportReport(el.dataset.format); },
+  'import': () => { startImport(); },
+  'backup-save': () => { backupSave(); },
+  'backup-restore': () => { backupRestore(); },
+  'view-menu': () => { setViewMenu($('#view-menu').hidden); },
+  'weekly': () => { setFileMenu(false); openWeekly(); },
+  'usage': () => { setFileMenu(false); openUsage(); },
+  'help': () => { setFileMenu(false); openHelp(); },
+  'set-dense': ({ el }) => { dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); },
+  'set-anim': ({ el }) => { anim = el.dataset.v === '1'; saveLocal('anim', anim); applyAnim(); renderViewMenu(); },
+  'zoom-step': ({ el }) => { stepZoom(Number(el.dataset.dir)); },
+  'open-trash': () => { setFileMenu(false); openTrash(); },
+  'do-import': ({ el }) => { el.disabled = true; doImport().finally(() => { el.disabled = false; }); },
+  'open-data-folder': () => { setFileMenu(false); api.openDataFolder(); },
+});
 async function openJournal() {
   setFileMenu(false);
   state.drawer = { kind: 'journal' };
@@ -6892,6 +7311,12 @@ function renderJournal() {
     ${body || `<div class="none">${j.entries.length ? 'Под фильтр ничего не попало.' : 'За этот период изменений нет. Журнал ведётся с версии 1.6.'}</div>`}`;
 }
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'open-journal': () => { openJournal(); },
+  'jr-period': ({ el }) => { state.journal.period = el.dataset.v; loadJournal(); },
+  'jr-type': ({ el }) => { state.journal.type = el.dataset.v; renderJournal(); },
+});
 /* ---------- quick search (Ctrl+K) ---------- */
 /* ---------- 52: recently opened projects, cards and contractors come first in Ctrl+K ---------- */
 const RECENT_MAX = 12;
@@ -7070,36 +7495,10 @@ function openTarget(target) {
   state.tab = 'day'; saveLocal('tab', 'day'); renderNow();
 }
 
-async function autoBackupMenu() {
-  setFileMenu(false);
-  const cur = await api.autoBackupGet();
-  if (cur.dir) {
-    const off = await confirmBox(`Автокопия сохраняется раз в день в «${cur.dir}»${cur.last ? `, последняя — ${fmtDate(cur.last)}` : ''}${cur.error ? `. Последняя попытка не удалась: ${cur.error}` : ''}. Выключить или выбрать другую папку?`, 'Выключить', 'Другая папка…');
-    if (off === null) return;
-    if (off) { await api.autoBackupSet(true); return toast('Автокопия выключена'); }
-  }
-  const r = await api.autoBackupSet(false);
-  if (r.canceled) return;
-  toast(r.ok ? `Автокопия включена: ${r.dir}. Первая копия уже сохранена, дальше — раз в день, хранятся 14 последних.` : r.message, !r.ok);
-}
-async function backupSave() {
-  setFileMenu(false);
-  const res = await api.backupSave();
-  if (res.canceled) return;
-  if (!res.ok) return toast(res.message, true);
-  toast(`Копия сохранена: ${res.name} (карточек ${res.counts.tasks}, проектов ${res.counts.projects}, подрядчиков ${res.counts.contractors})`);
-}
-async function backupRestore() {
-  setFileMenu(false);
-  const res = await api.backupRestore();
-  if (res.canceled) return;
-  if (!res.ok) return toast(res.message, true);
-  undoStack.length = 0; // earlier undo steps refer to the replaced data
-  closeDrawer();
-  await refresh();
-  toast(`Данные восстановлены из копии: записей ${res.count}. Прежние данные сохранены в папке backups.`);
-}
-
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'open-search': () => { openPalette(); },
+});
 /* ---------- demo data (only on explicit click, marked as examples) ---------- */
 async function seedDemo() {
   const d = n => addDays(todayStr(), n);
@@ -7232,6 +7631,18 @@ grip.addEventListener('pointerdown', e => {
   grip.addEventListener('pointercancel', up);
 });
 
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'seed-demo': ({ el }) => { el.disabled = true; seedDemo(); },
+  'clear-demo': ({ el }) => { el.disabled = true; clearDemo(); },
+  'toggle-pin': () => { api.setAlwaysOnTop(!state.win.alwaysOnTop); },
+  'toggle-compact': () => { api.setCompact(!state.win.compact); },
+  'ghost-on': () => { api.setClickThrough(true); toast('Сквозные клики включены. Вернуть управление: Ctrl+Alt+G или кнопка вверху окна.'); },
+  'ghost-off': () => { api.setClickThrough(false); },
+  'minimize': () => { api.minimize(); },
+  'toggle-max': () => { api.setMaximized(!state.win.maximized); },
+  'hide': () => { api.hide(); },
+});
 /* ---------- events ---------- */
 async function copy(value, btn) {
   try { await navigator.clipboard.writeText(value); toast('Скопировано'); }
@@ -7252,6 +7663,11 @@ function applyPlanTemplate(kind) {
   renderPlanRows(); renderPlanPreview();
 }
 
+// Buttons and links that belong to the whole window (not to one part).
+onAct({
+  'tip-close': ({ el }) => { closeTip(el.dataset.tip); },
+  'copy': ({ el }) => { copy(el.dataset.value, el); },
+});
 document.addEventListener('click', e => {
   if (suppressClick) { suppressClick = false; e.preventDefault(); e.stopPropagation(); return; }
   if (e.target.closest('.cell-edit')) return;
@@ -7265,283 +7681,7 @@ document.addEventListener('click', e => {
   if (!el) return;
   const act = el.dataset.act, id = el.dataset.id;
   track(act === 'tab' ? 'tab:' + id : 'act:' + act);
-  switch (act) {
-    case 'file-menu': setFileMenu($('#file-menu').hidden); break;
-    case 'att-menu': setAttMenu(!attOpen); break;
-    case 'create-menu': setCreateMenu($('#create-menu').hidden); break;
-    case 'customer-pdf': customerPdf(); break;
-    case 'tip-close': closeTip(el.dataset.tip); break;
-    case 'tips-reset': tipsClosed.clear(); saveLocal('tipsClosed', []); renderNow(); break;
-    case 'cols-pop': colsOpen = !colsOpen; el.closest('.cols-wrap').querySelector('.cols-menu').hidden = !colsOpen; break;
-    case 'tab-move': moveTab(id, Number(el.dataset.dir)); break;
-    case 'tabs-reset': setTabOrder([]); break;
-    case 'thank': thank(el.dataset.task, el.dataset.cid); break;
-    case 'open-task-folder': e.stopPropagation(); openTaskFolder(id); break;
-    case 'pick-task-folder': pickTaskFolder(); break;
-    case 'suggest-task-folder': suggestTaskFolder(); break;
-    case 'rev-add': addRevision(); break;
-    case 'rev-del': state.draft.revisions.splice(Number(el.dataset.i), 1); renderRevisions(); break;
-    case 'project-timeline': { const pr = state.projects.get(id); if (pr) askTimeline(pr).then(ok => ok && refresh()); break; }
-    case 'techcard': openTechcard(el.dataset.sec || 'stages'); break;
-    case 'delete-all-projects': deleteAllProjects(); break;
-    case 'autobackup': autoBackupMenu(); break;
-    case 'comp-base': state.draft.composition = Composition.fromBase(el.dataset.v); renderComposition(); break;
-    case 'comp-add': compAdd(id); break;
-    case 'comp-del': compDel(id); break;
-    case 'comp-rd-suggest': state.draft.composition.rd = Composition.rdDefaults(state.draft.composition); renderComposition(); break;
-    case 'rd-chip': rdChip(el.dataset.pd, el.dataset.mark); break;
-    case 'rd-add': rdAdd(el.dataset.pd); break;
-    case 'rd-del': rdDel(id); break;
-    case 'rd-move': rdMove(id, Number(el.dataset.dir)); break;
-    case 'comp-export': compExport(el.dataset.format); break;
-    case 'cab-remark': cabRemark(id); break;
-    case 'ird-request': { const x = state.draft.ird[Number(el.dataset.i)]; if (x?.title) { irdAsk(x); renderCustomer(); toast('Запрос добавлен в «Нужно от заказчика». Сохраните проект — заказчик увидит его на странице.'); } break; }
-    case 'ird-request-all': { const list = irdAskable(); list.forEach(irdAsk); renderCustomer(); toast(`Запрошено: ${list.length}. Сохраните проект — заказчик увидит запросы на странице.`); break; }
-    case 'ird-letter': navigator.clipboard.writeText(irdLetterText()).then(() => toast('Текст письма-запроса скопирован — вставьте в письмо или на бланк.'), () => toast('Не удалось скопировать.', true)); break;
-    case 'ird-techcard': state.draft.ird.push(...Techcard.SOURCE_DATA.filter(([t]) => !state.draft.ird.some(x => x.title.trim().toLowerCase() === t.toLowerCase())).map(([title, who]) => ({ id: newId(), title, kind: irdKindOf(title), who: who === 'Изыскатели' ? '«Тандем»' : who.replace('Заказчик / технолог', 'Заказчик'), status: 'plan', due: '', note: '' }))); renderCustomer(); break;
-    case 'pd-add': draftList(el.dataset.list).push(PD_NEW[el.dataset.list]()); renderCustomer(); break;
-    case 'pd-del': draftList(el.dataset.list).splice(Number(el.dataset.i), 1); renderCustomer(); break;
-    case 'cust-page': customerPage(el.dataset.format); break;
-    case 'cab-settings': openCabinetSettings(); break;
-    case 'cab-local-start': el.disabled = true; el.textContent = 'Запускаем…'; api.cabinetLocalStart().then(r => { if (!r.ok) { toast(r.message, true); el.disabled = false; el.textContent = 'Запустить кабинет на этом компьютере'; return; } cabCustomers = null; cabLoadErr = ''; toast(`Кабинет запущен${r.lan[0] ? ` · адрес для заказчиков: ${r.lan[0]}` : ''}`); }); break;
-    case 'cab-local-stop': api.cabinetLocalStop().then(r => { if (r.ok) { cabCustomers = null; toast('Кабинет на этом компьютере остановлен. Данные сохранены — при новом запуске всё вернётся.'); } }); break;
-    case 'cab-publish': cabPublish(); break;
-    case 'cab-unpublish': cabAction(api.cabinetUnpublish(state.drawer?.id), 'Снято с публикации: заказчик больше не видит проект'); break;
-    case 'cab-open': api.cabinetOpen(state.drawer?.id); break;
-    case 'cab-add': cabAdd(); break;
-    case 'cab-link': { const cid = $('#cab-other').value, c = cabCustomer(cid); if (c) cabPatch(cid, { projectIds: [...c.projectIds, state.drawer.id] }, `${c.name}: проект добавлен`); break; }
-    case 'cab-unlink': { const c = cabCustomer(id); if (c) cabPatch(id, { projectIds: c.projectIds.filter(x => x !== state.drawer.id) }, `${c.name} больше не видит проект`); break; }
-    case 'cab-reset': cabPatch(id, { resetPassword: true }, 'Новый пароль создан, старый больше не действует'); break;
-    case 'cab-toggle': { const c = cabCustomer(id); if (c) cabPatch(id, { disabled: !c.disabled }, c.disabled ? 'Вход открыт' : 'Вход закрыт'); break; }
-    case 'cab-reload': cabLoadErr = ''; cabCustomers = null; loadCabCustomers(true); break;
-    case 'cab-pw-hide': cabPw = null; renderCabinetBox(); break;
-    case 'cab-pw-copy': if (cabPw) copyText(`Кабинет заказчика: ${cab.publicUrl || cab.url}\nЛогин: ${cabPw.login}\nПароль: ${cabPw.password}`).then(ok => toast(ok ? 'Скопировано — вставьте в письмо или мессенджер' : 'Не удалось скопировать', !ok)); break;
-    case 'cab-read': api.cabinetRead([id]); break;
-    case 'cab-got': cabMarkGot(id); break;
-    case 'req-attach': { const x = state.draft?.requests?.[Number(el.dataset.i)], pid = state.drawer?.id; if (x && pid) api.attachAdd(pid).then(r => { if (r?.ok) { x.files = [...(x.files || []), r.file]; renderCustomer(); toast('Файл приложен — сохраните проект, и заказчик увидит его в кабинете.'); } else if (r && !r.canceled) toast(r.message, true); }); break; }
-    case 'req-unattach': { const x = state.draft?.requests?.[Number(el.dataset.i)]; if (x) { x.files = (x.files || []).filter((_, k) => k !== Number(el.dataset.k)); renderCustomer(); } break; }
-    case 'att-open': { const pid = state.drawer?.id; if (pid) api.attachOpen(pid, el.dataset.fid).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть', true); }); break; }
-    case 'cab-read-all': api.cabinetRead(cab.messages.filter(m => !m.read).map(m => m.id)); break;
-    case 'cab-open-msg': { const m = cab.messages.find(x => x.id === id); if (m) { api.cabinetRead([id]); if (state.projects.has(m.projectId)) openProject(m.projectId, 'cust'); } break; }
-    case 'open-project-cust': openProject(id, 'cust'); break;
-    case 'g-mode': setGantt({ mode: el.dataset.v }); break;
-    case 'set-font': brandFont = el.dataset.v === 'montserrat' ? 'montserrat' : 'golos'; saveLocal('brandFont', brandFont); applyBrandFont(); renderViewMenu(); if (document.querySelector('.settings-modal')) renderSettings(); break;
-    case 'set-game': game = el.dataset.v === '1'; saveLocal('game', game); renderNow(); break;
-    case 'office-person': officePerson(id); break;
-    case 'office-zoom': setOffice({ zoom: Math.min(2, Math.max(0.5, (officePrefs.zoom || 1) * (el.dataset.dir === 'in' ? 1.2 : 1 / 1.2))) }); break;
-    case 'office-fit': setOffice({ zoom: 1 }); break;
-    case 'bulk-toggle': state.bulk = state.bulk ? null : new Set(); renderNow(); break;
-    case 'bulk-pick': e.stopPropagation(); if (el.checked) state.bulk.add(id); else state.bulk.delete(id); renderNow(); break;
-    case 'bulk-all': { e.stopPropagation(); const ids = el.dataset.ids.split(' ').filter(Boolean); for (const x of ids) { if (el.checked) state.bulk.add(x); else state.bulk.delete(x); } renderNow(); break; }
-    case 'bulk-clear': state.bulk = new Set(); renderNow(); break;
-    case 'bulk-owner': case 'bulk-contr': case 'bulk-shift': case 'bulk-start': case 'bulk-trash': bulkDo(act.slice(5)); break;
-    case 'office-anim': setOffice({ anim: officePrefs.anim === false }); break;
-    case 'office-labels': setOffice({ labels: !officePrefs.labels }); break;
-    case 'pstage': state.projectStage = el.dataset.v; renderNow(); break;
-    case 'export': exportReport(el.dataset.format); break;
-    case 'import': startImport(); break;
-    case 'tab': if (e.ctrlKey) { wsAddSection(id); break; } wsRemember(); wsActive = ''; saveWs(); if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); break;
-    case 'sort': toggleSort(el.dataset.key); break;
-    case 'g-scale': zoomGantt(Number(el.dataset.days) / state.gantt.days, dayNum(state.today) >= dayNum(state.gantt.from) && dayNum(state.today) <= dayNum(state.gantt.from) + state.gantt.days ? (dayNum(state.today) - dayNum(state.gantt.from)) / state.gantt.days : 0.5); break;
-    case 'g-zoom': zoomGantt(el.dataset.dir === 'in' ? 0.7 : 1 / 0.7); break;
-    case 'g-shift': setGantt({ from: addDays(state.gantt.from, Math.round(state.gantt.days / 3) * Number(el.dataset.dir)) }); break;
-    case 'g-group': setGantt({ group: el.dataset.group }); break;
-    case 'g-today': setGantt({ from: addDays(state.today, -Math.round(state.gantt.days / 9)) }); break;
-    case 'open-task':
-      closeCardMenu();
-      // On an editable table cell wait a moment: a second click turns this into inline editing.
-      if (el.matches('tr.row') && e.target.closest('td[data-edit]')) {
-        clearTimeout(openTimer);
-        openTimer = setTimeout(() => openTask(id), 260);
-        break;
-      }
-      if (state.win.compact) { api.setCompact(false); state.win.compact = false; }
-      openTask(id); break;
-    case 'dep-del': state.draft.dependsOn = state.draft.dependsOn.filter(x => x !== id); renderDeps(); break;
-    case 'msg-kind': renderMessage(el.dataset.kind); break;
-    case 'msg-copy': copyText($('#msg-text').value).then(ok => toast(ok ? 'Текст скопирован' : 'Текст выделен — нажмите Ctrl+C')); break;
-    case 'msg-send': el.disabled = true; sendMessage(el.dataset.via).finally(() => { el.disabled = false; }); break;
-    case 'backup-save': backupSave(); break;
-    case 'backup-restore': backupRestore(); break;
-    case 'open-search': openPalette(); break;
-    case 'view-menu': setViewMenu($('#view-menu').hidden); break;
-    case 'user-menu': setUserMenu($('#user-menu').hidden); break;
-    case 'switch-user': switchUser(id); break;
-    case 'server': setUserMenu(false); setFileMenu(false); serverDialog(); break;
-    case 'open-user': openUser(id); break;
-    case 'new-user': setCreateMenu(false); openUser(null, el.dataset.role, el.dataset.chief); break;
-    case 'team-toggle': toggleTeamNode(id); break;
-    case 'talk-send': sendComment(); break;
-    case 'talk-edit': talkEditStart(el.dataset.cid); break;
-    case 'talk-edit-save': talkEditSave(); break;
-    case 'talk-edit-cancel': talkEditCancel(); break;
-    case 'weekly': setFileMenu(false); openWeekly(); break;
-    case 'usage': setFileMenu(false); openUsage(); break;
-    case 'help': setFileMenu(false); openHelp(); break;
-    case 'tour': setFileMenu(false); endTour(); startTour(); break;
-    case 'org-fold': { const id = el.dataset.id; if (el.dataset.open === 'true') { orgOpen.delete(id); orgOpen.add('x:' + id); } else { orgOpen.add(id); orgOpen.delete('x:' + id); } saveLocal('orgOpen', [...orgOpen]); renderNow(); break; }
-    case 'org-people': orgToggle('p:' + el.dataset.id); break;
-    case 'org-add': askDept(null, el.dataset.parent || ''); break;
-    case 'org-edit': { const d = state.depts.get(el.dataset.id); if (d) askDept(d); break; }
-    case 'org-from-groups': orgFromGroups(); break;
-    case 'people-mode': peopleMode = el.dataset.v; saveLocal('peopleMode', peopleMode); renderNow(); break;
-    case 'cg-toggle': toggleSet(cgOpen, id, 'cgOpen'); break;
-    case 'co-toggle': toggleSet(coOpen, id, 'coOpen'); break;
-    case 'cg-all': if (el.dataset.on === '1') CONTRACTOR_GROUPS.forEach(([k]) => cgOpen.add(k || '-')); else cgOpen.clear(); saveLocal('cgOpen', [...cgOpen]); renderNow(); break;
-    case 'person-tasks': if (!e.target.closest('button')) { state.filters = { ...EMPTY_FILTERS, owner: id }; state.tab = 'tasks'; saveLocal('tab', 'tasks'); renderNow(); } break;
-    case 'prog-weight': progWeight = el.dataset.v; saveLocal('progWeight', progWeight); renderNow(); break;
-    case 'show-more': shownLimits.set(el.dataset.key, Number(el.dataset.shown) + Number(el.dataset.step)); renderNow(); break;
-    case 'settings': openSettings(el.dataset.sec); break;
-    case 'ov-move': moveOv(el.dataset.id, Number(el.dataset.dir)); break;
-    case 'ov-show': setOvPrefs({ hidden: ovPrefs.hidden.filter(k => k !== el.dataset.id) }); break;
-    case 'ov-show-all': setOvPrefs({ hidden: ovPrefs.hidden.filter(k => k === 'projects' && ovPrefs.hidden.includes('projects')) }); break;
-    case 'ov-reset': setOvPrefs({ order: [], hidden: [...OV_DEFAULT_HIDDEN] }); break;
-    case 'counter': attOpen = false; openCounter(el.dataset.f); break;
-    case 'mk-all': state.drawer.allMarks = !state.drawer.allMarks; applyMarksFilter(); break;
-    case 'drawer-wide': setDrawerFull(!drawerPrefs.full); break;
-    case 'task-step': stepTask(Number(el.dataset.dir)); break;
-    case 'col-move': moveCol(el.dataset.id, Number(el.dataset.dir)); break;
-    case 'cols-reset': setColPrefs({ order: COLS.map(c => c.id), hidden: [] }); break;
-    case 'preset': applyPreset(id); break;
-    case 'preset-del': deletePreset(id); break;
-    case 'preset-save': savePreset(); break;
-    case 'preset-reset': state.filters = { ...EMPTY_FILTERS }; renderNow(); break;
-    case 'absences': openAbsences(id); break;
-    case 'fold': setFold([el.dataset.key], !isFolded(el.dataset.key)); break;
-    case 'fold-all': setFold(el.dataset.keys.split(' ').filter(Boolean), el.dataset.on === '1'); break;
-    case 'move-task': e.stopPropagation(); reassign(id, el.dataset.kind, el.dataset.from); break;
-    case 'cust-sec': custSec = el.dataset.v; saveLocal('custSec', custSec); custNav(); break;
-    case 'set-dense': dense = el.dataset.v === '1'; saveLocal('dense', dense); applyDense(); renderViewMenu(); break;
-    case 'set-backdrop': api.setBackdrop?.(el.dataset.v).then(ok => { if (ok === false) toast('Этот фон Windows здесь недоступен — осталась своя прозрачность.', true); }); break;
-    case 'set-dock': api.setDock?.(el.dataset.v); break;
-    case 'set-anim': anim = el.dataset.v === '1'; saveLocal('anim', anim); applyAnim(); renderViewMenu(); break;
-    case 'cm-quick': case 'cm-plus1': case 'cm-assign': case 'cm-chat': case 'cm-copy': case 'cm-window': { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); break; }
-    case 'proj-mode': projMode = el.dataset.v === 'portfolio' ? 'portfolio' : 'list'; saveLocal('projMode', projMode); renderNow(); break;
-    case 'g-crit': state.gantt.crit = !state.gantt.crit; saveLocal('ganttCrit', state.gantt.crit); renderNow(); break;
-    case 'review-queue': openReviewQueue(); break;
-    case 'ird-folder': irdOpen[el.dataset.id] = el.dataset.v; renderNow(); break;
-    case 'ird-upload': { const pid = el.dataset.id, folder = el.closest('.ird')?.querySelector('[data-ird-folder]')?.dataset.irdFolder || 'other'; api.attachAdd(pid).then(r => irdAdd(pid, [r], folder)); break; }
-    case 'sv-upload': { const pid = el.dataset.id, folder = el.dataset.folder; api.attachAdd(pid).then(r => irdAdd(pid, [r], folder)); break; }
-    case 'sv-files': { const p = state.projects.get(el.dataset.id), list = (p?.irdFiles || []).filter(f => f.folder === el.dataset.folder);
-      // The newest report opens; with several, the plate names the others.
-      const last = list.at(-1);
-      if (last) api.attachOpen(p.id, last.id).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть файл.', true); else if (list.length > 1) toast(`Открыт последний: ${last.name}. Ещё: ${list.slice(0, -1).map(f => f.name).join(', ')}`); });
-      break; }
-    case 'ird-open': api.attachOpen(el.dataset.id, el.dataset.fid).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть файл.', true); }); break;
-    case 'ird-del': { const p = state.projects.get(el.dataset.id); if (p) write(op.update('projects', p.id, { irdFiles: (p.irdFiles || []).filter(f => f.id !== el.dataset.fid) }), 'Файл убран'); break; }
-    case 'ird-newfolder': { const p = state.projects.get(el.dataset.id); if (p) askText('Новая папка', 'Название папки', 'Например: Согласования с сетевыми').then(name => { if (!name?.trim()) return; const id = newId(); irdOpen[p.id] = id; write(op.update('projects', p.id, { irdFolders: [...(p.irdFolders || []), { id, name: name.trim().slice(0, 80) }] }), 'Папка добавлена'); }); break; }
-    case 'let-view': letterView[el.dataset.id] = el.dataset.v; renderNow(); break;
-    case 'let-new': { const p = state.projects.get(el.dataset.id); if (p) askLetter(p, null, el.dataset.v); break; }
-    case 'let-edit': { const p = state.projects.get(el.dataset.id), l = p?.letters?.find(x => x.id === el.dataset.lid); if (l) askLetter(p, l); break; }
-    case 'let-mail': { const p = state.projects.get(el.dataset.id), l = p?.letters?.find(x => x.id === el.dataset.lid); if (l) mailLetter(l); break; }
-    case 'tf-open': { const t = state.tasks.get(state.drawer?.id); if (t) api.attachOpen(t.projectId, el.dataset.fid).then(r => { if (!r?.ok) toast(r?.message || 'Не удалось открыть файл.', true); }); break; }
-    case 'tf-del': { const t = state.tasks.get(state.drawer?.id); if (t) write(op.update('tasks', t.id, { files: (t.files || []).filter(f => f.id !== el.dataset.fid) }), 'Файл убран из карточки').then(refreshTaskFiles); break; }
-    case 'tp-task': api.windowMain?.({ kind: 'task', id: el.dataset.id }); api.hide?.(); break;
-    case 'tp-main': { const c = [...state.chats.values()].find(x => msgUnread(x).length); api.windowMain?.(el.dataset.v === 'msg' && c ? { kind: 'chat', id: c.id } : { kind: 'main', id: el.dataset.v === 'day' ? 'day' : 'open' }); api.hide?.(); break; }
-    case 'msg-open-any': msgOpen(); break;
-    case 'att-go': state.tab = 'tasks'; state.filters.status = el.dataset.v; renderNow(); break;
-    case 'ep-pick': epSet(el.dataset.pick, el.dataset.ref); break;
-    case 'ep-clear': epSet(el.dataset.pick, ''); $(`#t-${el.dataset.pick}-q`)?.focus(); break;
-    case 'focus-start': closeCardMenu(); focusStart(el.dataset.id).then(refreshFocusSlot); break;
-    case 'focus-stop': closeCardMenu(); focusStop().then(refreshFocusSlot); break;
-    case 'kb-lanes': state.kanban.lanes = el.dataset.v; saveLocal('kbLanes', el.dataset.v); renderNow(); break;
-    case 'kb-show-all': for (const [k] of KB_SHOW) state.kbShow[k] = el.dataset.v === '1'; saveLocal('kbShow', state.kbShow); renderKeepMenu('.kb-view'); break;
-    case 'nav-pos': setNav({ pos: el.dataset.v }); break;
-    case 'nav-mini': setNav({ mini: !nav.mini }); break;
-    case 'nav-mini-chk': setNav({ mini: el.checked }); break;
-    case 'set-theme': api.setTheme(el.dataset.v); break;
-    case 'zoom-step': stepZoom(Number(el.dataset.dir)); break;
-    case 'open-journal': openJournal(); break;
-    case 'jr-period': state.journal.period = el.dataset.v; loadJournal(); break;
-    case 'jr-type': state.journal.type = el.dataset.v; renderJournal(); break;
-    case 'new-task': setCreateMenu(false); openTask(null, { projectId: el.dataset.project }); break;
-    case 'open-project': openProject(id); break;
-    case 'project-page': openProjectPage(id); break;
-    case 'dtab-close': docTabClose(id); break;
-    case 'ws-open': wsOpen(el.dataset.key); break;
-    case 'ws-plus': if (state.tab === 'projects' && state.openProjectId) toast('Проект уже во вкладке — откройте другой раздел и нажмите «＋», или щёлкните по разделу средней кнопкой мыши.'); else wsAddSection(state.tab); break;
-    case 'ws-chat': wsAddChat(id); break;
-    case 'win-detach': detachDoc(el.dataset.kind, id); break;
-    case 'win-dock': api.windowDock?.(SOLO); break;
-    case 'project-back': state.openProjectId = null; render(); break;
-    case 'open-project-tab': openProject(id, el.dataset.tab); break;
-    case 'msg-open': msgOpen(); break;
-    case 'msg-close': msgClose(); break;
-    case 'msg-size': msg.mode = msg.mode === 'full' ? 'side' : 'full'; renderMsg(); break;
-    case 'msg-stick': msg.stick = !msg.stick; saveLocal('msgStick', msg.stick); renderMsg(); toast(msg.stick ? 'Окно сообщений закреплено — перетащите карточку в чат, чтобы отправить её' : 'Окно сообщений свернётся при щелчке мимо'); break;
-    case 'msg-chat': msgOpen(id); break;
-    case 'msg-back': msg.chatId = ''; renderMsg(); break;
-    case 'msg-filter': msg.filter = el.dataset.v; renderMsg(); break;
-    case 'msg-pin': msgTogglePin(id); break;
-    case 'msg-cust-project': msgClose(); openProject(id, 'cust'); break;
-    case 'mc-send': msgSend(); break;
-    case 'mc-edit': mcEditStart(id); break;
-    case 'mc-edit-save': mcEditSave(); break;
-    case 'mc-edit-cancel': mcEditCancel(); break;
-    case 'msg-info': msg.info = !msg.info; renderMsg(); break;
-    case 'chat-icon': case 'chat-icon-clear': setChatIcon(id, act === 'chat-icon'); break;
-    case 'proj-icon': case 'proj-icon-clear': setProjectIconField(act === 'proj-icon'); break;
-    case 'msg-project': msgOpen(projectChatId(id)); break;
-    case 'msg-new': msg.chatId = 'new'; msg.newKind = 'direct'; if (msg.mode === 'pill') { msg.mode = 'side'; msg.enter = true; } renderMsg(); break;
-    case 'msg-newkind': msg.newKind = el.dataset.v; renderMsg(); break;
-    case 'msg-pick': if (el.checked) msg.newPick.add(el.value); else msg.newPick.delete(el.value); msg.newTitle = $('#mc-title')?.value || msg.newTitle; renderMsg(); break;
-    case 'msg-ac': msgAcPick(Number(el.dataset.i)); break;
-    case 'msg-direct': api.chatDirect(id).then(async r => { if (!r?.ok) return toast(r?.message || 'Ошибка', true); await refresh(); msgOpen(r.id); }); break;
-    case 'msg-create': { const title = ($('#mc-title')?.value || '').trim(); api.chatCreate({ title, members: [...msg.newPick] }).then(async r => { if (!r?.ok) return toast(r?.message || 'Ошибка', true); msg.newPick = new Set(); msg.newTitle = ''; await refresh(); msgOpen(r.id); toast(`Чат «${title}» создан`); }); break; }
-    case 'msg-add-member': { const c = chatById(msg.chatId), uid = $('#mc-add')?.value; if (c && uid) api.chatUpdate(c.id, { members: [...(c.members || []), uid] }).then(r => (r?.ok ? refresh() : toast(r?.message || 'Ошибка', true))); break; }
-    case 'msg-leave': { const c = chatById(msg.chatId); if (c) confirmBox(`Выйти из чата «${chatTitle(c)}»? Вернуть может автор чата.`, 'Выйти').then(ok => ok && api.chatLeave(c.id).then(() => { msg.chatId = ''; refresh(); })); break; }
-    case 'assign-board': openAssignBoard(id); break;
-    case 'ask-customer': { const pr = state.projects.get(id); if (pr) askCustomer(pr); break; }
-    case 'member-add': { const p = state.projects.get(state.openProjectId), uid = $('#pt-member')?.value; if (p && uid) setMembers(p, [...memberIds(p), uid], `${state.users.get(uid)?.name} — в участниках проекта`); break; }
-    case 'member-del': { const p = state.projects.get(state.openProjectId); if (p) setMembers(p, memberIds(p).filter(x => x !== id), 'Убран из участников'); break; }
-    case 'member-add-tasks': { const p = state.projects.get(state.openProjectId); if (p) { const tasks = [...state.tasks.values()].filter(t => t.projectId === p.id); setMembers(p, [...memberIds(p), ...tasks.flatMap(t => [t.ownerId, ...(t.coOwnerIds || [])]).filter(x => x && state.users.has(x))], 'Участники добавлены'); } break; }
-    case 'new-project': setCreateMenu(false); openProject(null); break;
-    case 'open-contractor': openContractor(id); break;
-    case 'new-contractor': setCreateMenu(false); openContractor(null); break;
-    case 'goto-project':
-      if (state.win.compact) { api.setCompact(false); state.win.compact = false; }
-      state.tab = 'projects'; renderNow();
-      document.getElementById('p-' + id)?.scrollIntoView({ block: 'start' }); break;
-    case 'toggle-archive': state.showArchive = !state.showArchive; renderNow(); break;
-    case 'archive': setArchived(id, true); break;
-    case 'unarchive': setArchived(id, false); break;
-    case 'open-folder': openFolder(id); break;
-    case 'pick-folder': pickFolder(); break;
-    case 'dtab': setDrawerTab(id); break;
-    case 'request-close': requestClose(); break;
-    case 'discard': flushTaskDraft(); closeDrawer(); break;
-    case 'draft-restore': restoreTaskDraft(); break;
-    case 'smart-exec': epSet('exec', el.dataset.ref); execPickersRefresh(); smartDefaults(); scheduleTaskDraft({ target: el }); break;
-    case 'draft-drop': dropTaskDraft(draftKeyOf(state.drawer)); $('#confirm-slot').innerHTML = ''; break;
-    case 'save-close': $('#dform').requestSubmit(); break;
-    case 'save-stay': saveStay(); break;
-    case 'ask-delete': askDelete(); break;
-    case 'cancel-delete': $('#confirm-slot').innerHTML = ''; break;
-    case 'do-delete': el.disabled = true; doDelete(); break;
-    case 'quick': el.disabled = true; submitTask(el.dataset.q).finally(() => { el.disabled = false; }); break;
-    case 'ms-add': state.draft.milestones.push({ id: newId(), title: '', date: '', done: false }); renderMilestones(); $$('#ms-box [data-k="title"]').at(-1)?.focus(); break;
-    case 'ms-del': state.draft.milestones.splice(Number(el.dataset.i), 1); renderMilestones(); break;
-    case 'plan-add': state.draft.plan.push({ id: newId(), title: '', amount: 0, trigger: 'accepted' }); renderPlanRows(); renderPlanPreview(); break;
-    case 'plan-del': state.draft.plan.splice(Number(el.dataset.i), 1); renderPlanRows(); renderPlanPreview(); break;
-    case 'plan-tpl': applyPlanTemplate(el.dataset.tpl); break;
-    case 'add-payment': addPayment(); break;
-    case 'del-payment': delPayment(el.dataset.pid); break;
-    case 'open-trash': setFileMenu(false); openTrash(); break;
-    case 'restore': restoreItem(el.dataset.col, id); break;
-    case 'purge': purgeItem(el.dataset.col, id, el); break;
-    case 'do-import': el.disabled = true; doImport().finally(() => { el.disabled = false; }); break;
-    case 'seed-demo': el.disabled = true; seedDemo(); break;
-    case 'clear-demo': el.disabled = true; clearDemo(); break;
-    case 'copy': copy(el.dataset.value, el); break;
-    case 'open-data-folder': setFileMenu(false); api.openDataFolder(); break;
-    case 'toggle-pin': api.setAlwaysOnTop(!state.win.alwaysOnTop); break;
-    case 'toggle-compact': api.setCompact(!state.win.compact); break;
-    case 'ghost-on': api.setClickThrough(true); toast('Сквозные клики включены. Вернуть управление: Ctrl+Alt+G или кнопка вверху окна.'); break;
-    case 'ghost-off': api.setClickThrough(false); break;
-    case 'minimize': api.minimize(); break;
-    case 'toggle-max': api.setMaximized(!state.win.maximized); break;
-    case 'hide': api.hide(); break;
-  }
+  ACTIONS.get(act)?.({ e, el, id, act });
 });
 // Drag a card from one person's list onto another person of the same kind (staff → staff, outside → outside).
 let dragMove = null;

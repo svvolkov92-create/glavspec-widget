@@ -9,8 +9,12 @@ const root = path.join(__dirname, '..', '..');
 const from = path.join(root, 'src', 'renderer');
 const to = path.join(root, 'build', 'tauri-ui');
 
+// app.js is built from its parts (src/renderer/app/*.js); a stale app.js would ship old code.
+if (fs.readFileSync(path.join(from, 'app.js'), 'utf8') !== require(path.join(root, 'tools', 'build-app.js')).build()) {
+  throw new Error('src/renderer/app.js is not built from src/renderer/app/*.js — run: node tools/build-app.js');
+}
 fs.rmSync(to, { recursive: true, force: true });
-fs.cpSync(from, to, { recursive: true });
+fs.cpSync(from, to, { recursive: true, filter: src => src !== path.join(from, 'app') }); // the parts: already in app.js
 fs.copyFileSync(path.join(__dirname, 'tauri-windows.js'), path.join(to, 'tauri-windows.js'));
 fs.copyFileSync(path.join(__dirname, 'tauri-api.js'), path.join(to, 'tauri-api.js'));
 fs.copyFileSync(path.join(__dirname, 'tauri-core.js'), path.join(to, 'tauri-core.js'));
