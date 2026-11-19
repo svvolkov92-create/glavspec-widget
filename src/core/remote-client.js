@@ -50,9 +50,11 @@
   /* ---------- the person's part of the base ---------- */
   async function refresh() {
     const r = await request('GET', '/api/view');
+    // Not the answer of the server (a proxy page, an error): the copy here stays as it was.
+    if (!r || r instanceof Uint8Array || !r.data || typeof r.rev !== 'number') throw new NetError(r?.message || 'сервер ответил не так, как ждали');
     state.view = r.data; state.rev = r.rev; state.server = r.server || state.server;
     // Changes still waiting are shown on top of what came, so they do not «jump back» until sent.
-    for (const q of state.queue) if (q.fn === 'write') overlay(q.args[0]);
+    for (const q of state.queue) overlayCall(q.fn, q.args);
     persist();
     goneOnline();
     changed();
@@ -67,6 +69,15 @@
       else if (o.type === 'set') { const d = { ...JSON.parse(JSON.stringify(o.data || {})), id: o.id }; if (i >= 0) list[i] = d; else list.push(d); }
       else if (o.type === 'update' && i >= 0) list[i] = { ...list[i], ...JSON.parse(JSON.stringify(o.data || {})), id: o.id };
     }
+  }
+  // «Seen» marks waiting to be sent are shown at once too: otherwise the window, still seeing «new», asks again —
+  // without a connection that was a new item in the queue on every redraw.
+  function overlayCall(fn, args) {
+    if (fn === 'write') return overlay(args[0]);
+    const meId = state.view?.me?.id;
+    if (!meId || (fn !== 'taskSeen' && fn !== 'chatSeen')) return;
+    const d = (state.view[fn === 'taskSeen' ? 'tasks' : 'chats'] || []).find(x => x.id === args[0]);
+    if (d) d.seen = { ...(d.seen || {}), [meId]: new Date().toISOString() };
   }
   // What the person saw before the change, field by field: the server finds conflicts with it.
   function prevOf(ops) {
@@ -120,8 +131,9 @@
     }
   }
   function enqueue(fn, args) {
-    state.queue.push({ fn, args: JSON.parse(JSON.stringify(args)), at: new Date().toISOString() });
-    if (fn === 'write') overlay(args[0]);
+    const same = (fn === 'taskSeen' || fn === 'chatSeen') && state.queue.some(q => q.fn === fn && q.args[0] === args[0]);
+    if (!same) state.queue.push({ fn, args: JSON.parse(JSON.stringify(args)), at: new Date().toISOString() });
+    overlayCall(fn, args);
     persist();
     changed();
     deps.onQueued?.();
@@ -137,7 +149,11 @@
         const q = state.queue[0];
         let r;
         try { r = await rpc(q.fn, ...q.args); }
-        catch (e) { if (e instanceof NetError) { goneOffline(e.message); return; } r = { ok: false, message: e.message }; }
+        catch (e) {
+          if (e instanceof NetError) { goneOffline(e.message); return; }
+          if (e.auth) return; // signed out: the changes stay in the queue until the person signs in again
+          r = { ok: false, message: e.message };
+        }
         state.queue.shift();
         persist();
         if (r?.conflict) state.conflicts.push({ ops: q.args[0], meta: q.args[1], prev: q.args[2], list: r.conflict, at: q.at });
@@ -165,6 +181,9 @@
         if (!state.view || !state.online) await refresh();
         if (state.queue.length) await sendQueue();
         const r = await request('GET', `/api/wait?rev=${state.rev}`, undefined, { timeout: 40000 });
+        // Anything but the server's answer (a proxy page, an error) is waited out like no connection — never a
+        // refresh straight away, which would go round without a pause.
+        if (!r || typeof r.rev !== 'number') throw new NetError(r?.message || 'сервер ответил не так, как ждали');
         goneOnline();
         delay = 2000;
         if (r.rev !== state.rev) await refresh();

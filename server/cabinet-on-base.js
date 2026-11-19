@@ -7,7 +7,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-module.exports = function cabinetOnBase({ cfg, store, core, asUser, A, L, LIB, acc }) {
+module.exports = function cabinetOnBase({ cfg, store, core, asUser, inTurnAs, A, L, LIB, acc }) {
   const { createServer } = require('./cabinet-server.js');
   const { Cabinet, normalizeUrl, isLocalHost, KINDS } = require(path.join(LIB, 'cabinet.js'));
   const { pageModel } = require(path.join(LIB, 'report', 'customer.js'));
@@ -44,14 +44,19 @@ module.exports = function cabinetOnBase({ cfg, store, core, asUser, A, L, LIB, a
 
   // Contacts of customers (their logins, phones) — the GIP, or a chief the GIP gave «видит контакты заказчика».
   const contacts = u => A.isGip(u) || !!u?.canSeeContacts;
+  // The customer's page is the same whoever presses the button: it is built as the GIP sees the project. Built as a
+  // chief (who sees no money, not every card) it would differ — and the next sync would send it again, back and forth.
+  const gipId = () => Object.keys(acc.byUser).find(id => store.data.users[id]?.role === 'gip' && !store.data.users[id]?.deletedAt && !acc.byUser[id].disabled);
+  const asGip = fn => { const g = gipId(); return g && inTurnAs ? inTurnAs(g, fn) : fn(); };
+  const seesProject = id => core.userView().projects.some(p => p.id === String(id));
   const ALLOWED = {
     view: () => {
       const v = rules.view();
       return v.allowed ? { ...v, onServer: true, publicUrl: cfg.cabinetUrl || v.publicUrl } : v;
     },
-    sync: () => rules.sync({ quiet: true }),
-    publish: id => rules.publish(String(id)),
-    unpublish: id => rules.unpublish(String(id)),
+    sync: () => asGip(() => rules.sync({ quiet: true })),
+    publish: id => (seesProject(id) ? asGip(() => rules.publish(String(id))) : { ok: false, message: 'Проект не найден.' }),
+    unpublish: id => (seesProject(id) ? asGip(() => rules.unpublish(String(id))) : { ok: false, message: 'Проект не найден.' }),
     customers: () => rules.customers(),
     customerCreate: c => rules.customerCreate(c),
     customerUpdate: (id, patch) => rules.customerUpdate(id, patch),
@@ -62,12 +67,12 @@ module.exports = function cabinetOnBase({ cfg, store, core, asUser, A, L, LIB, a
   function call(me, fn, args) {
     const f = ALLOWED[fn];
     if (!f) return { ok: false, message: 'Эта настройка кабинета на сервере не нужна.' };
+    if (['sync', 'publish', 'unpublish'].includes(fn) && (!me.user || A.isSpecialist(me.user))) return { ok: false, message: 'Кабинетом заказчика управляют ГИП и главспецы.' };
     if (CONTACTS.has(fn) && !contacts(me.user)) return { ok: false, message: 'Заказчиков и их контакты видит ГИП (или тот, кому он открыл контакты).' };
     return f(...(args || []));
   }
 
   // Every two minutes, as the first GIP with a login: re-send changed projects, take new messages.
-  const gipId = () => Object.keys(acc.byUser).find(id => store.data.users[id]?.role === 'gip' && !store.data.users[id]?.deletedAt && !acc.byUser[id].disabled);
   const tick = () => { const g = gipId(); if (g) asUser(g, () => rules.sync({ quiet: true })).catch(e => console.error('Кабинет:', e.message)); };
   const timers = [setInterval(tick, 2 * 60e3), setTimeout(tick, 10e3)];
   for (const t of timers) t.unref?.();

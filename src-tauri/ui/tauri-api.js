@@ -46,7 +46,7 @@
   // 37: the window keeps a side of the screen; the strip is re-applied after a resize, a move or being shown.
   // One change at a time; a choice made meanwhile is applied right after (the last one wins).
   // Moves and resizes caused by the docking itself are ignored for a moment.
-  let docking = false, dockWant = null, dockQuietUntil = 0;
+  let docking = false, dockWant = null, dockQuietUntil = 0, dockRect = '';
   async function applyDock(edge) {
     dockWant = edge;
     if (docking) return;
@@ -60,16 +60,23 @@
       } catch (err) { console.error('Край экрана:', err); window.AppBridge?.toast(`Не удалось закрепить у края: ${err}`, true); }
     }
     dockQuietUntil = Date.now() + 600;
+    try { dockRect = JSON.stringify(await getBounds()); } catch { dockRect = ''; }
     docking = false;
   }
   const dockNow = () => (ctx && DOCKS.includes(ctx.settings.get('dock')) ? ctx.settings.get('dock') : 'off');
   let dockTimer = null;
-  const redock = () => { if (dockNow() === 'off' || docking || Date.now() < dockQuietUntil) return; clearTimeout(dockTimer); dockTimer = setTimeout(() => applyDock(dockNow()), 500); };
+  const redock = () => { if (dockNow() === 'off' || docking || Date.now() < dockQuietUntil) return; clearTimeout(dockTimer); dockTimer = setTimeout(async () => {
+    // The window is where the strip put it (a late event of the docking itself): nothing to do — no endless re-docking.
+    try { if (dockRect && JSON.stringify(await getBounds()) === dockRect) return; } catch { /* apply anyway */ }
+    applyDock(dockNow());
+  }, 500); };
   // 38: a monitor unplugged while Пульт runs — the window comes back to a connected one.
   async function keepOnScreen() {
     if (!ctx || dockNow() !== 'off' || !(await win.isVisible()) || (await win.isMaximized()) || (await win.isMinimized())) return;
     const b = await getBounds(), fit = await fitToDisplay(b, ctx.settings.get('compact') ? COMPACT_DEFAULT : FULL_DEFAULT);
-    if (fit.x !== b.x || fit.y !== b.y || fit.width !== b.width) await setBounds(fit);
+    // A pixel of rounding (scale 125 %, 150 %) is not «off the screen»: otherwise the window is moved every 15 s.
+    const off = (p, q) => Math.abs(p - q) > 2;
+    if (off(fit.x, b.x) || off(fit.y, b.y) || off(fit.width, b.width)) await setBounds(fit);
   }
   const LATER = 'В версии 4.0 этого нет.';
   const later = async () => ({ ok: false, message: LATER });

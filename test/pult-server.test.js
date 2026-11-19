@@ -201,8 +201,19 @@ test('pult server: the customer cabinet on the shared base', async () => {
     const v = await rpc(gip, 'cabinet', 'view');
     assert.ok(v.allowed && v.onServer && v.configured, JSON.stringify(v));
     assert.equal(v.publicUrl, 'https://kabinet.example.ru');
+    // A card of «Цех» that the chief does not see (another group): it is on the customer's page all the same.
+    await rpc(gip, 'write', [{ type: 'set', col: 'tasks', id: 't4', data: { projectId: 'p1', marks: ['ЭОМ'], title: 'ЭОМ', ownerId: 'u-other', status: 'todo', start: '2026-11-01', finish: '2026-12-20', history: [] } }], {});
     const pub = await rpc(gip, 'cabinet', 'publish', 'p1');
     assert.ok(pub.ok, JSON.stringify(pub));
+    // The page is the same whoever presses «Обновить»: a chief (no money, not every card) does not change it,
+    // and the next sync has nothing to send again.
+    const hash = () => app.cabinet.client.state.published.p1?.hash;
+    const h0 = hash();
+    assert.ok(h0);
+    assert.ok((await rpc(chief, 'cabinet', 'sync')).ok !== false);
+    assert.equal(hash(), h0, 'a chief\'s sync keeps the page built as the GIP sees it');
+    assert.ok((await rpc(chief, 'cabinet', 'publish', 'p1')).ok);
+    assert.equal(hash(), h0, 'a chief\'s publish too');
     // Customers and their contacts: the GIP; a chief only if the GIP opened contacts to them.
     const made = await rpc(gip, 'cabinet', 'customerCreate', { name: 'ООО Заказчик', login: 'zakazchik', projectIds: ['p1'] });
     assert.ok(made.ok && made.password, JSON.stringify(made));

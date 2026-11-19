@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const LIB = fs.existsSync(path.join(__dirname, 'lib')) ? path.join(__dirname, 'lib') : path.join(__dirname, '..', 'src');
 const SC = require(path.join(LIB, 'core', 'store-core.js'));
 const L = require(path.join(LIB, 'renderer', 'logic.js'));
@@ -80,15 +80,18 @@ function openBase(dir) {
   const raw = readJson(dataFile, null);
   const store = {
     data: raw ? SC.fromParsed(raw) : SC.emptyData(),
-    rev: 0,
+    // Starts from the clock, not 0: after a restart a Пульт's remembered number can never match by chance.
+    rev: Date.now(),
     snapshot() { return SC.snapshot(this.data); },
     apply(op) { SC.applyOp(this.data, op); this.save(); },
     applyAll(ops) { let n = 0; try { for (const op of ops) { SC.applyOp(this.data, op); n++; } } finally { if (n) this.save(); } },
     replaceAll(data) { this.data = data; this.save(); },
-    save() { this.rev++; dirty = true; clearTimeout(timer); timer = setTimeout(flush, 300); wake(); },
+    save() { this.rev++; dirty = true; if (!timer) timer = setTimeout(flush, 300); wake(); },
   };
   let dirty = false, timer = null;
+  // At most 0.3 s after the first unsaved change (a steady stream of changes must not postpone it).
   function flush() {
+    clearTimeout(timer); timer = null;
     if (!dirty) return;
     dirty = false;
     writeAtomic(dataFile, JSON.stringify({ version: 1, ...store.data }));
@@ -197,6 +200,13 @@ function createServer(cfgIn = {}) {
     return run;
   }
 
+  // Inside a request's turn: a part of it as another person (the customer page is always built as the GIP sees it).
+  async function inTurnAs(userId, fn) {
+    const was = actor;
+    actor = userId;
+    try { return await fn(); } finally { actor = was; }
+  }
+
   /* ----- who is asking ----- */
   const sessionDays = cfg.sessionDays;
   function whoIs(req) {
@@ -222,7 +232,9 @@ function createServer(cfgIn = {}) {
   const fails = new Map();
   const clientIp = req => (cfg.trustProxy ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '') || req.socket.remoteAddress || '';
   function tooMany(ip) { const f = fails.get(ip); return f && f.n >= 10 && Date.now() - f.at < 10 * 60e3; }
-  function failed(ip) { const f = fails.get(ip) || { n: 0, at: 0 }; if (Date.now() - f.at > 10 * 60e3) f.n = 0; f.n++; f.at = Date.now(); fails.set(ip, f); }
+  function failed(ip) {
+    if (fails.size > 10000) for (const [k, f] of fails) if (Date.now() - f.at > 10 * 60e3) fails.delete(k);
+    const f = fails.get(ip) || { n: 0, at: 0 }; if (Date.now() - f.at > 10 * 60e3) f.n = 0; f.n++; f.at = Date.now(); fails.set(ip, f); }
 
   const LOGIN_RE = /^[A-Za-z0-9._@-]{3,60}$/;
   const loginTaken = (login, except = '') => Object.entries(acc.byUser).some(([uid, a]) => uid !== except && a.login.toLowerCase() === String(login).toLowerCase());
@@ -389,7 +401,7 @@ function createServer(cfgIn = {}) {
   const projectVisible = (userId, pid) => viewOf(userId).projects.some(p => p.id === pid);
 
   /* ----- the customer cabinet on this base ----- */
-  const cabinet = cfg.cabinetPort ? require('./cabinet-on-base.js')({ cfg, store, core, asUser, A, L, LIB, attachDir, acc }) : null;
+  const cabinet = cfg.cabinetPort ? require('./cabinet-on-base.js')({ cfg, store, core, asUser, inTurnAs, A, L, LIB, attachDir, acc }) : null;
   RPC.cabinet = cabinet ? (me, fn, ...args) => cabinet.call(me, fn, args) : () => ({ ok: false, allowed: false, message: 'Кабинет заказчика на этом сервере не включён.' });
 
   /* ----- web client ----- */
@@ -429,7 +441,7 @@ function createServer(cfgIn = {}) {
         if (Object.keys(acc.byUser).length) return json(res, 409, { ok: false, message: 'Сервер уже настроен. Войдите своим логином.' });
         const ip = clientIp(req);
         if (tooMany(ip)) return json(res, 429, { ok: false, message: 'Слишком много попыток. Подождите 10 минут.' });
-        const b = JSON.parse((await readBody(req, 64 * 1024 * 1024)).toString('utf8'));
+        const b = JSON.parse((await readBody(req, 64 * 1024 * 1024)).toString('utf8')) || {};
         if (String(b.code || '').trim().toUpperCase() !== acc.setupCode) { failed(ip); return json(res, 403, { ok: false, message: 'Код установки неверный — он показан при установке сервера.' }); }
         const err = checkNewAccount(b.login, b.password);
         if (err) return json(res, 400, { ok: false, message: err });
@@ -449,7 +461,7 @@ function createServer(cfgIn = {}) {
       if (p === '/api/login' && req.method === 'POST') {
         const ip = clientIp(req);
         if (tooMany(ip)) return json(res, 429, { ok: false, message: 'Слишком много попыток входа. Подождите 10 минут.' });
-        const b = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8'));
+        const b = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) || {};
         const hit = Object.entries(acc.byUser).find(([, a]) => a.login.toLowerCase() === String(b.login || '').trim().toLowerCase());
         const ok = hit && hit[1].pw && !hit[1].disabled && checkPassword(b.password, hit[1].pw) && store.data.users[hit[0]] && !store.data.users[hit[0]].deletedAt;
         if (!ok) { failed(ip); return json(res, 401, { ok: false, message: hit?.[1]?.disabled ? 'Вход отключён ГИПом.' : 'Неверный логин или пароль.' }); }
@@ -461,7 +473,7 @@ function createServer(cfgIn = {}) {
       if (p === '/api/join' && req.method === 'POST') {
         const ip = clientIp(req);
         if (tooMany(ip)) return json(res, 429, { ok: false, message: 'Слишком много попыток. Подождите 10 минут.' });
-        const b = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8'));
+        const b = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) || {};
         const code = String(b.code || '').trim().toUpperCase();
         const inv = acc.invites[code];
         if (!inv || Date.parse(inv.until) < Date.now()) { failed(ip); return json(res, 403, { ok: false, message: 'Приглашение не найдено или истекло — попросите ГИПа прислать новое.' }); }
@@ -512,11 +524,18 @@ function createServer(cfgIn = {}) {
         return;
       }
       if (p === '/api/rpc' && req.method === 'POST') {
-        const b = JSON.parse((await readBody(req, 8 * 1024 * 1024)).toString('utf8'));
+        const b = JSON.parse((await readBody(req, 64 * 1024 * 1024)).toString('utf8')) || {};
         const fn = RPC[b.fn];
         if (!fn || !Object.prototype.hasOwnProperty.call(RPC, b.fn)) return json(res, 400, { ok: false, message: `Неизвестная команда: ${b.fn}` });
         const args = Array.isArray(b.args) ? b.args : [];
-        const r = await asUser(me.userId, () => fn(me, ...args));
+        let r;
+        try { r = await asUser(me.userId, () => fn(me, ...args)); }
+        catch (e) {
+          if (e.status === 401) throw e;
+          // A broken change is refused, not «server error»: a Пульт would keep it in its queue and retry forever.
+          console.error(`rpc ${b.fn}:`, e);
+          r = { ok: false, message: `Сервер не смог выполнить действие: ${e.message}` };
+        }
         return json(res, 200, { rev: store.rev, ...(r && typeof r === 'object' && !Array.isArray(r) ? r : { result: r }) });
       }
       // Upload: raw bytes, the name in X-File-Name (URI-encoded). X-File-Id: the id the file already has in the base
@@ -563,8 +582,12 @@ function createServer(cfgIn = {}) {
     try {
       if (!Object.keys(acc.byUser).length) return;
       const d = today();
-      if (d !== lastBackup && (new Date().getHours() >= 3 || !fs.existsSync(path.join(cfg.dataDir, 'backups', `data-${d}.json`)))) { backupNow(base, cfg.backupDays); lastBackup = d; }
-      core.purgeTrash && asUser(Object.keys(acc.byUser)[0], () => core.purgeTrash());
+      // Once a day after 03:00; today's copy is never overwritten (a restart in the afternoon keeps the night's state).
+      const has = fs.existsSync(path.join(cfg.dataDir, 'backups', `data-${d}.json`));
+      if (d !== lastBackup && !has && new Date().getHours() >= 3) { backupNow(base, cfg.backupDays); lastBackup = d; }
+      else if (has) lastBackup = d;
+      const gip = Object.keys(acc.byUser).find(id => store.data.users[id]?.role === 'gip' && !store.data.users[id]?.deletedAt);
+      if (gip) asUser(gip, () => core.purgeTrash()).catch(e => console.error('Корзина:', e.message));
     } catch (e) { console.error('Копия базы:', e); }
   };
   const timers = [setInterval(tick, 30 * 60e3), setTimeout(tick, 5e3)];

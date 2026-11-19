@@ -3,7 +3,7 @@
 // desktop can do (window levels, Windows folders, Word/Excel reports) says so instead of failing silently.
 (function () {
   'use strict';
-  const LS = { get: k => { try { return JSON.parse(localStorage.getItem('pult.' + k)); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem('pult.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
+  const LS = { get: k => { try { return JSON.parse(localStorage.getItem('pult.' + k)); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem('pult.' + k, JSON.stringify(v)); return true; } catch { return false; /* private mode, or full */ } } };
   const URL0 = location.origin;
   document.documentElement.classList.add('web');
   const phone = () => window.matchMedia('(max-width: 700px)').matches;
@@ -11,14 +11,19 @@
   /* ---------- signing in ---------- */
   let resolveReady;
   const readyP = new Promise(r => { resolveReady = r; });
-  let remote = null, me = null;
+  let remote = null, me = null, authShown = false;
   const dataListeners = [], cabListeners = [];
   function startRemote(token) {
     remote = window.createRemote({
       url: URL0, token,
-      storage: { load: () => LS.get('cache'), save: v => LS.set('cache', v) },
+      // A big base may not fit the browser's storage: then at least the changes waiting to be sent are kept.
+      // The copy belongs to the login it was taken with (another person signing in here does not get it).
+      storage: { load: () => { const c = LS.get('cache'); return c && c.login === LS.get('login') ? c : null; },
+        save: v => { const login = LS.get('login'); if (!LS.set('cache', { ...v, login })) LS.set('cache', { queue: v.queue, rev: 0, server: v.server, view: null, login }); } },
       onChanged: () => { const v = remote.view(); if (v) { me = v.me; for (const cb of dataListeners) cb(v); } },
-      onAuthLost: () => { LS.set('token', null); LS.set('cache', null); signInScreen('Сеанс закончился — войдите снова.'); },
+      // Once: later refusals (the window still calls) must not redraw the form the person is typing in.
+      // The cache stays: changes not sent yet go out after signing in again.
+      onAuthLost: () => { if (authShown) return; authShown = true; LS.set('token', null); signInScreen('Сеанс закончился — войдите снова.'); },
     });
     remote.start();
     const first = () => (remote.view() ? resolveReady() : setTimeout(first, 100));
