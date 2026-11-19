@@ -414,7 +414,7 @@ async function serverDialog(tab = '') {
         ${acc.accounts.map(a => `<tr${a.disabled ? ' class="off"' : ''}><td><b>${esc(a.name)}</b><br><span class="hint">${esc(A.ROLES[a.role]?.label || a.role)}</span></td>
           <td>${a.login ? esc(a.login) : '<span class="hint">нет</span>'}${a.disabled ? ' <span class="chip tone-bad">вход отключён</span>' : ''}</td>
           <td class="hint">${devs(a.devices.length)}${a.devices[0] ? `<br>${esc(a.devices.map(d => d.device || 'устройство').join(', ')).slice(0, 80)}` : ''}</td>
-          <td class="srv-acts">${a.invite ? `<span class="hint">код <b class="mono">${esc(a.invite.code)}</b> до ${fmtDate(a.invite.until.slice(0, 10))}</span> ` : ''}
+          <td class="srv-acts">${a.invite ? `<span class="hint sv-code">код <b class="mono">${esc(a.invite.code)}</b> до ${fmtDate(a.invite.until.slice(0, 10))}</span> ` : ''}
             ${a.userId === state.me?.id ? '<span class="hint">это вы</span>' : `${!a.login || a.invite ? `<button class="btn sm" type="button" data-sv="invite" data-id="${esc(a.userId)}">${a.invite ? 'Новый код' : 'Пригласить'}</button>` : `<button class="btn sm" type="button" data-sv="reset" data-id="${esc(a.userId)}">Сбросить пароль</button>`}
             ${a.login ? `<button class="btn ghostbtn sm" type="button" data-sv="${a.disabled ? 'enable' : 'disable'}" data-id="${esc(a.userId)}">${a.disabled ? 'Включить вход' : 'Отключить вход'}</button>` : ''}`}</td></tr>`).join('')}</tbody></table>
         <div class="srv-invite" id="sv-inv" hidden></div>` : ''}
@@ -456,6 +456,12 @@ async function serverDialog(tab = '') {
       const r = await api.serverCall(a === 'invite' ? 'inviteCreate' : 'accountReset', id);
       if (!r?.ok) return err(r?.message || 'Не получилось.');
       const u = state.users.get(id);
+      // The row shows the code that works now (the previous one is no longer valid).
+      const cell = b.closest('td');
+      const codeHtml = `<span class="hint sv-code">код <b class="mono">${esc(r.code)}</b> до ${fmtDate(r.until.slice(0, 10))}</span> `;
+      const old = cell.querySelector('.sv-code, .hint');
+      if (old && /код/.test(old.textContent)) old.outerHTML = codeHtml; else cell.insertAdjacentHTML('afterbegin', codeHtml);
+      if (a === 'invite') b.textContent = 'Новый код';
       const box = q('#sv-inv');
       const text = `${u?.name || ''}, вход в Пульт «Тандема»:\nадрес: ${info.url}\nкод приглашения: ${r.code} (действует до ${fmtDate(r.until.slice(0, 10))})\n${r.link ? `или откройте на телефоне: ${r.link}\n` : ''}В Пульте: меню → «Сервер Пульта» → «Подключиться», введите код и придумайте логин и пароль.`;
       box.hidden = false;
