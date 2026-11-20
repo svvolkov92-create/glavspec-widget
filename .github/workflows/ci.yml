@@ -7,45 +7,55 @@ on:
 
 jobs:
   windows-tests:
-    name: Tests on Windows
+    name: Unit tests on Windows
     runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unit tests
+        run: node --test "test/*.test.js"
+
+  window-checks:
+    name: Window checks (Tauri interface in Chromium) and smokes
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install Electron (same version as the installer)
-        run: npm install --no-save --no-package-lock electron@33.4.11
-      - name: Unit tests
-        run: node --test "test/*.test.js"
-      - name: Smoke tests (real app windows)
+      - name: Playwright
+        run: |
+          npm install --no-save --no-package-lock playwright@1.48.2
+          npx playwright install --with-deps chromium
+      - name: Prepare the interface
+        run: node src-tauri/ui/prepare-ui.js
+      - name: Window checks (with Rust stand-ins and a real Pult server)
+        run: node src-tauri/ui/check-ui.js
+      - name: Smoke tests (the whole interface, one profile each)
         id: smokes
         run: node test/run-smokes.js
       - name: Upload screenshots and logs
         if: always() && steps.smokes.outputs.out != ''
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-screenshots-windows
+          name: smoke-screenshots
           path: ${{ steps.smokes.outputs.out }}
           retention-days: 14
 
   package:
-    name: Build installer and server packages
+    name: Customer cabinet server package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Unit tests
-        run: node --test "test/*.test.js"
       - name: Build
-        run: bash build-win.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: PultGlavspeca-setup
-          path: dist/PultGlavspeca-setup.zip
+        run: bash server/build-cabinet.sh
       - uses: actions/upload-artifact@v4
         with:
           name: KabinetZakazchika-server

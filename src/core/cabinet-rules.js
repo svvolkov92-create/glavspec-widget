@@ -1,5 +1,5 @@
 'use strict';
-// The customer cabinet from the team's side, shared by the Electron main process and the Tauri window: what the
+// The customer cabinet from the team's side, shared by the Tauri window and the Сервер Пульта: what the
 // window sees, publishing projects, customers, the inbox (every two minutes), files attached to requests.
 // The HTTP client is src/cabinet.js; what differs between the two apps comes in `deps`:
 //   cabinet — the client;  keyStore.get() / set(key) — the team key, kept encrypted;

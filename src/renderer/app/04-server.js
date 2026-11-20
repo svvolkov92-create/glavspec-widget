@@ -7,6 +7,12 @@ async function remoteStatus() {
   renderRemote();
 }
 // The chip in the title bar: «на связи» / «нет связи · ждут отправки N»; conflicts open their dialog.
+// «4.10.0» is newer than «4.9.3»: compared part by part as numbers.
+function newerVersion(a, b) {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+}
 function renderRemote() {
   let chip = $('#srv-chip');
   const r = state.remote;
@@ -16,10 +22,20 @@ function renderRemote() {
     chip = $('#srv-chip');
   }
   const off = !r.online, wait = r.pending || 0;
+  // The web version is always as new as its server: an «outdated» answer means the page is old — load it again (once).
+  if (r.outdated?.who === 'pult' && r.web) {
+    let again = false;
+    try { again = sessionStorage.getItem('pult.reloaded') === '1'; sessionStorage.setItem('pult.reloaded', '1'); } catch { /* no storage */ }
+    if (!again) { location.reload(); return; }
+  } else if (r.web && r.online) { try { sessionStorage.removeItem('pult.reloaded'); } catch { /* no storage */ } }
+  const old = r.outdated ? (r.outdated.who === 'server' ? 'Сервер устарел' : 'Обновите Пульт') : '';
+  // 65: the GIP put a newer Пульт on the server — said once per version, then a word on the chip.
+  const upd = r.app && r.server?.pult && newerVersion(r.server.pult.version, r.app) ? r.server.pult.version : '';
+  if (upd && loadLocal('updToldFor', '') !== upd) { saveLocal('updToldFor', upd); toast(`Есть новый Пульт ${upd} — «Сервер» вверху → «Обновить»`); }
   chip.hidden = false;
-  chip.className = `srv-chip${r.authLost ? ' bad' : off ? ' off' : wait ? ' wait' : ''}`;
-  chip.innerHTML = `<i></i>${r.authLost ? 'Войдите заново' : off ? `Нет связи${wait ? ` · ждут отправки ${wait}` : ''}` : wait ? `Отправляю ${wait}…` : 'Сервер'}`;
-  chip.title = r.authLost ? r.authLost : off ? `Нет связи с сервером (${r.lastError || 'нет ответа'}). Работайте дальше: изменения отправятся сами, когда связь вернётся.` : `Общая база: ${r.url} · вы ${r.login}`;
+  chip.className = `srv-chip${r.authLost || old ? ' bad' : off ? ' off' : wait ? ' wait' : ''}`;
+  chip.innerHTML = `<i></i>${old ? `${old}${wait ? ` · ждут отправки ${wait}` : ''}` : r.authLost ? 'Войдите заново' : off ? `Нет связи${wait ? ` · ждут отправки ${wait}` : ''}` : wait ? `Отправляю ${wait}…` : upd ? 'Сервер · обновление' : 'Сервер'}`;
+  chip.title = old ? `${r.outdated.message} Изменения не потеряются: они ждут и уйдут после обновления.` : r.authLost ? r.authLost : off ? `Нет связи с сервером (${r.lastError || 'нет ответа'}). Работайте дальше: изменения отправятся сами, когда связь вернётся.` : `Общая база: ${r.url} · вы ${r.login}`;
   for (const f of r.failed || []) toast(`Не отправлено: ${f.message}`, true);
   const nConf = Array.isArray(r.conflicts) ? r.conflicts.length : r.conflicts;
   if (nConf && !document.querySelector('.conflict-modal')) conflictsDialog();
@@ -74,6 +90,7 @@ async function serverDialog(tab = '') {
   } else {
     let acc = null;
     if (gip) acc = await api.serverCall('accounts');
+    const upd = await api.updateInfo?.(); // 65: only the desktop Пульт updates itself (the web version is always new)
     const devs = n => (n ? `${n} ${plural(n, 'устройство', 'устройства', 'устройств')}` : 'не входил');
     html = `<h2 id="srv-t">Сервер Пульта</h2>
       <p>${info.online ? '<span class="chip tone-ok">на связи</span>' : `<span class="chip tone-warn">нет связи</span> <span class="hint">${esc(info.lastError || '')}</span>`} ${info.pending ? `<span class="chip tone-warn">ждут отправки: ${info.pending}</span>` : ''}</p>
@@ -87,6 +104,12 @@ async function serverDialog(tab = '') {
             ${a.userId === state.me?.id ? '<span class="hint">это вы</span>' : `${!a.login || a.invite ? `<button class="btn sm" type="button" data-sv="invite" data-id="${esc(a.userId)}">${a.invite ? 'Новый код' : 'Пригласить'}</button>` : `<button class="btn sm" type="button" data-sv="reset" data-id="${esc(a.userId)}">Сбросить пароль</button>`}
             ${a.login ? `<button class="btn ghostbtn sm" type="button" data-sv="${a.disabled ? 'enable' : 'disable'}" data-id="${esc(a.userId)}">${a.disabled ? 'Включить вход' : 'Отключить вход'}</button>` : ''}`}</td></tr>`).join('')}</tbody></table>
         <div class="srv-invite" id="sv-inv" hidden></div>` : ''}
+      ${upd ? `<h3>Обновление Пульта</h3>
+        <p>${upd.newer ? `<span class="chip tone-work">есть новая версия ${esc(upd.server.version)}</span> у вас ${esc(upd.app)} <button class="btn primary sm" type="button" data-sv="upd-run">Обновить</button>`
+          : `<span class="hint">У вас Пульт ${esc(upd.app)}${upd.server ? ` · на сервере ${esc(upd.server.version)}` : ''} — обновлять нечего.</span>`}</p>
+        <p class="hint">Пульт скачает установщик с сервера, проверит, что файл тот самый, и запустит его — нажмите в нём «Далее». Ваши данные не затрагиваются.</p>
+        ${upd.gip ? `<p class="hint">ГИП: скачайте с GitHub новый установщик (PultGlavspeca_…_x64-setup.exe) и положите его сюда — у всех появится «Обновить».</p>
+          <div class="row-in"><button class="btn sm" type="button" data-sv="upd-put">Положить новую версию на сервер…</button><span class="hint" id="sv-upd-st"></span></div>` : ''}` : ''}
       <h3>Мой вход</h3>
       <div class="row-in">${field('sv-old', 'Текущий пароль', 'password')}${field('sv-new', 'Новый пароль', 'password')}<button class="btn sm" type="button" data-sv="pw">Сменить пароль</button></div>
       <div class="err" id="sv-err" hidden></div>
@@ -148,6 +171,30 @@ async function serverDialog(tab = '') {
       const r = await api.serverCall('passwordChange', q('#sv-old').value, q('#sv-new').value);
       if (!r?.ok) return err(r?.message || 'Не получилось.', '#sv-old');
       toast('Пароль изменён'); q('#sv-old').value = ''; q('#sv-new').value = ''; return;
+    }
+    if (a === 'upd-run') {
+      if (!(await confirmBox('Обновить Пульт сейчас? Он закроется и запустится установщик новой версии. Несохранённые карточки сохраните заранее.', 'Обновить'))) return;
+      busy(b, true);
+      const r = await api.updateInstall(m => toast(m));
+      busy(b, false);
+      if (!r?.ok) return err(r?.message || 'Не получилось.');
+      return;
+    }
+    if (a === 'upd-put') {
+      const f = await api.updatePick();
+      if (!f) return;
+      // The version comes from the file name (PultGlavspeca_4.8.0_x64-setup.exe); asked only if the name has none.
+      const version = f.version || (await askText('Номер версии этого установщика', 'Версия', '4.8.0'))?.trim();
+      if (!version) return;
+      if (f.version && !(await confirmBox(`Положить на сервер Пульт ${version} (${f.name})? У всех, у кого Пульт старее, появится «Обновить».`, 'Положить'))) return;
+      if (!/^\d+\.\d+\.\d+$/.test(version)) return err('Номер версии — три числа через точку, например 4.8.0.');
+      busy(b, true);
+      q('#sv-upd-st').textContent = `Загружаю ${f.name}…`;
+      const r = await api.updateUpload(f.path, version);
+      busy(b, false);
+      q('#sv-upd-st').textContent = '';
+      if (!r?.ok) return err(r?.message || 'Не получилось.');
+      root.remove(); toast(`Пульт ${version} на сервере — у всех появится «Обновить»`); return serverDialog();
     }
     if (a === 'others') { const r = await api.serverCall('signOutOthers'); toast(r?.ok ? 'Другие устройства вышли' : (r?.message || 'Не получилось'), !r?.ok); return; }
     if (a === 'disconnect') {

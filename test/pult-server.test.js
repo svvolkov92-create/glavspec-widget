@@ -64,7 +64,24 @@ test('pult server: setup, invitations, rights, conflicts, live updates, files', 
     // Without a token — nothing.
     assert.equal((await s.call('GET', '/api/view')).status, 401);
 
+    // Versions of the exchange: an older Пульт is told to update (and writes nothing); the server says its own.
+    assert.equal((await s.call('GET', '/api/hello')).body.protocol, 1);
+    const old = await s.call('POST', '/api/rpc', { fn: 'write', args: [[]] }, gip, { 'X-Pult-Protocol': '0' });
+    assert.equal(old.status, 426);
+    assert.match(old.body.message, /обновите Пульт/);
+
+    // 65: the new Пульт on the server — only an .exe, only from the GIP; everyone gets version and SHA-256.
+    const exe = new Uint8Array(4096); exe[0] = 0x4d; exe[1] = 0x5a;
+    assert.equal((await s.call('POST', '/api/update', new Uint8Array(4096), gip, { 'X-Update-Version': '4.8.0' })).status, 400, 'not a Windows program');
+    assert.equal((await s.call('POST', '/api/update', exe, gip, { 'X-Update-Version': 'new' })).status, 400, 'a version is three numbers');
+    const put = await s.call('POST', '/api/update', exe, gip, { 'X-Update-Version': '4.8.0' });
+    assert.equal(put.status, 200, JSON.stringify(put.body));
+    assert.equal(put.body.update.sha256, require('node:crypto').createHash('sha256').update(exe).digest('hex'));
+    assert.equal((await s.call('GET', '/api/update/file', null, gip)).body.length, exe.length);
+
     const gv = (await s.call('GET', '/api/view', null, gip)).body;
+    assert.equal(gv.server.protocol, 1);
+    assert.equal(gv.server.pult.version, '4.8.0');
     assert.equal(gv.data.tasks.length, 3);
     assert.equal(gv.data.projects.find(p => p.id === 'p1').contract.no, '47-П', 'the GIP sees the contract');
 
@@ -78,6 +95,9 @@ test('pult server: setup, invitations, rights, conflicts, live updates, files', 
     assert.equal((await s.call('POST', '/api/join', { code: inv.code, login: 'orlov2', password: 'orlov-pass-1' })).status, 403, 'an invitation works once');
     const chief = (await s.call('POST', '/api/login', { login: 'ORLOV', password: 'orlov-pass-1' })).body.token;
     assert.ok(chief);
+    const exe2 = new Uint8Array(4096); exe2[0] = 0x4d; exe2[1] = 0x5a;
+    assert.equal((await s.call('POST', '/api/update', exe2, chief, { 'X-Update-Version': '9.9.9' })).status, 403, 'only the GIP puts a new Пульт');
+    assert.equal((await s.call('GET', '/api/update/file', null, chief)).body.length, 4096, 'everyone downloads it');
     const invS = await s.rpc(gip, 'inviteCreate', 'u-spec');
     const spec = (await s.call('POST', '/api/join', { code: invS.code, login: 'smirnova', password: 'smirnova-1' })).body.token;
     const invO = await s.rpc(gip, 'inviteCreate', 'u-other');

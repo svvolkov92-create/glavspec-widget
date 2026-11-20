@@ -288,6 +288,12 @@
     setTimeout(() => ctx.files.autoBackup(), 30 * 1000);
     setInterval(() => ctx.files.autoBackup(), 30 * 60 * 1000);
   }
+  // «4.10.0» newer than «4.9.3»: compared part by part as numbers.
+  const newerVersion = (a, b) => {
+    const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+    return false;
+  };
   const setting = async patch => { (await ready()).settings.set(patch); pushState(); };
 
   // A change is answered once the file is written: if saving failed, the window gets the error instead of «ok».
@@ -323,6 +329,44 @@
       if (!c.remote) return { ok: false, message: 'Пульт работает со своим файлом, а не с сервером.' };
       if (!['accounts', 'inviteCreate', 'accountDisable', 'accountReset', 'passwordChange', 'signOutOthers'].includes(fn)) return { ok: false, message: 'Неизвестная команда.' };
       return c.remote.call(fn, ...args);
+    },
+    // 65 «Обновление Пульта». Compares versions as numbers: 4.10.0 is newer than 4.9.3.
+    updateInfo: async () => {
+      const c = await ready();
+      const st = c.status ? c.status() : null, have = st?.app || '', srv = st?.server?.pult || null;
+      return { app: have, server: srv, newer: !!(srv && newerVersion(srv.version, have)), gip: window.Access.isGip(c.core.currentUser()) };
+    },
+    // The GIP puts the installer from GitHub on the server: chosen here, the version is read from its name.
+    updatePick: async () => {
+      const path = await invoke('dialog_open', { title: 'Установщик Пульта (PultGlavspeca_…_x64-setup.exe)', defaultPath: null, filters: [{ name: 'Установщик Windows', extensions: ['exe'] }], directory: false });
+      if (!path) return null;
+      const name = String(path).split(/[\\/]/).pop();
+      return { path, name, version: (/(\d+\.\d+\.\d+)/.exec(name) || [])[1] || '' };
+    },
+    updateUpload: async (path, version) => {
+      const c = await ready();
+      if (!c.remote) return { ok: false, message: 'Пульт работает со своим файлом, а не с сервером.' };
+      try {
+        const bytes = new Uint8Array(window.Buffer.from(await invoke('fs_read', { path }), 'base64'));
+        return await c.remote.uploadUpdate(version, bytes);
+      } catch (e) { return { ok: false, message: e.message || String(e) }; }
+    },
+    // Downloads the installer, checks it by its SHA-256 (the file is exactly the one the GIP put), starts it; the
+    // program closes so the installer can replace it.
+    updateInstall: async progress => {
+      const c = await ready();
+      const srv = c.status?.()?.server?.pult;
+      if (!c.remote || !srv) return { ok: false, message: 'Обновления на сервере нет.' };
+      try {
+        progress?.('Скачиваю обновление…');
+        const bytes = await c.remote.downloadUpdate();
+        const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
+        if (hash !== srv.sha256) return { ok: false, message: 'Скачанный файл не совпал с тем, что положил ГИП (повреждён при загрузке). Попробуйте ещё раз.' };
+        progress?.('Запускаю установщик…');
+        await c.flush?.();
+        await invoke('update_run', { version: srv.version, base64: window.Buffer.from(bytes).toString('base64') });
+        return { ok: true };
+      } catch (e) { return { ok: false, message: e.message || String(e) }; }
     },
     serverResolve: async (i, keepMine) => { const c = await ready(); return c.remote ? c.remote.resolve(i, keepMine) : { ok: false }; },
     onData: cb => { dataListeners.push(cb); return () => dataListeners.splice(dataListeners.indexOf(cb), 1); },

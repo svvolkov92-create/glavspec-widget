@@ -1,7 +1,7 @@
 'use strict';
-// Business rules of the main process that do not depend on Electron: who the current user is, what they see,
-// checked writes with bookkeeping and the journal, comments, the trash. Shared by src/main.js (Electron) and
-// the Tauri window. `store`, `journal` and `settings` are the same small interfaces in both:
+// Business rules: who the current user is, what they see, checked writes with bookkeeping and the journal,
+// comments, the trash. Shared by the Tauri window and the Сервер Пульта (which runs them for each person).
+// `store`, `journal` and `settings` are the same small interfaces in both:
 //   store.data / snapshot() / apply(op) / applyAll(ops)   journal.append(entries, meta) / read({ since })
 //   settings.get(key) / set(patch)                        changed({ user }) — data (or the user) changed, refresh views
 (function (root, factory) {

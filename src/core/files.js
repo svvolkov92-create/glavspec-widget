@@ -1,8 +1,8 @@
 'use strict';
-// Work with files that the rules decide on, shared by the Electron main process and the Tauri window:
+// Work with files that the rules decide on, shared by the Tauri window and the Сервер Пульта:
 // reports (Excel / Word), the customer page (HTML / PDF), the composition of the project documentation,
 // backups and their restore, the automatic copy, import from a table, opening folders, contacting a contractor.
-// Everything that touches Windows goes through `io` (Electron: fs/dialog/shell; Tauri: Rust commands):
+// Everything that touches Windows goes through `io` (Tauri: Rust commands):
 //   io.saveDialog({ title, defaultPath, filters }) → path | null      io.openDialog({ title, defaultPath, filters, directory }) → path | null
 //   io.confirm({ title, message, detail, ok }) → bool                 io.writeFile(path, bytes | string)   io.readFile(path) → bytes
 //   io.exists(path) io.mkdir(path) io.copyFile(from, to) io.listDir(dir) → names  io.remove(path)

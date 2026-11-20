@@ -1,5 +1,5 @@
 'use strict';
-// Messenger rules shared by the Electron main process and the Tauri window: project, personal and group chats,
+// Messenger rules shared by the Tauri window and the Сервер Пульта: project, personal and group chats,
 // @mentions, sending and correcting messages, membership, sample chats. Only these functions write the chats
 // collection (generic writes to it are refused by the access rules).
 (function (root, factory) {

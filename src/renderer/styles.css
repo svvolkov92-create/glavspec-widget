@@ -1689,7 +1689,19 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .org-people { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px }
 .org-people .pt-member.me b, .org-people .pt-member.me { color: var(--accent-text, var(--accent)) }
 .org-modal { width: min(560px, 94vw) }
-.org-mem .chk-row { max-height: 200px; overflow: auto }
+/* A list of people to tick: one line each — box, name, where they are now (grey, cut with «…»). */
+.pick-tools { display: flex; align-items: center; gap: 12px; margin: 2px 0 6px }
+.pick-tools input[type="search"] { flex: 1 }
+.pick-tools .chk { white-space: nowrap }
+.pick-list { max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface) }
+.pick-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px; color: var(--ink); min-width: 0 }
+.pick-row:last-of-type { border-bottom: 0 }
+.pick-row:hover { background: var(--hover, rgba(0, 0, 0, .04)) }
+.pick-row[hidden] { display: none }
+:root .pick-list .pick-row input[type="checkbox"] { width: 16px; height: 16px; min-width: 16px; flex: none; margin: 0; padding: 0; accent-color: var(--accent) }
+.pick-name { white-space: nowrap; font-weight: 500 }
+.pick-now { margin-left: auto; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.pick-none { padding: 8px 10px; margin: 0 }
 /* 4.1.1 (item 45): the field a stopped save is about */
 .field-bad { outline: 2px solid var(--bad) !important; outline-offset: 1px; background: color-mix(in srgb, var(--bad) 6%, var(--surface)) !important }
 @media (prefers-reduced-motion: no-preference) { .field-bad { animation: field-bad 0.5s ease 2 } }
@@ -1908,3 +1920,7 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 .srv-invite textarea { width: 100%; font: 12.5px/1.4 var(--f-mono, monospace); margin: 6px 0 }
 .srv-invite .big { font-size: 18px; letter-spacing: .08em }
 .conflict-modal .modal { width: min(760px, calc(100vw - 32px)) }
+
+/* Own comment / message not sent yet (no connection to the server): grey until it goes out. */
+.msg-item.pending, .chat-msg.pending { opacity: .6 }
+.pending-t { font-style: italic }

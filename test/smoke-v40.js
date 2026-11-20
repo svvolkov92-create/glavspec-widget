@@ -105,7 +105,8 @@ app.on('browser-window-created', (_e, win) => {
         for (const id of ids) { await open(id); await wait(200); }
         const tabs = await js(`[...document.querySelectorAll('.doc-tabs .dtab[data-doc]')].map(t => t.dataset.docId).join()`);
         check('two tabs, the last one shown', tabs === ids.join() && (await js(`window.AppBridge.state.openProjectId`)) === ids[1], tabs);
-        check('no ⧉ where windows cannot be opened', !(await js(`!!document.querySelector('[data-act="win-detach"]')`)));
+        // Tauri opens projects and chats in separate windows: ⧉ is there (Electron had none).
+        check('⧉ to open a tab in its own window', await js(`!!document.querySelector('[data-act="win-detach"]')`));
         await click('.doc-tabs .dtab.home'); await wait(200);
         check('«Все проекты» shows the list, tabs stay', (await js(`window.AppBridge.state.openProjectId`)) === null && (await js(`document.querySelectorAll('.doc-tabs .dtab[data-doc]').length`)) === 2);
         await click(`.dtab[data-doc-id="${ids[0]}"] .dt-open`); await wait(200);

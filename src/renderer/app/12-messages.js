@@ -181,7 +181,7 @@ function msgChatHtml(c) {
     day = d;
     const out = m.userId === me, tome = (m.mentions || []).includes(me), fresh = !out && m.ts > seen;
     const editing = out && msg.edit?.mid === m.id;
-    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${tome ? ' tome' : ''}${fresh ? ' fresh' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(m.user)}</b> <span class="hint">${lt.slice(11, 16)}${m.editedAt ? ' · изменено' : ''}</span>${tome ? ' <span class="chip tone-work">вас упомянули</span>' : ''}${out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(m.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
+    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${tome ? ' tome' : ''}${fresh ? ' fresh' : ''}${m.pending ? ' pending' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(m.user)}</b> <span class="hint">${lt.slice(11, 16)}${m.editedAt ? ' · изменено' : ''}</span>${tome ? ' <span class="chip tone-work">вас упомянули</span>' : ''}${m.pending ? ' <span class="hint pending-t">ждёт отправки</span>' : out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(m.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
       ? `<div class="msg-edit"><textarea id="mc-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(msg.edit.text)}</textarea><div class="row-in"><button class="btn primary sm" type="button" data-act="mc-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="mc-edit-cancel">Отмена</button></div></div>`
       : `<div class="chat-text">${msgText(m.text, c)}</div>`}</div>`;
   }).join('');
@@ -204,7 +204,7 @@ function msgTaskHtml(t) {
     const lt = localTs(c.ts), d = lt.slice(0, 10), sep = d !== day ? `<div class="mc-day">${d === state.today ? 'Сегодня' : fmtDate(d)}</div>` : '';
     day = d;
     const out = c.userId === me, editing = out && msg.edit?.mid === c.id;
-    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${c.kind === 'submit' ? ' submit' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(c.user || '—')}</b> <span class="hint">${lt.slice(11, 16)}${c.editedAt ? ' · изменено' : ''}</span>${c.kind === 'submit' ? ' <span class="chip tone-review">сдал на проверку</span>' : ''}${out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
+    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${c.kind === 'submit' ? ' submit' : ''}${c.pending ? ' pending' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(c.user || '—')}</b> <span class="hint">${lt.slice(11, 16)}${c.editedAt ? ' · изменено' : ''}</span>${c.kind === 'submit' ? ' <span class="chip tone-review">сдал на проверку</span>' : ''}${c.pending ? ' <span class="hint pending-t">ждёт отправки</span>' : out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
       ? `<div class="msg-edit"><textarea id="mc-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(msg.edit.text)}</textarea><div class="row-in"><button class="btn primary sm" type="button" data-act="mc-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="mc-edit-cancel">Отмена</button></div></div>`
       : `<div class="chat-text">${cardLinks(esc(c.text))}</div>`}${thankBtn(t, c)}</div>`;
   }).join('');

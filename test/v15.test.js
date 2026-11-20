@@ -2,14 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 const C = require('../src/renderer/calendar.js');
 const L = require('../src/renderer/logic.js');
 const M = require('../src/renderer/messages.js');
 const { contactUrl, phoneDigits, telegramUser } = require('../src/contact.js');
-const { Store, StoreError } = require('../src/store.js');
 
 test('production calendar: 247 working days in 2025–2027 per the decrees', () => {
   for (const y of [2025, 2026, 2027]) {
@@ -99,15 +95,4 @@ test('contact links are built only from stored contacts', () => {
   assert.equal(contactUrl({ email: 'bad?x@y.ru' }, 'mail'), null);
   assert.equal(contactUrl({}, 'whatsapp'), null);
   assert.equal(contactUrl(c, 'sms'), null);
-});
-
-test('store.replaceAll restores a backup, skipping invalid ids', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'restore-'));
-  const s = new Store(dir);
-  s.apply({ type: 'set', col: 'projects', id: 'old', data: { name: 'Старый' } });
-  const n = s.replaceAll({ projects: { p1: { name: 'Новый', id: 'evil' } }, tasks: { 't1': { status: 'done' }, '../x': { status: 'done' } } });
-  assert.equal(n, 2);
-  assert.deepEqual(new Store(dir).snapshot().projects, [{ id: 'p1', name: 'Новый' }]);
-  assert.throws(() => s.replaceAll([1, 2]), StoreError);
-  assert.throws(() => s.replaceAll({ tasks: 'x' }), StoreError);
 });

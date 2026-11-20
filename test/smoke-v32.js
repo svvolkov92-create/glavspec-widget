@@ -59,7 +59,7 @@ app.on('browser-window-created', (_e, win) => {
         await js(`document.querySelector('form.modal').requestSubmit()`); await wait(1000);
         check('dialog closed after success', !(await js(`!!document.querySelector('#c-url')`)));
         const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'));
-        check('settings saved, key not in plain JSON when encryption exists', st.cabinetUrl === base && !!st.cabinetKey && (st.cabinetKey.startsWith('enc:') || st.cabinetKey.startsWith('plain:')), st.cabinetKey.slice(0, 6));
+        check('settings saved, key not in plain JSON when encryption exists', st.cabinetUrl === base && !!st.cabinetKey && (st.cabinetKey.startsWith('dpapi:') || st.cabinetKey.startsWith('enc:') || st.cabinetKey.startsWith('plain:')), st.cabinetKey.slice(0, 6));
         check('window never gets the key', !(await js(`JSON.stringify(window.api.cabinetGet ? 1 : 0)`)).includes(srv.teamKey()) && !JSON.stringify(await js(`window.api.cabinetGet()`)).includes(srv.teamKey()));
         check('connected: publish button', /Сохранить и опубликовать/.test(await text('#cab-box')));
       });

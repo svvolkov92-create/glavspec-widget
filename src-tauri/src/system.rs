@@ -155,3 +155,25 @@ pub fn open_data_folder(files: State<Files>) -> Result<(), String> {
 pub fn app_quit(app: AppHandle) {
     app.exit(0);
 }
+
+// 65 «Обновить»: the installer downloaded from the Сервер Пульта (the window has checked its SHA-256) goes to the
+// data folder (updates\) and starts; the program quits so the installer can replace its files.
+#[tauri::command]
+pub fn update_run(app: AppHandle, files: State<Files>, version: String, base64: String) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    if version.is_empty() || version.len() > 20 || !version.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return Err("Неверный номер версии.".into());
+    }
+    let bytes = STANDARD.decode(base64).map_err(|e| e.to_string())?;
+    // A Windows program starts with «MZ»: anything else is not started.
+    if bytes.len() < 1024 || &bytes[..2] != b"MZ" {
+        return Err("Это не установщик Windows.".into());
+    }
+    let dir = files.dir.join("updates");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("PultGlavspeca_{version}_x64-setup.exe"));
+    std::fs::write(&path, &bytes).map_err(|e| format!("Не удалось сохранить установщик: {e}"))?;
+    std::process::Command::new(&path).spawn().map_err(|e| format!("Установщик не запустился: {e}"))?;
+    app.exit(0);
+    Ok(())
+}

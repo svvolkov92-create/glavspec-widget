@@ -13,7 +13,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.0.1';
+const VERSION = '1.1.0';
+// The version of the exchange with Пульты (src/core/remote-client.js: PROTOCOL). MIN_CLIENT — the oldest one this
+// server still accepts: raise it when old Пульты would write something the server no longer understands.
+const PROTOCOL = 1, MIN_CLIENT = 1;
+const UPDATE_MAX = 300 * 1024 * 1024;
 const LIB = fs.existsSync(path.join(__dirname, 'lib')) ? path.join(__dirname, 'lib') : path.join(__dirname, '..', 'src');
 const SC = require(path.join(LIB, 'core', 'store-core.js'));
 const L = require(path.join(LIB, 'renderer', 'logic.js'));
@@ -158,7 +162,7 @@ function cors(req, res, cfg) {
   if (ALLOWED_ORIGINS.has(o) || (cfg.publicUrl && o === new URL(cfg.publicUrl).origin) || cfg.devOrigins?.includes(o)) {
     res.setHeader('Access-Control-Allow-Origin', o);
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-File-Name, X-File-Type, X-File-Id');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-File-Name, X-File-Type, X-File-Id, X-Pult-Protocol, X-Update-Version');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '600');
   }
@@ -205,6 +209,15 @@ function createServer(cfgIn = {}) {
     const was = actor;
     actor = userId;
     try { return await fn(); } finally { actor = was; }
+  }
+
+  // 65: the Пульт installer the GIP put on the server (version, size, SHA-256 — the Пульт checks the file by it).
+  const updDir = path.join(cfg.dataDir, 'updates');
+  function pultUpdate() {
+    try {
+      const i = readJson(path.join(updDir, 'pult.json'), null);
+      return i && fs.existsSync(path.join(updDir, i.file)) ? { version: i.version, size: i.size, sha256: i.sha256, at: i.at } : null;
+    } catch { return null; }
   }
 
   /* ----- who is asking ----- */
@@ -434,7 +447,11 @@ function createServer(cfgIn = {}) {
     if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
     try {
       if (p === '/healthz') return json(res, 200, { ok: true, version: VERSION });
-      if (p === '/api/hello') return json(res, 200, { ok: true, name: cfg.name, version: VERSION, setup: !Object.keys(acc.byUser).length, cabinetUrl: cfg.cabinetUrl || '' });
+      // An old Пульт (no header — the first version of the exchange) is told to update instead of writing.
+      if (p.startsWith('/api/') && p !== '/api/hello' && Number(req.headers['x-pult-protocol'] ?? 1) < MIN_CLIENT) {
+        return json(res, 426, { ok: false, outdated: true, message: `Пульт устарел для сервера ${VERSION} — обновите Пульт.` });
+      }
+      if (p === '/api/hello') return json(res, 200, { ok: true, name: cfg.name, version: VERSION, protocol: PROTOCOL, minProtocol: MIN_CLIENT, setup: !Object.keys(acc.byUser).length, cabinetUrl: cfg.cabinetUrl || '' });
 
       /* --- first start: the GIP moves the base from their Пульт (code from the installation) --- */
       if (p === '/api/setup' && req.method === 'POST') {
@@ -510,7 +527,33 @@ function createServer(cfgIn = {}) {
 
       if (p === '/api/view') {
         const data = await asUser(me.userId, () => core.userView());
-        return json(res, 200, { ok: true, rev: store.rev, data, server: { name: cfg.name, version: VERSION, cabinetUrl: cfg.cabinetUrl || '' } });
+        return json(res, 200, { ok: true, rev: store.rev, data, server: { name: cfg.name, version: VERSION, protocol: PROTOCOL, cabinetUrl: cfg.cabinetUrl || '', pult: pultUpdate() } });
+      }
+
+      /* --- 65: the new Пульт for Windows, put here by the GIP; every Пульт offers «Обновить» --- */
+      if (p === '/api/update' && req.method === 'POST') {
+        if (!A.isGip(store.data.users[me.userId])) return json(res, 403, { ok: false, message: 'Обновление Пульта кладёт на сервер ГИП.' });
+        const version = String(req.headers['x-update-version'] || '').trim();
+        if (!/^\d{1,3}\.\d{1,3}\.\d{1,4}$/.test(version)) return json(res, 400, { ok: false, message: 'Укажите номер версии вида 4.8.0.' });
+        const bytes = await readBody(req, UPDATE_MAX + 1024);
+        if (bytes.length > UPDATE_MAX) return json(res, 413, { ok: false, message: 'Файл больше 300 МБ — это не установщик Пульта.' });
+        // A Windows program starts with «MZ»: a wrong file (a zip, the portable folder) is refused here, not on every computer.
+        if (bytes.length < 1024 || bytes[0] !== 0x4d || bytes[1] !== 0x5a) return json(res, 400, { ok: false, message: 'Это не установщик Windows (нужен PultGlavspeca_…_x64-setup.exe).' });
+        fs.mkdirSync(updDir, { recursive: true });
+        const file = `pult-${version}.exe`;
+        fs.writeFileSync(path.join(updDir, file + '.tmp'), bytes);
+        fs.renameSync(path.join(updDir, file + '.tmp'), path.join(updDir, file));
+        const info = { version, file, size: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), at: new Date().toISOString(), by: me.userId };
+        writeAtomic(path.join(updDir, 'pult.json'), JSON.stringify(info, null, 1));
+        for (const f of fs.readdirSync(updDir)) if (/^pult-.*\.exe$/.test(f) && f !== file) fs.rmSync(path.join(updDir, f), { force: true });
+        store.save(); // every connected Пульт takes a fresh copy — and sees the update
+        return json(res, 200, { ok: true, update: pultUpdate() });
+      }
+      if (p === '/api/update/file') {
+        const info = readJson(path.join(updDir, 'pult.json'), null);
+        const f = info && path.join(updDir, info.file);
+        if (!f || !fs.existsSync(f)) return json(res, 404, { ok: false, message: 'Обновления на сервере нет.' });
+        return send(res, 200, fs.readFileSync(f), 'application/octet-stream', { 'Content-Disposition': `attachment; filename="PultGlavspeca_${info.version}_x64-setup.exe"` });
       }
       // Live updates: answers when the base changes (or after 25 s with the same number).
       if (p === '/api/wait') {
@@ -595,7 +638,7 @@ function createServer(cfgIn = {}) {
   return { server, cfg, base, store, acc, core, cabinet, close: () => { for (const t of timers) clearInterval(t); base.flush(); cabinet?.stop(); } };
 }
 
-module.exports = { createServer, loadConfig, hashPassword, checkPassword, VERSION };
+module.exports = { createServer, loadConfig, hashPassword, checkPassword, VERSION, PROTOCOL, MIN_CLIENT };
 
 if (require.main === module) {
   const app = createServer();

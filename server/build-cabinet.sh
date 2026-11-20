@@ -1,30 +1,10 @@
 #!/usr/bin/env bash
-# Builds the Windows installer package: the app plus a PowerShell script that downloads
-# the official Electron runtime from GitHub, verifies its SHA-256 and installs per-user.
+# Builds dist/KabinetZakazchika-server.zip: the standalone customer cabinet server (the Pult server has its own inside).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/dist"
-INST="$OUT/PultGlavspeca-setup"
-
-rm -rf "$INST" "$OUT/PultGlavspeca-setup.zip"
-mkdir -p "$INST/app"
-cp -r "$ROOT/package.json" "$ROOT/src" "$ROOT/assets" "$INST/app/"
-mkdir -p "$INST/app/server" && cp "$ROOT/server/cabinet-server.js" "$INST/app/server/"   # «кабинет на этом компьютере»
-printf '\xEF\xBB\xBF' > "$INST/install.ps1"           # BOM: Windows PowerShell 5.1 reads Cyrillic correctly only with it
-sed 's/$/\r/' "$ROOT/installer/install.ps1" >> "$INST/install.ps1"
-sed 's/$/\r/' "$ROOT/installer/install.cmd" > "$INST/Установить.cmd"
-sed 's/$/\r/' "$ROOT/README-win.txt" > "$INST/ПРОЧТИ.txt"
-
-(cd "$OUT" && python3 - <<'EOF'
-import os, zipfile
-with zipfile.ZipFile('PultGlavspeca-setup.zip', 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-    for base, _, files in os.walk('PultGlavspeca-setup'):
-        for f in files:
-            z.write(os.path.join(base, f))
-EOF
-)
-echo "Built: $OUT/PultGlavspeca-setup.zip"
+mkdir -p "$OUT"
 
 # Customer cabinet server: the server script, the shared code it renders with, start scripts and the guide.
 SRV="$OUT/KabinetZakazchika-server"

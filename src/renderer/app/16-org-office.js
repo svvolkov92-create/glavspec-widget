@@ -61,12 +61,35 @@ function askDept(dept = null, parentId = '') {
     <div class="f"><label class="req" for="org-name">Название</label><input id="org-name" maxlength="120" value="${esc(d.name)}" placeholder="Отдел инженерных систем"></div>
     <div class="f"><label for="org-head">Руководитель</label><select id="org-head"><option value="">— не назначен —</option>${staff.map(u => `<option value="${esc(u.id)}"${u.id === d.headId ? ' selected' : ''}>${esc(u.name)} · ${esc(A.ROLES[u.role]?.label || '')}</option>`).join('')}</select></div>
     <div class="f"><label for="org-parent">Входит в</label><select id="org-parent"><option value="">— верхний уровень —</option>${others.map(x => `<option value="${esc(x.id)}"${x.id === d.parentId ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
-    <fieldset class="f org-mem"><legend>Сотрудники отдела</legend><div class="chk-row">${staff.map(u => `<label class="chk"><input type="checkbox" value="${esc(u.id)}"${members.has(u.id) ? ' checked' : ''}> ${esc(u.name)}${u.deptId && u.deptId !== d.id && state.depts.get(u.deptId) ? ` <span class="hint">(сейчас: ${esc(state.depts.get(u.deptId).name)})</span>` : ''}</label>`).join('')}</div></fieldset>
+    <fieldset class="f org-mem"><legend>Сотрудники отдела <span class="hint" id="org-cnt"></span></legend>
+      <div class="pick-tools"><input type="search" id="org-find" placeholder="Найти по фамилии" aria-label="Найти сотрудника"><label class="chk"><input type="checkbox" id="org-free"> только без отдела</label></div>
+      <div class="pick-list">${staff.sort((a, b) => members.has(b.id) - members.has(a.id)).map(u => {
+        // Where the person is now: one grey line on the right, cut with «…» (whole — in the tooltip).
+        const now = u.deptId && u.deptId !== d.id ? state.depts.get(u.deptId)?.name : '';
+        return `<label class="pick-row" data-name="${esc(u.name.toLowerCase())}" data-free="${u.deptId && state.depts.get(u.deptId) ? '0' : '1'}"><input type="checkbox" value="${esc(u.id)}"${members.has(u.id) ? ' checked' : ''}><span class="pick-name">${esc(u.name)}</span>${now ? `<span class="pick-now" title="Сейчас: ${esc(now)}">сейчас: ${esc(now)}</span>` : ''}</label>`;
+      }).join('')}<p class="hint pick-none" hidden>Никого не найдено.</p></div></fieldset>
     <div class="err" id="org-err" hidden></div>
     <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${dept ? '<button class="btn danger" type="button" data-m="del">Удалить отдел</button>' : ''}</div></form>`;
   document.body.append(root);
   const q = sel => root.querySelector(sel), close = () => root.remove();
   q('#org-name').focus();
+  // The list: search by surname, «только без отдела», how many are chosen.
+  const pickList = () => {
+    const find = q('#org-find').value.trim().toLowerCase(), free = q('#org-free').checked;
+    let shown = 0;
+    for (const r of root.querySelectorAll('.pick-row')) {
+      const on = r.querySelector('input').checked;
+      r.hidden = !on && ((find && !r.dataset.name.includes(find)) || (free && r.dataset.free !== '1'));
+      if (!r.hidden) shown++;
+    }
+    q('.pick-none').hidden = shown > 0;
+    const n = root.querySelectorAll('.pick-list input:checked').length;
+    q('#org-cnt').textContent = n ? `· выбрано ${n}` : '';
+  };
+  pickList();
+  q('#org-find').addEventListener('input', pickList);
+  q('#org-free').addEventListener('change', pickList);
+  q('.pick-list').addEventListener('change', pickList);
   root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.addEventListener('click', async e => {
     if (e.target === root || e.target.dataset.m === 'cancel') close();
@@ -86,7 +109,7 @@ function askDept(dept = null, parentId = '') {
     // No loops: the parent may not be inside this department.
     for (let x = parent; x; x = state.depts.get(x)?.parentId) if (x === d.id) return err('Отдел не может входить сам в себя или в свой подотдел.', '#org-parent');
     const id = dept?.id || newId();
-    const chosen = new Set([...root.querySelectorAll('.org-mem input:checked')].map(i => i.value));
+    const chosen = new Set([...root.querySelectorAll('.pick-list input:checked')].map(i => i.value));
     if (headId) chosen.add(headId);
     const ops = [dept ? op.update('depts', id, { name, headId, parentId: parent }) : op.set('depts', id, { name, headId, parentId: parent, createdAt: new Date().toISOString() }),
       ...staff.filter(u => chosen.has(u.id) && u.deptId !== id).map(u => op.update('users', u.id, { deptId: id })),

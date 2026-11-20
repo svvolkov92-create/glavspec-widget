@@ -87,7 +87,7 @@
   const C = (fn, ...a) => readyP.then(() => remote.call(fn, ...a));
 
   const known = {
-    getData: async () => { await readyP; return { data: remote.view(), warning: null, remote: { ...remote.status(), login: LS.get('login') } }; },
+    getData: async () => { await readyP; return { data: remote.view(), warning: null, remote: { ...remote.status(), login: LS.get('login'), web: true } }; },
     onData: cb => { dataListeners.push(cb); return () => dataListeners.splice(dataListeners.indexOf(cb), 1); },
     write: (ops, meta) => C('write', ops, meta),
     switchUser: async () => ({ ok: false, message: 'На сервере каждый входит своим логином.' }),

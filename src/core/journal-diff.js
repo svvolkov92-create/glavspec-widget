@@ -1,5 +1,5 @@
-// Action journal entries: what changed in a record, in words. Pure functions shared by the Electron main process
-// and the Tauri window; the files themselves are written by src/journal.js (Electron) or the Rust core (Tauri).
+// Action journal entries: what changed in a record, in words. Pure functions shared by the Tauri window and the
+// Сервер Пульта; the files themselves are written by the Rust core (Tauri) or the server.
 (function (root, factory) {
   const L = typeof module === 'object' && module.exports ? require('../renderer/logic.js') : root.Logic;
   const api = factory(L);

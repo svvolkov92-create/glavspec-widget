@@ -345,11 +345,11 @@
     const ctx = {
       core, chats, files, cabinet, store, settings, remote, flush: async () => ({ ok: true }),
       get warning() { return authLost ? `Сервер Пульта: ${authLost}` : null; },
-      status: () => ({ ...remote.status(), login: srv.login, authLost }),
+      status: () => ({ ...remote.status(), login: srv.login, authLost, app: APP_VERSION }),
     };
     return ctx;
   }
-  const APP_VERSION = '4.7.2';
+  const APP_VERSION = '4.8.0';
   // Sign in / join / move the base (no ctx yet, or switching from the local file).
   const server = {
     async signIn({ url, login, password, code }) {

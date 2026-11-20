@@ -1,6 +1,5 @@
 // The data set in memory: collections of records and the operations on them (set / update / delete).
-// Pure, shared by the Electron store (src/store.js, which also writes the file) and the Tauri window
-// (which asks the Rust core to write the file).
+// Pure, shared by the Tauri window (which asks the Rust core to write the file) and the Сервер Пульта.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;

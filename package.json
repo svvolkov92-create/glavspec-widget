@@ -1,9 +1,8 @@
 {
   "name": "glavspec-widget",
   "productName": "Пульт главспеца",
-  "version": "3.8.0",
-  "description": "Полупрозрачный виджет для отслеживания разделов ЭОМ/СС, исполнителей, сроков и оплаты",
-  "main": "src/main.js",
+  "version": "4.8.0",
+  "description": "Пульт главспеца (Tauri) и Сервер Пульта: карточки разделов, сроки, исполнители, кабинет заказчика",
   "private": true,
   "scripts": {
     "test": "node --test \"test/*.test.js\""

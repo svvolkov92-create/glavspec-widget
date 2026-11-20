@@ -1,23 +1,15 @@
 'use strict';
-// Runs every test/smoke-*.js in Electron, each with its own empty profile, and fails if any check fails.
-// Usage: node test/run-smokes.js [electronBinary] [filter]
-// The Electron binary defaults to the `electron` npm package (CI) and then to /opt/electron/electron.
-// On Linux without a display, wrap the call in xvfb-run.
+// Runs every test/smoke-*.js against the Tauri window in Chromium (test/smoke-host.js), each with its own empty
+// profile, and fails if any check fails. Needs build/tauri-ui (node src-tauri/ui/prepare-ui.js) and playwright.
+// Usage: node test/run-smokes.js [filter]
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-function electronBinary(arg) {
-  if (arg) return arg;
-  try { return require('electron'); } catch { /* not installed */ }
-  return '/opt/electron/electron';
-}
-
-const bin = electronBinary(process.argv[2]);
-const filter = process.argv[3] || '';
+const filter = process.argv[2] || '';
 const testDir = __dirname;
-const smokes = fs.readdirSync(testDir).filter(f => /^smoke-.*\.js$/.test(f) && f !== 'smoke-env.js' && f.includes(filter)).sort();
+const smokes = fs.readdirSync(testDir).filter(f => /^smoke-.*\.js$/.test(f) && f !== 'smoke-host.js' && f.includes(filter)).sort();
 const outRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glavspec-smokes-'));
 let failed = 0;
 
@@ -27,11 +19,9 @@ for (const file of smokes) {
   const out = path.join(outRoot, name, 'out');
   fs.mkdirSync(profile, { recursive: true });
   fs.mkdirSync(out, { recursive: true });
-  // Electron reads the Windows profile folder from the system, not from %APPDATA%,
-  // so smoke-env.js moves app.getPath('appData') to this folder before the smoke starts.
   const env = { ...process.env, GLAVSPEC_TEST_APPDATA: profile };
   const started = Date.now();
-  const r = spawnSync(bin, ['--no-sandbox', path.join(testDir, 'smoke-env.js'), path.join(testDir, file), out], { env, encoding: 'utf8', timeout: 5 * 60 * 1000 });
+  const r = spawnSync(process.execPath, [path.join(testDir, 'smoke-host.js'), path.join(testDir, file), out], { env, encoding: 'utf8', timeout: 5 * 60 * 1000 });
   const logFile = path.join(out, 'log.txt');
   const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
   const lines = log.split('\n').filter(Boolean);

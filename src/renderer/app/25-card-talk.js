@@ -8,8 +8,8 @@ function renderTalk() {
   const editingNow = document.activeElement?.id === 'talk-edit';
   const list = t.comments || [];
   const when = ts => new Date(ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  box.innerHTML = `<div class="talk">${list.length ? list.map(c => `<div class="msg-item${c.userId === state.me?.id ? ' mine' : ''}${c.kind === 'submit' ? ' submit' : ''}">
-      <div class="msg-h"><b>${esc(c.user || '—')}</b>${c.kind === 'submit' ? '<span class="chip tone-review">сдал на проверку</span>' : ''}<span class="hint">${when(c.ts)}${c.editedAt ? ' · изменено' : ''}</span>${c.userId === state.me?.id && talkEdit?.cid !== c.id ? `<button class="edit-msg" type="button" data-act="talk-edit" data-cid="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>
+  box.innerHTML = `<div class="talk">${list.length ? list.map(c => `<div class="msg-item${c.userId === state.me?.id ? ' mine' : ''}${c.kind === 'submit' ? ' submit' : ''}${c.pending ? ' pending' : ''}">
+      <div class="msg-h"><b>${esc(c.user || '—')}</b>${c.kind === 'submit' ? '<span class="chip tone-review">сдал на проверку</span>' : ''}<span class="hint">${when(c.ts)}${c.editedAt ? ' · изменено' : ''}</span>${c.pending ? ' <span class="hint pending-t">ждёт отправки</span>' : c.userId === state.me?.id && talkEdit?.cid !== c.id ? `<button class="edit-msg" type="button" data-act="talk-edit" data-cid="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>
       ${talkEdit?.cid === c.id ? `<div class="msg-edit"><textarea id="talk-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(talkEdit.text)}</textarea>
         <div class="row-in"><button class="btn primary sm" type="button" data-act="talk-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="talk-edit-cancel">Отмена</button><span class="hint">Ctrl+Enter — сохранить, Esc — отмена</span></div></div>`
         : `<div class="msg-t">${esc(c.text)}</div>`}${thankBtn(t, c)}</div>`).join('') : '<div class="hint">Обсуждения пока нет. Здесь видят друг друга ответственные по карточке и их руководители.</div>'}</div>

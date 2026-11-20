@@ -42,6 +42,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       case 'window_to_bottom': sysCalls.push('bottom'); return true;
       case 'open_data_folder': sysCalls.push('folder'); return null;
       case 'app_quit': sysCalls.push('quit'); return null;
+      case 'update_run': sysCalls.push('update:' + args.version); fsMem.__update = Buffer.from(args.base64, 'base64'); return null;
       case 'known_dirs': return { documents: 'C:\\Users\\gip\\Documents', userData: 'C:\\Users\\gip\\AppData\\Roaming\\GlavspecWidget' };
       case 'dialog_save': case 'dialog_open': dialogs.push({ cmd, ...args }); return nextPath;
       case 'dialog_confirm': dialogs.push({ cmd, ...args }); return confirmAnswer;
@@ -71,31 +72,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       default: throw 'unknown command ' + cmd;
     }
   });
-  await ctx.addInitScript(() => {
-    try { Object.defineProperty(navigator, 'userAgentData', { value: { getHighEntropyValues: async () => ({ platformVersion: '15.0.0' }) } }); } catch { /* keep */ }
-    // A stand-in window that remembers its place and what was asked of it.
-    const w = window.__win = { x: 0, y: 0, width: 1320, height: 860, visible: false, top: null, skip: null, min: null, calls: [] };
-    const sp = new URLSearchParams(location.search).get('w');
-    const label = sp ? 'sat-' + sp.replace(/[^a-z0-9]/gi, '') : 'main';
-    const listeners = {};
-    const win = { label, close: async () => { w.calls.push('close'); window.__bus('__close', label); }, setFocus: async () => { w.calls.push('focus'); }, unminimize: async () => {}, isMaximized: async () => false, isMinimized: async () => false, isVisible: async () => w.visible, onResized: () => {}, onMoved: () => {}, onFocusChanged: () => {},
-      minimize: async () => {}, maximize: async () => {}, unmaximize: async () => {}, startDragging: async () => {},
-      setSize: async s => { w.width = s.width; w.height = s.height; }, setPosition: async p => { w.x = p.x; w.y = p.y; }, setMinSize: async s => { w.min = s; },
-      outerPosition: async () => ({ x: w.x, y: w.y }), outerSize: async () => ({ width: w.width, height: w.height }), scaleFactor: async () => 1,
-      show: async () => { w.visible = true; w.calls.push('show'); }, hide: async () => { w.visible = false; w.calls.push('hide'); },
-      setAlwaysOnTop: async on => { w.top = on; }, setSkipTaskbar: async on => { w.skip = on; }, setTheme: async () => {}, setIgnoreCursorEvents: async () => {},
-      setEffects: async e => { w.calls.push('fx:' + e.effects.join()); }, clearEffects: async () => { w.calls.push('fx:none'); }, isFocused: async () => w.focused !== false };
-    function Size(width, height) { this.width = width; this.height = height; }
-    function Pos(x, y) { this.x = x; this.y = y; }
-    window.__emit = (name, payload) => (listeners[name] || []).forEach(f => f({ payload }));
-    function WebviewWindow(lbl, opts) { window.__bus('__open', { label: lbl, opts }); this.once = (ev, f) => { if (ev === 'tauri://created') setTimeout(() => f({}), 10); }; }
-    WebviewWindow.getByLabel = async () => null;
-    window.__TAURI__ = { core: { invoke: (c, a) => window.__rust(c, a || {}) }, event: { listen: async (n, f) => { (listeners[n] ||= []).push(f); }, emit: async (n, x) => window.__bus(n, x) },
-      webviewWindow: { WebviewWindow },
-      dpi: { LogicalSize: Size, LogicalPosition: Pos },
-      window: { getCurrentWindow: () => win, availableMonitors: async () => [{ position: { x: 0, y: 0 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 }], cursorPosition: async () => ({ x: 0, y: 0 }) },
-      webview: { getCurrentWebview: () => ({ setZoom: async () => {} }) } };
-  });
+  await ctx.addInitScript(require('./stub-window.js'));
   const p = await ctx.newPage();
   const errs = []; p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
   const js = (f, a) => p.evaluate(f, a);
@@ -698,6 +675,23 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     const pid = await js(() => [...window.AppBridge.state.projects.values()][0].id);
     const fu = await js(id => window.api.attachBytes(id, 'Обмер.pdf', new Uint8Array([5, 6, 7])), pid);
     check('server: a file goes to the server', fu?.ok && require('fs').existsSync(require('path').join(pDir, 'attachments', pid, fu.file.id)), JSON.stringify(fu).slice(0, 120));
+    // 65: the GIP puts a newer Пульт on the server → «Обновить» → the installer, checked by its SHA-256, is started.
+    const exe = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(4000, 7)]);
+    nextPath = 'C:\\Users\\gip\\Downloads\\PultGlavspeca_9.1.0_x64-setup.exe'; fsMem[nextPath] = exe;
+    await js(() => document.querySelector('#srv-chip').click()); await wait(700);
+    await js(() => document.querySelector('.srv-modal [data-sv="upd-put"]').click()); await wait(400);
+    await js(() => [...document.querySelectorAll('.modal [data-m="yes"]')].pop()?.click()); await wait(2500);
+    const updInfo = (() => { try { return JSON.parse(require('fs').readFileSync(require('path').join(pDir, 'updates', 'pult.json'), 'utf8')); } catch { return null; } })();
+    check('update: the GIP put the installer on the server', updInfo?.version === '9.1.0' && updInfo.size === exe.length, JSON.stringify(updInfo));
+    const updChip = await js(() => document.querySelector('#srv-chip')?.textContent);
+    check('update: the window sees a newer Пульт', /обновление/.test(updChip || ''), updChip);
+    await js(() => document.querySelector('.srv-modal [data-sv="close"]')?.click());
+    await js(() => document.querySelector('#srv-chip').click()); await wait(700);
+    check('update: «Обновить» offered', await js(() => !!document.querySelector('.srv-modal [data-sv="upd-run"]') && /9\.1\.0/.test(document.querySelector('.srv-modal').textContent)));
+    await js(() => document.querySelector('.srv-modal [data-sv="upd-run"]').click()); await wait(400);
+    await js(() => [...document.querySelectorAll('.modal [data-m="yes"]')].pop()?.click()); await wait(2500);
+    check('update: the same installer is started', sysCalls.includes('update:9.1.0') && fsMem.__update?.equals(exe), sysCalls.filter(x => x.startsWith('update')).join(','));
+    await js(() => document.querySelector('.srv-modal')?.remove());
     // The user picker: no switching on the server.
     await js(() => document.querySelector('#btn-user').click()); await wait(200);
     check('server: no switching between people', await js(() => !document.querySelector('#user-menu [data-act="switch-user"]') && !!document.querySelector('#user-menu [data-act="server"]')));

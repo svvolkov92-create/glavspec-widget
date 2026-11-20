@@ -566,6 +566,12 @@ async function remoteStatus() {
   renderRemote();
 }
 // The chip in the title bar: «на связи» / «нет связи · ждут отправки N»; conflicts open their dialog.
+// «4.10.0» is newer than «4.9.3»: compared part by part as numbers.
+function newerVersion(a, b) {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+}
 function renderRemote() {
   let chip = $('#srv-chip');
   const r = state.remote;
@@ -575,10 +581,20 @@ function renderRemote() {
     chip = $('#srv-chip');
   }
   const off = !r.online, wait = r.pending || 0;
+  // The web version is always as new as its server: an «outdated» answer means the page is old — load it again (once).
+  if (r.outdated?.who === 'pult' && r.web) {
+    let again = false;
+    try { again = sessionStorage.getItem('pult.reloaded') === '1'; sessionStorage.setItem('pult.reloaded', '1'); } catch { /* no storage */ }
+    if (!again) { location.reload(); return; }
+  } else if (r.web && r.online) { try { sessionStorage.removeItem('pult.reloaded'); } catch { /* no storage */ } }
+  const old = r.outdated ? (r.outdated.who === 'server' ? 'Сервер устарел' : 'Обновите Пульт') : '';
+  // 65: the GIP put a newer Пульт on the server — said once per version, then a word on the chip.
+  const upd = r.app && r.server?.pult && newerVersion(r.server.pult.version, r.app) ? r.server.pult.version : '';
+  if (upd && loadLocal('updToldFor', '') !== upd) { saveLocal('updToldFor', upd); toast(`Есть новый Пульт ${upd} — «Сервер» вверху → «Обновить»`); }
   chip.hidden = false;
-  chip.className = `srv-chip${r.authLost ? ' bad' : off ? ' off' : wait ? ' wait' : ''}`;
-  chip.innerHTML = `<i></i>${r.authLost ? 'Войдите заново' : off ? `Нет связи${wait ? ` · ждут отправки ${wait}` : ''}` : wait ? `Отправляю ${wait}…` : 'Сервер'}`;
-  chip.title = r.authLost ? r.authLost : off ? `Нет связи с сервером (${r.lastError || 'нет ответа'}). Работайте дальше: изменения отправятся сами, когда связь вернётся.` : `Общая база: ${r.url} · вы ${r.login}`;
+  chip.className = `srv-chip${r.authLost || old ? ' bad' : off ? ' off' : wait ? ' wait' : ''}`;
+  chip.innerHTML = `<i></i>${old ? `${old}${wait ? ` · ждут отправки ${wait}` : ''}` : r.authLost ? 'Войдите заново' : off ? `Нет связи${wait ? ` · ждут отправки ${wait}` : ''}` : wait ? `Отправляю ${wait}…` : upd ? 'Сервер · обновление' : 'Сервер'}`;
+  chip.title = old ? `${r.outdated.message} Изменения не потеряются: они ждут и уйдут после обновления.` : r.authLost ? r.authLost : off ? `Нет связи с сервером (${r.lastError || 'нет ответа'}). Работайте дальше: изменения отправятся сами, когда связь вернётся.` : `Общая база: ${r.url} · вы ${r.login}`;
   for (const f of r.failed || []) toast(`Не отправлено: ${f.message}`, true);
   const nConf = Array.isArray(r.conflicts) ? r.conflicts.length : r.conflicts;
   if (nConf && !document.querySelector('.conflict-modal')) conflictsDialog();
@@ -633,6 +649,7 @@ async function serverDialog(tab = '') {
   } else {
     let acc = null;
     if (gip) acc = await api.serverCall('accounts');
+    const upd = await api.updateInfo?.(); // 65: only the desktop Пульт updates itself (the web version is always new)
     const devs = n => (n ? `${n} ${plural(n, 'устройство', 'устройства', 'устройств')}` : 'не входил');
     html = `<h2 id="srv-t">Сервер Пульта</h2>
       <p>${info.online ? '<span class="chip tone-ok">на связи</span>' : `<span class="chip tone-warn">нет связи</span> <span class="hint">${esc(info.lastError || '')}</span>`} ${info.pending ? `<span class="chip tone-warn">ждут отправки: ${info.pending}</span>` : ''}</p>
@@ -646,6 +663,12 @@ async function serverDialog(tab = '') {
             ${a.userId === state.me?.id ? '<span class="hint">это вы</span>' : `${!a.login || a.invite ? `<button class="btn sm" type="button" data-sv="invite" data-id="${esc(a.userId)}">${a.invite ? 'Новый код' : 'Пригласить'}</button>` : `<button class="btn sm" type="button" data-sv="reset" data-id="${esc(a.userId)}">Сбросить пароль</button>`}
             ${a.login ? `<button class="btn ghostbtn sm" type="button" data-sv="${a.disabled ? 'enable' : 'disable'}" data-id="${esc(a.userId)}">${a.disabled ? 'Включить вход' : 'Отключить вход'}</button>` : ''}`}</td></tr>`).join('')}</tbody></table>
         <div class="srv-invite" id="sv-inv" hidden></div>` : ''}
+      ${upd ? `<h3>Обновление Пульта</h3>
+        <p>${upd.newer ? `<span class="chip tone-work">есть новая версия ${esc(upd.server.version)}</span> у вас ${esc(upd.app)} <button class="btn primary sm" type="button" data-sv="upd-run">Обновить</button>`
+          : `<span class="hint">У вас Пульт ${esc(upd.app)}${upd.server ? ` · на сервере ${esc(upd.server.version)}` : ''} — обновлять нечего.</span>`}</p>
+        <p class="hint">Пульт скачает установщик с сервера, проверит, что файл тот самый, и запустит его — нажмите в нём «Далее». Ваши данные не затрагиваются.</p>
+        ${upd.gip ? `<p class="hint">ГИП: скачайте с GitHub новый установщик (PultGlavspeca_…_x64-setup.exe) и положите его сюда — у всех появится «Обновить».</p>
+          <div class="row-in"><button class="btn sm" type="button" data-sv="upd-put">Положить новую версию на сервер…</button><span class="hint" id="sv-upd-st"></span></div>` : ''}` : ''}
       <h3>Мой вход</h3>
       <div class="row-in">${field('sv-old', 'Текущий пароль', 'password')}${field('sv-new', 'Новый пароль', 'password')}<button class="btn sm" type="button" data-sv="pw">Сменить пароль</button></div>
       <div class="err" id="sv-err" hidden></div>
@@ -707,6 +730,30 @@ async function serverDialog(tab = '') {
       const r = await api.serverCall('passwordChange', q('#sv-old').value, q('#sv-new').value);
       if (!r?.ok) return err(r?.message || 'Не получилось.', '#sv-old');
       toast('Пароль изменён'); q('#sv-old').value = ''; q('#sv-new').value = ''; return;
+    }
+    if (a === 'upd-run') {
+      if (!(await confirmBox('Обновить Пульт сейчас? Он закроется и запустится установщик новой версии. Несохранённые карточки сохраните заранее.', 'Обновить'))) return;
+      busy(b, true);
+      const r = await api.updateInstall(m => toast(m));
+      busy(b, false);
+      if (!r?.ok) return err(r?.message || 'Не получилось.');
+      return;
+    }
+    if (a === 'upd-put') {
+      const f = await api.updatePick();
+      if (!f) return;
+      // The version comes from the file name (PultGlavspeca_4.8.0_x64-setup.exe); asked only if the name has none.
+      const version = f.version || (await askText('Номер версии этого установщика', 'Версия', '4.8.0'))?.trim();
+      if (!version) return;
+      if (f.version && !(await confirmBox(`Положить на сервер Пульт ${version} (${f.name})? У всех, у кого Пульт старее, появится «Обновить».`, 'Положить'))) return;
+      if (!/^\d+\.\d+\.\d+$/.test(version)) return err('Номер версии — три числа через точку, например 4.8.0.');
+      busy(b, true);
+      q('#sv-upd-st').textContent = `Загружаю ${f.name}…`;
+      const r = await api.updateUpload(f.path, version);
+      busy(b, false);
+      q('#sv-upd-st').textContent = '';
+      if (!r?.ok) return err(r?.message || 'Не получилось.');
+      root.remove(); toast(`Пульт ${version} на сервере — у всех появится «Обновить»`); return serverDialog();
     }
     if (a === 'others') { const r = await api.serverCall('signOutOthers'); toast(r?.ok ? 'Другие устройства вышли' : (r?.message || 'Не получилось'), !r?.ok); return; }
     if (a === 'disconnect') {
@@ -2323,7 +2370,7 @@ function msgChatHtml(c) {
     day = d;
     const out = m.userId === me, tome = (m.mentions || []).includes(me), fresh = !out && m.ts > seen;
     const editing = out && msg.edit?.mid === m.id;
-    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${tome ? ' tome' : ''}${fresh ? ' fresh' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(m.user)}</b> <span class="hint">${lt.slice(11, 16)}${m.editedAt ? ' · изменено' : ''}</span>${tome ? ' <span class="chip tone-work">вас упомянули</span>' : ''}${out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(m.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
+    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${tome ? ' tome' : ''}${fresh ? ' fresh' : ''}${m.pending ? ' pending' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(m.user)}</b> <span class="hint">${lt.slice(11, 16)}${m.editedAt ? ' · изменено' : ''}</span>${tome ? ' <span class="chip tone-work">вас упомянули</span>' : ''}${m.pending ? ' <span class="hint pending-t">ждёт отправки</span>' : out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(m.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
       ? `<div class="msg-edit"><textarea id="mc-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(msg.edit.text)}</textarea><div class="row-in"><button class="btn primary sm" type="button" data-act="mc-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="mc-edit-cancel">Отмена</button></div></div>`
       : `<div class="chat-text">${msgText(m.text, c)}</div>`}</div>`;
   }).join('');
@@ -2346,7 +2393,7 @@ function msgTaskHtml(t) {
     const lt = localTs(c.ts), d = lt.slice(0, 10), sep = d !== day ? `<div class="mc-day">${d === state.today ? 'Сегодня' : fmtDate(d)}</div>` : '';
     day = d;
     const out = c.userId === me, editing = out && msg.edit?.mid === c.id;
-    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${c.kind === 'submit' ? ' submit' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(c.user || '—')}</b> <span class="hint">${lt.slice(11, 16)}${c.editedAt ? ' · изменено' : ''}</span>${c.kind === 'submit' ? ' <span class="chip tone-review">сдал на проверку</span>' : ''}${out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
+    return `${sep}<div class="chat-msg ${out ? 'out' : 'in'}${c.kind === 'submit' ? ' submit' : ''}${c.pending ? ' pending' : ''}"><div class="chat-meta"><b>${out ? 'Вы' : esc(c.user || '—')}</b> <span class="hint">${lt.slice(11, 16)}${c.editedAt ? ' · изменено' : ''}</span>${c.kind === 'submit' ? ' <span class="chip tone-review">сдал на проверку</span>' : ''}${c.pending ? ' <span class="hint pending-t">ждёт отправки</span>' : out && !editing ? `<button class="edit-msg" type="button" data-act="mc-edit" data-id="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>${editing
       ? `<div class="msg-edit"><textarea id="mc-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(msg.edit.text)}</textarea><div class="row-in"><button class="btn primary sm" type="button" data-act="mc-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="mc-edit-cancel">Отмена</button></div></div>`
       : `<div class="chat-text">${cardLinks(esc(c.text))}</div>`}${thankBtn(t, c)}</div>`;
   }).join('');
@@ -3202,12 +3249,35 @@ function askDept(dept = null, parentId = '') {
     <div class="f"><label class="req" for="org-name">Название</label><input id="org-name" maxlength="120" value="${esc(d.name)}" placeholder="Отдел инженерных систем"></div>
     <div class="f"><label for="org-head">Руководитель</label><select id="org-head"><option value="">— не назначен —</option>${staff.map(u => `<option value="${esc(u.id)}"${u.id === d.headId ? ' selected' : ''}>${esc(u.name)} · ${esc(A.ROLES[u.role]?.label || '')}</option>`).join('')}</select></div>
     <div class="f"><label for="org-parent">Входит в</label><select id="org-parent"><option value="">— верхний уровень —</option>${others.map(x => `<option value="${esc(x.id)}"${x.id === d.parentId ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
-    <fieldset class="f org-mem"><legend>Сотрудники отдела</legend><div class="chk-row">${staff.map(u => `<label class="chk"><input type="checkbox" value="${esc(u.id)}"${members.has(u.id) ? ' checked' : ''}> ${esc(u.name)}${u.deptId && u.deptId !== d.id && state.depts.get(u.deptId) ? ` <span class="hint">(сейчас: ${esc(state.depts.get(u.deptId).name)})</span>` : ''}</label>`).join('')}</div></fieldset>
+    <fieldset class="f org-mem"><legend>Сотрудники отдела <span class="hint" id="org-cnt"></span></legend>
+      <div class="pick-tools"><input type="search" id="org-find" placeholder="Найти по фамилии" aria-label="Найти сотрудника"><label class="chk"><input type="checkbox" id="org-free"> только без отдела</label></div>
+      <div class="pick-list">${staff.sort((a, b) => members.has(b.id) - members.has(a.id)).map(u => {
+        // Where the person is now: one grey line on the right, cut with «…» (whole — in the tooltip).
+        const now = u.deptId && u.deptId !== d.id ? state.depts.get(u.deptId)?.name : '';
+        return `<label class="pick-row" data-name="${esc(u.name.toLowerCase())}" data-free="${u.deptId && state.depts.get(u.deptId) ? '0' : '1'}"><input type="checkbox" value="${esc(u.id)}"${members.has(u.id) ? ' checked' : ''}><span class="pick-name">${esc(u.name)}</span>${now ? `<span class="pick-now" title="Сейчас: ${esc(now)}">сейчас: ${esc(now)}</span>` : ''}</label>`;
+      }).join('')}<p class="hint pick-none" hidden>Никого не найдено.</p></div></fieldset>
     <div class="err" id="org-err" hidden></div>
     <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${dept ? '<button class="btn danger" type="button" data-m="del">Удалить отдел</button>' : ''}</div></form>`;
   document.body.append(root);
   const q = sel => root.querySelector(sel), close = () => root.remove();
   q('#org-name').focus();
+  // The list: search by surname, «только без отдела», how many are chosen.
+  const pickList = () => {
+    const find = q('#org-find').value.trim().toLowerCase(), free = q('#org-free').checked;
+    let shown = 0;
+    for (const r of root.querySelectorAll('.pick-row')) {
+      const on = r.querySelector('input').checked;
+      r.hidden = !on && ((find && !r.dataset.name.includes(find)) || (free && r.dataset.free !== '1'));
+      if (!r.hidden) shown++;
+    }
+    q('.pick-none').hidden = shown > 0;
+    const n = root.querySelectorAll('.pick-list input:checked').length;
+    q('#org-cnt').textContent = n ? `· выбрано ${n}` : '';
+  };
+  pickList();
+  q('#org-find').addEventListener('input', pickList);
+  q('#org-free').addEventListener('change', pickList);
+  q('.pick-list').addEventListener('change', pickList);
   root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.addEventListener('click', async e => {
     if (e.target === root || e.target.dataset.m === 'cancel') close();
@@ -3227,7 +3297,7 @@ function askDept(dept = null, parentId = '') {
     // No loops: the parent may not be inside this department.
     for (let x = parent; x; x = state.depts.get(x)?.parentId) if (x === d.id) return err('Отдел не может входить сам в себя или в свой подотдел.', '#org-parent');
     const id = dept?.id || newId();
-    const chosen = new Set([...root.querySelectorAll('.org-mem input:checked')].map(i => i.value));
+    const chosen = new Set([...root.querySelectorAll('.pick-list input:checked')].map(i => i.value));
     if (headId) chosen.add(headId);
     const ops = [dept ? op.update('depts', id, { name, headId, parentId: parent }) : op.set('depts', id, { name, headId, parentId: parent, createdAt: new Date().toISOString() }),
       ...staff.filter(u => chosen.has(u.id) && u.deptId !== id).map(u => op.update('users', u.id, { deptId: id })),
@@ -5095,8 +5165,8 @@ function renderTalk() {
   const editingNow = document.activeElement?.id === 'talk-edit';
   const list = t.comments || [];
   const when = ts => new Date(ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  box.innerHTML = `<div class="talk">${list.length ? list.map(c => `<div class="msg-item${c.userId === state.me?.id ? ' mine' : ''}${c.kind === 'submit' ? ' submit' : ''}">
-      <div class="msg-h"><b>${esc(c.user || '—')}</b>${c.kind === 'submit' ? '<span class="chip tone-review">сдал на проверку</span>' : ''}<span class="hint">${when(c.ts)}${c.editedAt ? ' · изменено' : ''}</span>${c.userId === state.me?.id && talkEdit?.cid !== c.id ? `<button class="edit-msg" type="button" data-act="talk-edit" data-cid="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>
+  box.innerHTML = `<div class="talk">${list.length ? list.map(c => `<div class="msg-item${c.userId === state.me?.id ? ' mine' : ''}${c.kind === 'submit' ? ' submit' : ''}${c.pending ? ' pending' : ''}">
+      <div class="msg-h"><b>${esc(c.user || '—')}</b>${c.kind === 'submit' ? '<span class="chip tone-review">сдал на проверку</span>' : ''}<span class="hint">${when(c.ts)}${c.editedAt ? ' · изменено' : ''}</span>${c.pending ? ' <span class="hint pending-t">ждёт отправки</span>' : c.userId === state.me?.id && talkEdit?.cid !== c.id ? `<button class="edit-msg" type="button" data-act="talk-edit" data-cid="${esc(c.id)}" title="Исправить сообщение">✎</button>` : ''}</div>
       ${talkEdit?.cid === c.id ? `<div class="msg-edit"><textarea id="talk-edit" rows="2" maxlength="2000" aria-label="Исправить сообщение">${esc(talkEdit.text)}</textarea>
         <div class="row-in"><button class="btn primary sm" type="button" data-act="talk-edit-save">Сохранить</button><button class="btn sm" type="button" data-act="talk-edit-cancel">Отмена</button><span class="hint">Ctrl+Enter — сохранить, Esc — отмена</span></div></div>`
         : `<div class="msg-t">${esc(c.text)}</div>`}${thankBtn(t, c)}</div>`).join('') : '<div class="hint">Обсуждения пока нет. Здесь видят друг друга ответственные по карточке и их руководители.</div>'}</div>

@@ -48,8 +48,6 @@ app.on('browser-window-created', (_e, win) => {
       await wait(800);
       // The legacy walkthrough checks every overview panel: show them all (2.5 hides some by default).
       check('short overview by default', await js(`JSON.parse(localStorage.getItem('glavspec.overview') || '{}').hidden?.includes('quiet') === true`));
-      await js(`localStorage.setItem('glavspec.overview', JSON.stringify({ order: [], hidden: [], v: 2 })); location.reload()`).catch(() => {});
-      await wait(1500);
       // The legacy walkthrough runs as the GIP (full access); roles are checked further down.
       await js(`window.api.switchUser('u-gip')`); await wait(500);
       await click('[data-act="seed-demo"]'); await wait(700);
@@ -390,14 +388,17 @@ app.on('browser-window-created', (_e, win) => {
         await shot('16-view-menu');
         await click('[data-act="settings"]'); await wait(200);
         check('settings window', await js(`!!document.querySelector('.settings-modal .set-sec')`));
-        // On Windows the mode is there (PowerShell helper); elsewhere it is switched off.
-        check('desktop mode only on Windows', (await js(`document.querySelector('input[name="vm-level"][value="desktop"]').disabled`)) === (process.platform !== 'win32'));
+        // Tauri: the Rust side says whether the mode works (desktop_supported); the stand-in says yes.
+        check('desktop mode offered when supported', (await js(`document.querySelector('input[name="vm-level"][value="desktop"]').disabled`)) === false);
         await shot('16b-settings');
         await click('[data-act="set-theme"][data-v="dark"]'); await wait(500);
-        check('dark theme applied', await js(`matchMedia('(prefers-color-scheme: dark)').matches`));
+        // Tauri switches the dark rules of the styles itself (tauri-windows.js), not the system scheme. The window is
+        // transparent (the background is the window's), so the text tells: light text — dark theme.
+        const inkLight = () => js(`(() => { const m = getComputedStyle(document.body).color.match(/[0-9.]+/g).map(Number); return (m[0] * 299 + m[1] * 587 + m[2] * 114) / 1000; })()`);
+        check('dark theme applied', (await inkLight()) > 150, String(await inkLight()));
         await shot('17-dark');
         await click('[data-act="set-theme"][data-v="light"]'); await wait(400);
-        check('light theme applied', !(await js(`matchMedia('(prefers-color-scheme: dark)').matches`)));
+        check('light theme applied', (await inkLight()) < 100, String(await inkLight()));
         await js(`(() => { const r = document.querySelector('input[name="vm-level"][value="normal"]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); })()`); await wait(300);
         check('normal window level', !win.isAlwaysOnTop());
         await js(`(() => { const r = document.querySelector('input[name="vm-level"][value="top"]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); })()`); await wait(300);
@@ -853,34 +854,7 @@ app.on('browser-window-created', (_e, win) => {
         await js(`document.querySelector('.usage-modal [data-m="close"], .usage-modal [data-m="cancel"]')?.click()`); await wait(100);
       });
 
-      await step('notes for the developer', async () => {
-        await click('[data-act="tab"][data-id="overview"]'); await wait(200);
-        await js(`document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyF', key: 'F', ctrlKey: true, shiftKey: true, bubbles: true }))`); await wait(200);
-        check('notes mode on', await js(`document.documentElement.classList.contains('fb-mode') && !!document.querySelector('.fb-banner')`));
-        await js(`(() => { const el = document.querySelector('.kpi, .panel-h h3'); el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true })); el.click(); })()`); await wait(300);
-        check('note popup for element', await js(`!!document.querySelector('.fb-pop #fb-text')`));
-        check('normal click blocked in notes mode', (await js(`document.querySelector('.tab[aria-selected="true"]').dataset.id`)) === 'overview');
-        await shot('55-note-popup');
-        await js(`document.querySelector('#fb-text').value = 'Цифры мелковаты'; document.querySelector('.fb-pop form').requestSubmit()`); await wait(900);
-        await js(`document.querySelector('[data-fb="general"]').click()`); await wait(200);
-        await js(`document.querySelector('#fb-text').value = 'В целом удобно'; document.querySelector('.fb-pop form').requestSubmit()`); await wait(700);
-        const notesFile = path.join(dataDir, 'feedback', 'notes.json');
-        const notes = JSON.parse(fs.readFileSync(notesFile, 'utf8'));
-        check('notes saved', notes.length === 2 && notes[0].comment === 'Цифры мелковаты' && !!notes[0].selector && /Сводка/.test(notes[0].where), JSON.stringify(notes[0]).slice(0, 200));
-        check('screenshot saved', !!notes[0].image && fs.statSync(path.join(dataDir, 'feedback', notes[0].image)).size > 500);
-        await js(`document.querySelector('.fb-banner [data-fb="list"]').click()`); await wait(300);
-        check('notes list', (await js(`document.querySelectorAll('.fb-item').length`)) === 2);
-        await shot('56-notes-list');
-        await js(`document.querySelector('[data-fbi="export"]').click()`); await wait(600);
-        const zipPath = fs.readdirSync(outDir).find(f => f.startsWith('Пометки') && f.endsWith('.zip'));
-        const zipBuf = zipPath ? fs.readFileSync(path.join(outDir, zipPath)) : Buffer.alloc(0);
-        check('notes exported', zipBuf.length > 1000 && zipBuf.includes(Buffer.from('notes.md')) && zipBuf.includes(Buffer.from('.png')), zipPath || 'no zip');
-        await js(`document.querySelector('[data-fbi="close"]').click()`); await wait(100);
-        await js(`document.querySelector('.fb-banner [data-fb="toggle"]').click()`); await wait(150);
-        check('notes mode off', !(await js(`document.documentElement.classList.contains('fb-mode')`)));
-        await click('[data-act="tab"][data-id="tasks"]'); await wait(200);
-        check('clicks work again', (await js(`document.querySelector('.tab[aria-selected="true"]').dataset.id`)) === 'tasks');
-      });
+      // «Пометки для разработчика» (Ctrl+Shift+F) were in the Electron version only.
 
       // Compact view
       await step('compact', async () => {

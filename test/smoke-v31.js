@@ -59,9 +59,10 @@ app.on('browser-window-created', (_e, win) => {
         check('no contractors, no money on page', !/Петров|Сидорова|Кузнецов|180\s?000|₽/.test(html));
         check('logo and font embedded', /<svg[^>]*viewBox="0 0 233 51"/.test(html) && /font\/ttf;base64/.test(html));
         fs.copyFileSync(path.join(outDir, f), path.join(outDir, 'page.html'));
+        // Tauri has no print engine of its own: the page opens in the browser with its print dialog («Сохранить как PDF»).
         await click('[data-act="cust-page"][data-format="pdf"]'); await wait(2500);
-        const pdf = fs.readdirSync(outDir).find(x => x.endsWith('.pdf'));
-        check('pdf saved', !!pdf && fs.readFileSync(path.join(outDir, pdf)).slice(0, 4).toString() === '%PDF');
+        const printDir = path.join(dataDir, 'print'), printed = fs.existsSync(printDir) ? fs.readdirSync(printDir).filter(x => x.endsWith('.html')) : [];
+        check('pdf: the page opens for printing', printed.length >= 1 && /Экспертиза/.test(fs.readFileSync(path.join(printDir, printed.at(-1)), 'utf8')), printed.join());
       });
 
       await step('composition', async () => {
