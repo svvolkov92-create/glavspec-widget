@@ -118,7 +118,7 @@
     try { core.purgeTrash(); } catch (e) { console.error('Не удалось очистить корзину:', e); }
     await flush();
 
-    return { core, chats, files, cabinet: cabinetRules, store, settings, flush, warning: store.warning || null };
+    return { core, chats, files, cabinet: cabinetRules, party: partyOf(settings), store, settings, flush, warning: store.warning || null };
   }
 
   // The customer cabinet: the client of the Electron version (src/cabinet.js) and the shared rules
@@ -185,6 +185,17 @@
     return s.startsWith('plain:') ? s.slice(6) : s;
   };
   const protect = async text => { try { return 'dpapi:' + await invoke('secret_protect', { text }); } catch { return 'plain:' + text; } };
+  // Requisites by INN (src/core/party.js): the DaData key of this computer, DPAPI-encrypted; HTTP through Rust (no CORS).
+  function partyOf(settings) {
+    let key = null;
+    return window.Party.createParty({
+      http: req => invoke('http_request', { method: req.method, url: req.url, headers: req.headers, body: req.body, timeoutMs: 15000 }),
+      key: {
+        get: async () => { if (key === null) { try { key = await unprotect(settings.get('dadataKey')); } catch { key = ''; } } return key; },
+        set: async k => { key = k; settings.set({ dadataKey: k ? await protect(k) : '' }); },
+      },
+    });
+  }
   // Every file a project refers to: request files, source data, letters, cards.
   function fileRefs(view, projectId) {
     const p = (view?.projects || []).find(x => x.id === projectId) || {};
@@ -343,13 +354,13 @@
     };
     remote.start();
     const ctx = {
-      core, chats, files, cabinet, store, settings, remote, flush: async () => ({ ok: true }),
+      core, chats, files, cabinet, party: partyOf(settings), store, settings, remote, flush: async () => ({ ok: true }),
       get warning() { return authLost ? `Сервер Пульта: ${authLost}` : null; },
       status: () => ({ ...remote.status(), login: srv.login, authLost, app: APP_VERSION }),
     };
     return ctx;
   }
-  const APP_VERSION = '4.9.0';
+  const APP_VERSION = '4.9.1';
   // Sign in / join / move the base (no ctx yet, or switching from the local file).
   const server = {
     async signIn({ url, login, password, code }) {

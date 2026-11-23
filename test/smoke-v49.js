@@ -149,6 +149,38 @@ app.on('browser-window-created', (_e, win) => {
         await js(`window.api.switchUser('u-gip')`); await wait(600);
       });
 
+      await step('4.9.1: requisites by INN from the registry (DaData stand-in)', async () => {
+        await tab('orgs');
+        await click('[data-act="new-org"]'); await wait(700);
+        check('no key: the card offers to enter it', (await text('#o-party')).includes('ключ DaData'));
+        await click('#o-party [data-act="party-key"]'); await wait(200);
+        await setVal('#pk-key', 'не ключ'); await js(`document.querySelector('#pk-title').closest('form').requestSubmit()`); await wait(300);
+        check('a wrong key is refused', (await text('#pk-err')).includes('латинские'));
+        await setVal('#pk-key', '0123456789abcdef0123456789abcdef01234567'); await js(`document.querySelector('#pk-title').closest('form').requestSubmit()`); await wait(500);
+        const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'));
+        check('the key is kept encrypted', String(st.dadataKey || '').startsWith('dpapi:') && !String(st.dadataKey).includes('0123456789abcdef'), String(st.dadataKey).slice(0, 12));
+        await setVal('#o-inn', '7736050003'); await wait(1200);
+        const vals = await js(`Object.fromEntries(['name', 'fullName', 'kpp', 'ogrn', 'address', 'director'].map(k => [k, document.querySelector('#dform [name="' + k + '"]').value]))`);
+        check('typed INN → the card fills by itself', vals.name === 'ПАО «ГАЗПРОМ»' && vals.kpp === '772801001' && vals.ogrn === '1027700070518' && vals.fullName.startsWith('ПУБЛИЧНОЕ') && vals.address.startsWith('197229') && vals.director.includes('Миллер'), JSON.stringify(vals));
+        check('… and says what it filled', (await text('#o-party')).includes('Заполнено из ЕГРЮЛ'));
+        await setVal('#o-name', 'Газпром (наш)'); await setVal('#o-kpp', '000000000');
+        await click('[data-act="party-fill"]'); await wait(800);
+        check('hand-typed values are not overwritten, differences offered', (await js(`document.querySelector('#o-name').value`)) === 'Газпром (наш)' && (await js(`document.querySelectorAll('.party-row').length`)) === 2);
+        await shot('49-05-party');
+        await click('[data-act="party-take"][data-k="kpp"]'); await wait(200);
+        check('«Заменить» takes the registry value', (await js(`document.querySelector('#o-kpp').value`)) === '772801001' && (await js(`document.querySelector('#o-name').value`)) === 'Газпром (наш)');
+        await setChk('[name="role-customer"]', false); await setChk('[name="role-supplier"]', true);
+        await save();
+        const o = orgByName('Газпром (наш)')?.[1];
+        check('saved with the full name and the director', o && o.fullName.includes('ГАЗПРОМ') && o.director.includes('Миллер') && o.ogrn === '1027700070518', JSON.stringify(o));
+        await click('[data-act="new-org"]'); await wait(500);
+        await setVal('#o-inn', '500100732259'); await wait(1200);
+        check('a liquidated ИП is flagged', (await text('#o-party')).includes('ликвидирована') && (await js(`document.querySelector('#o-kpp').value`)) === '');
+        await setVal('#o-inn', '2703000150'); await wait(1200);
+        check('an INN not in the registry is said so', (await text('#o-party')).includes('не найден'));
+        await js(`document.querySelector('[data-act="discard"]').click()`); await wait(200);
+      });
+
       await step('trash and back', async () => {
         await tab('orgs');
         const [id] = orgByName('ООО «СтройПоставка»');

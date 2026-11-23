@@ -423,6 +423,11 @@
     cabinetCustomerDelete: async id => (await ready()).cabinet.customerDelete(id),
     cabinetRead: async (ids, read) => (await ready()).cabinet.read(ids, read),
     cabinetOpen: async projectId => (await ready()).cabinet.open(projectId),
+    // Requisites by INN from DaData (src/core/party.js).
+    partyKey: async () => (await ready()).party.keyInfo(),
+    partyKeySet: async k => (await ready()).party.setKey(k),
+    partyByInn: async inn => (await ready()).party.find(inn),
+    openDadata: () => invoke('open_url', { url: 'https://dadata.ru/api/' }),
 
     getWindowState: async () => { await startLook(); return windowState(); },
     onWindowState: cb => { winListeners.push(cb); return () => winListeners.splice(winListeners.indexOf(cb), 1); },

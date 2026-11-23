@@ -107,8 +107,11 @@ function openOrg(id, preset = {}) {
       <div class="f wide"><label class="req" for="o-name">Название</label><input id="o-name" name="name" value="${esc(o.name || '')}" placeholder="ООО «Альфа-Строй»" maxlength="200"></div>
       <div class="f wide"><span class="lbl-t">Роль</span><div class="org-roles">${Object.entries(A.ORG_ROLES).map(([k, l]) => `<label class="chk"><input type="checkbox" name="role-${k}" data-org-role${roles.includes(k) ? ' checked' : ''}${orgRoleLocked(k) ? ' disabled title="Эту роль отмечает ГИП"' : ''}> ${l}</label>`).join('')}</div>
         <span class="hint">Одна организация может быть и заказчиком, и подрядчиком.</span></div>
-      <div class="f"><label for="o-inn">ИНН</label><input id="o-inn" name="inn" value="${esc(o.inn || '')}" inputmode="numeric" maxlength="14" placeholder="10 или 12 цифр"><span class="hint" id="o-inn-hint"></span></div>
-      ${f('kpp', 'КПП', 'inputmode="numeric" maxlength="9"')}${f('ogrn', 'ОГРН', 'inputmode="numeric" maxlength="15"')}
+      <div class="f wide"><label for="o-inn">ИНН</label><div class="row-in"><input id="o-inn" name="inn" value="${esc(o.inn || '')}" inputmode="numeric" maxlength="14" placeholder="10 или 12 цифр — остальное заполнится из ЕГРЮЛ">${api.partyByInn ? '<button class="btn" type="button" data-act="party-fill">Заполнить по ИНН</button>' : ''}</div>
+        <span class="hint" id="o-inn-hint"></span><div id="o-party" class="o-party" hidden></div></div>
+      ${f('fullName', 'Полное наименование', 'maxlength="500" placeholder="Общество с ограниченной ответственностью «…»"', true)}
+      ${f('kpp', 'КПП', 'inputmode="numeric" maxlength="9"')}${f('ogrn', 'ОГРН / ОГРНИП', 'inputmode="numeric" maxlength="15"')}
+      ${f('director', 'Руководитель', 'maxlength="200" placeholder="Генеральный директор Иванов Иван Иванович"', true)}
       ${f('phone', 'Телефон', 'type="tel" maxlength="40" placeholder="+7 4217 00-00-00"')}${f('email', 'Почта', 'type="email" maxlength="120"')}${f('site', 'Сайт', 'maxlength="120"')}
       ${f('address', 'Адрес', 'maxlength="200" placeholder="681000, г. Комсомольск-на-Амуре, …"', true)}
       <details class="f wide more"${o.requisites || o.note ? ' open' : ''}><summary>Банковские реквизиты, примечание</summary><div class="fgrid">
@@ -125,8 +128,10 @@ function openOrg(id, preset = {}) {
       ${id ? '<button class="btn danger" data-act="ask-delete" type="button">В корзину</button>' : ''}`,
   });
   renderOrgContacts(); renderOrgContracts(); orgInnHint(); renderOrgCabinet();
+  partyLast = String(o.inn || '');
+  partyKeyLoad().then(() => { if (!id && partyKeyHas === false && $('#o-party') && state.drawer?.kind === 'org') { const b = $('#o-party'); b.hidden = false; b.innerHTML = '<p class="hint">Название, КПП, ОГРН, адрес и руководитель могут заполняться сами по ИНН — для этого нужен бесплатный ключ DaData. <button class="linkbtn" type="button" data-act="party-key">Ввести ключ…</button></p>'; } });
   markClean();
-  if (!id) $('#o-name').focus();
+  if (!id) $('#o-inn').focus();
 }
 function renderOrgContacts() {
   const box = $('#org-contacts');
@@ -173,7 +178,7 @@ async function submitOrg(keepOpen = false) {
   const { id } = state.drawer, before = id ? state.orgs.get(id) : {};
   formError('');
   const roles = orgRolesPicked(before);
-  const data = { name: val('name'), roles, inn: val('inn').replace(/\s+/g, ''), kpp: val('kpp'), ogrn: val('ogrn'), phone: val('phone'), email: val('email'), site: val('site'), address: val('address'), requisites: val('requisites'), note: val('note') };
+  const data = { name: val('name'), fullName: val('fullName'), director: val('director'), roles, inn: val('inn').replace(/\s+/g, ''), kpp: val('kpp'), ogrn: val('ogrn'), phone: val('phone'), email: val('email'), site: val('site'), address: val('address'), requisites: val('requisites'), note: val('note') };
   if (!data.name) return formError('Укажите название организации.', '', 'name');
   if (!roles.length) return formError('Отметьте роль: заказчик, подрядчик или поставщик.');
   const innBad = L.innError(data.inn);
@@ -205,6 +210,91 @@ async function submitOrg(keepOpen = false) {
   if (keepOpen) { await refresh(); openOrg(oid); return true; }
   closeDrawer();
   return true;
+}
+
+/* ----- requisites by INN from ЕГРЮЛ / ЕГРИП through DaData (src/core/party.js); the key is this computer's ----- */
+let partyKeyHas = null, partyLast = '', partyTimer = null, partyDiff = [];
+const PARTY_FIELDS = [['name', 'Название'], ['fullName', 'Полное наименование'], ['kpp', 'КПП'], ['ogrn', 'ОГРН'], ['address', 'Адрес'], ['director', 'Руководитель']];
+async function partyKeyLoad(force = false) {
+  if (!api.partyKey || (partyKeyHas !== null && !force)) return partyKeyHas;
+  try { partyKeyHas = !!(await api.partyKey())?.has; } catch { partyKeyHas = false; }
+  return partyKeyHas;
+}
+// Typing the INN: once it is whole and right, the card asks the registry by itself (with a key); empty fields fill,
+// differing ones are offered with «Заменить» — nothing typed by hand is overwritten silently.
+function partyAuto() {
+  clearTimeout(partyTimer);
+  const inn = val('inn').replace(/\s+/g, '');
+  if (!api.partyByInn || !inn || L.innError(inn) || inn === partyLast) return;
+  partyTimer = setTimeout(async () => { if (await partyKeyLoad()) partyFill(true); }, 350);
+}
+async function partyFill(auto = false) {
+  const box = $('#o-party');
+  if (!box || !api.partyByInn) return;
+  const inn = val('inn').replace(/\s+/g, ''), bad = inn ? L.innError(inn) : 'Введите ИНН — 10 или 12 цифр.';
+  if (bad) { if (!auto) formError(bad, '', 'inn'); return; }
+  partyLast = inn;
+  box.hidden = false;
+  box.innerHTML = '<p class="hint">Ищем в ЕГРЮЛ…</p>';
+  const r = await api.partyByInn(inn);
+  if (!$('#o-party') || val('inn').replace(/\s+/g, '') !== inn) return; // the card closed or the INN changed meanwhile
+  if (!r.ok) {
+    if (r.needKey) partyKeyHas = false;
+    box.innerHTML = `<p class="${r.needKey ? 'hint' : 'neg'}">${esc(r.message)}${r.needKey ? ' <button class="linkbtn" type="button" data-act="party-key">Ввести ключ…</button>' : ''}</p>`;
+    return;
+  }
+  const p = r.party, filled = [];
+  partyDiff = [];
+  for (const [k, label] of PARTY_FIELDS) {
+    const el = $(`#dform [name="${k}"]`), v = p[k];
+    if (!el || !v) continue;
+    if (!el.value.trim()) { el.value = v; filled.push(label); } else if (el.value.trim() !== v) partyDiff.push({ k, label, v });
+  }
+  renderPartyBox(p, filled);
+}
+function renderPartyBox(p, filled = []) {
+  const box = $('#o-party');
+  if (!box) return;
+  box.innerHTML = `${p.status ? `<p class="neg"><b>По ЕГРЮЛ организация ${esc(p.status)}${p.liquidated ? ` (${fmtDate(p.liquidated)})` : ''}.</b> Проверьте, прежде чем заключать договор.</p>` : ''}
+    ${filled.length ? `<p class="okv">Заполнено из ЕГРЮЛ: ${filled.join(', ')}.</p>` : ''}
+    ${partyDiff.length ? `<div class="party-diff">${partyDiff.map(d => `<div class="party-row"><span class="grow"><b>${esc(d.label)}</b> в реестре: ${esc(d.v)}</span><button class="btn ghostbtn sm" type="button" data-act="party-take" data-k="${d.k}">Заменить</button></div>`).join('')}
+      ${partyDiff.length > 1 ? '<button class="btn sm" type="button" data-act="party-take-all">Заменить всё по реестру</button>' : ''}</div>` : filled.length ? '' : '<p class="hint">Сведения совпадают с ЕГРЮЛ.</p>'}`;
+}
+function partyTake(keys) {
+  for (const k of keys) { const d = partyDiff.find(x => x.k === k), el = $(`#dform [name="${k}"]`); if (d && el) el.value = d.v; }
+  partyDiff = partyDiff.filter(x => !keys.includes(x.k));
+  const box = $('#o-party');
+  if (box && !partyDiff.length) box.innerHTML = '<p class="okv">Заменено по реестру — не забудьте сохранить.</p>';
+  else renderPartyBox({});
+}
+// The key: a small dialog of its own (the settings window redraws and would lose the typed text).
+function openPartyKey() {
+  const root = document.createElement('div');
+  root.className = 'modal-back';
+  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="pk-title" novalidate><h2 id="pk-title">Реквизиты по ИНН</h2>
+    <p class="hint">Название, полное наименование, КПП, ОГРН, адрес и руководитель подтягиваются из ЕГРЮЛ и ЕГРИП через сервис DaData. Зарегистрируйтесь на dadata.ru (бесплатный тариф — до 10 000 запросов в день), в личном кабинете скопируйте «API-ключ» и вставьте сюда.</p>
+    <p class="hint">Ключ хранится на этом компьютере в зашифрованном виде. Запросы идут из Пульта в DaData: передаётся только ИНН.</p>
+    <div class="f"><label for="pk-key">API-ключ DaData</label><input id="pk-key" type="password" autocomplete="off" maxlength="80" placeholder="${partyKeyHas ? 'сохранён — оставьте пустым, чтобы не менять' : '40 латинских букв и цифр'}"></div>
+    <p class="neg" id="pk-err"></p>
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button>${api.openDadata ? '<button class="btn ghostbtn" type="button" data-m="site">Открыть dadata.ru</button>' : ''}${partyKeyHas ? '<button class="btn" type="button" data-m="off">Удалить ключ</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
+  document.body.append(root);
+  const close = () => root.remove();
+  root.querySelector('#pk-key').focus();
+  const save = async k => {
+    const r = await api.partyKeySet(k);
+    if (!r.ok) { root.querySelector('#pk-err').textContent = r.message; root.querySelector('#pk-key').focus(); return; }
+    partyKeyHas = r.has; close();
+    toast(r.has ? 'Ключ DaData сохранён — теперь реквизиты заполняются по ИНН' : 'Ключ DaData удалён');
+    if (document.querySelector('.settings-modal')) renderSettings();
+    if (r.has && $('#o-party')) { partyLast = ''; partyFill(true); }
+  };
+  root.addEventListener('click', e => {
+    if (e.target === root || e.target.dataset.m === 'cancel') close();
+    if (e.target.dataset.m === 'off') save('');
+    if (e.target.dataset.m === 'site') api.openDadata();
+  });
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const k = root.querySelector('#pk-key').value.trim(); if (!k && partyKeyHas) return close(); if (!k) { root.querySelector('#pk-err').textContent = 'Вставьте ключ.'; return; } save(k); });
 }
 
 /* ----- the customer cabinet from the company's card: a login for each contact person, all projects of the customer ----- */
@@ -349,4 +439,8 @@ onAct({
   'org-cab-sync': () => { syncOrgCabinet(state.drawer?.id).then(n => { toast(n ? `Доступ обновлён: входов — ${n}` : 'Все входы уже видят проекты заказчика'); renderOrgCabinet(); }); },
   'org-cab-publish': ({ el }) => { el.disabled = true; orgCabPublish().finally(() => { el.disabled = false; }); },
   'org-from-project': () => { orgFromProject(); },
+  'party-fill': ({ el }) => { el.disabled = true; partyFill(false).finally(() => { el.disabled = false; }); },
+  'party-take': ({ el }) => { partyTake([el.dataset.k]); },
+  'party-take-all': () => { partyTake(partyDiff.map(d => d.k)); },
+  'party-key': () => { openPartyKey(); },
 });

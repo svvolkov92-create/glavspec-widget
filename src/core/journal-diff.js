@@ -65,6 +65,7 @@ const FIELDS = {
   },
   orgs: {
     name: ['Название', v => v || '—'], roles: ['Роль', v => (Array.isArray(v) && v.length ? v.map(r => ({ customer: 'заказчик', contractor: 'подрядчик', supplier: 'поставщик' }[r] || r)).join(', ') : '—')],
+    fullName: ['Полное наименование', v => v || '—'], director: ['Руководитель', v => v || '—'],
     inn: ['ИНН', v => v || '—'], kpp: ['КПП', v => v || '—'], address: ['Адрес', v => v || '—'], requisites: ['Реквизиты', () => 'изменено'],
     contacts: ['Контактные лица', v => (Array.isArray(v) ? `${v.length}` : '0')], contracts: ['Договоры', v => (Array.isArray(v) ? `${v.length}` : '0')],
     note: ['Примечание', () => 'изменено'],

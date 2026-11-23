@@ -275,7 +275,7 @@ document.addEventListener('input', e => {
   if (t.id === 'org-q') { orgQ = t.value; clearTimeout(orgQTimer); orgQTimer = setTimeout(render, 180); return; }
   if (t.dataset.oc !== undefined && state.draft?.contacts) { state.draft.contacts[Number(t.dataset.oc)][t.dataset.k] = t.value; return; }
   if (t.dataset.ok !== undefined && state.draft?.contracts) { state.draft.contracts[Number(t.dataset.ok)][t.dataset.k] = t.value; if (t.dataset.k === 'sum') renderOrgContractsTotal(); return; }
-  if (t.id === 'o-inn') { orgInnHint(); return; }
+  if (t.id === 'o-inn') { orgInnHint(); partyAuto(); return; }
   if (t.id === 'pr-client') { customerHint(); return; }
   if (t.dataset.orgRole !== undefined) { const sub = $('#org-contracts-sub'); if (sub) sub.hidden = !orgContractsOn(orgRolesPicked(state.orgs?.get(state.drawer?.id))); return; }
   if (t.id === 'jr-q') { state.journal.q = t.value; const pos = t.selectionStart; renderJournal(); const n = $('#jr-q'); n.focus(); n.setSelectionRange(pos, pos); return; }

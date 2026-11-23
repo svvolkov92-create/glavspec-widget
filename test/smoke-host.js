@@ -100,7 +100,20 @@ async function rust(cmd, a) {
     }
     case 'notify': new electron.Notification({ title: a.title, body: a.body }).show(); return true;
     case 'notify_actions': new electron.Notification({ title: a.title, body: a.body }).show(); return true;
-    case 'http_request': { const r = await fetch(a.url, { method: a.method, headers: a.headers, body: a.body ?? undefined }); return { status: r.status, body: await r.text() }; }
+    case 'http_request': {
+      // DaData (src/core/party.js): a stand-in registry — no internet in the checks.
+      if (String(a.url).startsWith('https://suggestions.dadata.ru/')) {
+        if (a.headers?.Authorization !== 'Token 0123456789abcdef0123456789abcdef01234567') return { status: 403, body: '' };
+        const inn = JSON.parse(a.body).query;
+        const reg = {
+          '7736050003': { type: 'LEGAL', inn, kpp: '772801001', ogrn: '1027700070518', name: { full_with_opf: 'ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО «ГАЗПРОМ»', short_with_opf: 'ПАО «ГАЗПРОМ»' },
+            management: { post: 'ПРЕДСЕДАТЕЛЬ ПРАВЛЕНИЯ', name: 'Миллер Алексей Борисович' }, address: { unrestricted_value: '197229, г Санкт-Петербург, Лахтинский пр-кт, д 2 к 3 стр 1' }, state: { status: 'ACTIVE' } },
+          '500100732259': { type: 'INDIVIDUAL', inn, ogrn: '304500116000157', name: { full_with_opf: 'Индивидуальный предприниматель Иванов Иван Иванович', short_with_opf: 'ИП Иванов Иван Иванович' },
+            address: { value: 'Московская обл, г Коломна' }, state: { status: 'LIQUIDATED', liquidation_date: 1700000000000 } },
+        }[inn];
+        return { status: 200, body: JSON.stringify({ suggestions: reg ? [{ value: reg.name.short_with_opf, data: reg }] : [] }) };
+      }
+      const r = await fetch(a.url, { method: a.method, headers: a.headers, body: a.body ?? undefined }); return { status: r.status, body: await r.text() }; }
     case 'secret_protect': return Buffer.from('X' + a.text).toString('base64');
     case 'secret_unprotect': return Buffer.from(a.data, 'base64').toString().slice(1);
     case 'cabinet_local_start': {

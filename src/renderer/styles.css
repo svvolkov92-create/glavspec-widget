@@ -1944,3 +1944,8 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 .org-projs { display: flex; flex-wrap: wrap; gap: 4px 14px }
 #org-cab .org-login { width: 160px; min-width: 0 }
 .org-mig > .hint, .org-mig .org-sug { padding-left: 12px; padding-right: 12px }
+.o-party { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel, transparent) }
+.o-party p { margin: 2px 0 }
+.party-diff { display: flex; flex-direction: column; gap: 4px; align-items: flex-start }
+.party-row { display: flex; align-items: center; gap: 8px; width: 100% }
+.party-row .grow { flex: 1; min-width: 0; overflow-wrap: anywhere }
