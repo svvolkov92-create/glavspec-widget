@@ -28,12 +28,12 @@ function viewOrgs() {
   const seg = `<span class="seg">${[['all', 'Все'], ['customer', 'Заказчики'], ['contractor', 'Подрядчики'], ['supplier', 'Поставщики']]
     .map(([k, l]) => `<button class="btn sm ${orgFilter === k ? 'on' : ''}" type="button" data-act="org-filter" data-v="${k}" aria-pressed="${orgFilter === k}">${l} <span class="cnt">${count(k)}</span></button>`).join('')}</span>`;
   return `<div class="people-h"><h2>Контрагенты</h2>${tip('orgs', 'Организации, с которыми работаем. Одна фирма может быть и заказчиком, и подрядчиком. У заказчика — контактные лица со своим входом в кабинет: каждый видит все проекты своей организации.', 'inline')}
-      <span class="spacer"></span>${seg}<input id="org-q" class="org-q" type="search" placeholder="Название, ИНН, контакт" value="${esc(orgQ)}" aria-label="Поиск контрагента"><button class="btn sm" type="button" data-act="new-org">+ Контрагент</button></div>
+      <span class="spacer"></span>${seg}<input id="org-q" class="org-q" type="search" placeholder="Название, ИНН, контакт" value="${esc(orgQ)}" aria-label="Поиск контрагента">${partyOn() && all.some(o => o.inn) ? '<button class="btn sm" type="button" data-act="orgcheck" title="Проверить по реестру всех, у кого записан ИНН">Сверить с ЕГРЮЛ</button>' : ''}<button class="btn sm" type="button" data-act="new-org">+ Контрагент</button></div>
     ${orgMigration()}
     ${list.length ? `<div class="tablewrap"><table class="staff-t org-t"><thead><tr><th>Организация</th><th>ИНН</th><th>Контакт</th><th class="r">Проектов</th>${showMoney ? '<th class="r">Договоры</th>' : ''}</tr></thead><tbody>
       ${list.map(o => {
         const n = orgProjects(o.id).length, k = (o.contacts || [])[0];
-        return `<tr class="row" data-act="open-org" data-id="${esc(o.id)}" title="Открыть карточку"><td><b>${esc(o.name)}</b> ${orgChips(o)}</td><td class="num hint">${esc(o.inn || '')}</td>
+        return `<tr class="row" data-act="open-org" data-id="${esc(o.id)}" title="Открыть карточку"><td><b>${esc(o.name)}</b> ${orgChips(o)}${o.regStatus ? ` <span class="chip tone-bad" title="По ЕГРЮЛ${o.regCheckedAt ? ' на ' + fmtDate(o.regCheckedAt) : ''}">${esc(o.regStatus)}</span>` : ''}</td><td class="num hint">${esc(o.inn || '')}</td>
           <td class="hint">${k ? `${esc(k.name)}${k.position ? `, ${esc(k.position)}` : ''}${k.phone ? ` · ${esc(k.phone)}` : ''}${o.contacts.length > 1 ? ` <span class="cnt">+${o.contacts.length - 1}</span>` : ''}` : ''}</td>
           <td class="r num">${n || '—'}</td>${showMoney ? `<td class="r num">${o.contracts?.length ? `${o.contracts.length} · ${money(contractSum(o))}` : '—'}</td>` : ''}</tr>`;
       }).join('')}</tbody></table></div>`
@@ -107,7 +107,7 @@ function openOrg(id, preset = {}) {
       <div class="f wide"><label class="req" for="o-name">Название</label><input id="o-name" name="name" value="${esc(o.name || '')}" placeholder="ООО «Альфа-Строй»" maxlength="200"></div>
       <div class="f wide"><span class="lbl-t">Роль</span><div class="org-roles">${Object.entries(A.ORG_ROLES).map(([k, l]) => `<label class="chk"><input type="checkbox" name="role-${k}" data-org-role${roles.includes(k) ? ' checked' : ''}${orgRoleLocked(k) ? ' disabled title="Эту роль отмечает ГИП"' : ''}> ${l}</label>`).join('')}</div>
         <span class="hint">Одна организация может быть и заказчиком, и подрядчиком.</span></div>
-      <div class="f wide"><label for="o-inn">ИНН</label><div class="row-in"><input id="o-inn" name="inn" value="${esc(o.inn || '')}" inputmode="numeric" maxlength="14" placeholder="10 или 12 цифр — остальное заполнится из ЕГРЮЛ">${api.partyByInn ? '<button class="btn" type="button" data-act="party-fill">Заполнить по ИНН</button>' : ''}</div>
+      <div class="f wide"><label for="o-inn">ИНН</label><div class="row-in"><input id="o-inn" name="inn" value="${esc(o.inn || '')}" inputmode="numeric" maxlength="14" placeholder="10 или 12 цифр — остальное заполнится из ЕГРЮЛ">${partyServer() ? `<button class="btn" type="button" data-act="party-fill"${partyOn() ? '' : ' disabled title="На сервере нет ключа DaData"'}>Заполнить по ИНН</button>` : ''}</div>
         <span class="hint" id="o-inn-hint"></span><div id="o-party" class="o-party" hidden></div></div>
       ${f('fullName', 'Полное наименование', 'maxlength="500" placeholder="Общество с ограниченной ответственностью «…»"', true)}
       ${f('kpp', 'КПП', 'inputmode="numeric" maxlength="9"')}${f('ogrn', 'ОГРН / ОГРНИП', 'inputmode="numeric" maxlength="15"')}
@@ -128,8 +128,8 @@ function openOrg(id, preset = {}) {
       ${id ? '<button class="btn danger" data-act="ask-delete" type="button">В корзину</button>' : ''}`,
   });
   renderOrgContacts(); renderOrgContracts(); orgInnHint(); renderOrgCabinet();
-  partyLast = String(o.inn || '');
-  partyKeyLoad().then(() => { if (!id && partyKeyHas === false && $('#o-party') && state.drawer?.kind === 'org') { const b = $('#o-party'); b.hidden = false; b.innerHTML = '<p class="hint">Название, КПП, ОГРН, адрес и руководитель могут заполняться сами по ИНН — для этого нужен бесплатный ключ DaData. <button class="linkbtn" type="button" data-act="party-key">Ввести ключ…</button></p>'; } });
+  partyLast = String(o.inn || ''); partySeen = null; partyDiff = [];
+  partyIntro({ ...o, id });
   markClean();
   if (!id) $('#o-inn').focus();
 }
@@ -202,6 +202,7 @@ async function submitOrg(keepOpen = false) {
     }
     data.contracts = list;
   }
+  Object.assign(data, partyStamp(data.inn));
   const oid = id || newId();
   const ops = [id ? op.update('orgs', id, data) : op.set('orgs', oid, { ...data, createdAt: new Date().toISOString(), createdBy: state.me?.id || '' })];
   // Projects keep the customer's name in «client» (reports, the customer page): a renamed customer is renamed there too.
@@ -212,38 +213,44 @@ async function submitOrg(keepOpen = false) {
   return true;
 }
 
-/* ----- requisites by INN from ЕГРЮЛ / ЕГРИП through DaData (src/core/party.js); the key is this computer's ----- */
-let partyKeyHas = null, partyLast = '', partyTimer = null, partyDiff = [];
+/* ----- requisites by INN from ЕГРЮЛ / ЕГРИП: the Сервер Пульта asks DaData with the team's key (4.9.2) ----- */
+let partyLast = '', partyTimer = null, partyDiff = [], partySeen = null; // partySeen: { inn, status } of the last lookup
 const PARTY_FIELDS = [['name', 'Название'], ['fullName', 'Полное наименование'], ['kpp', 'КПП'], ['ogrn', 'ОГРН'], ['address', 'Адрес'], ['director', 'Руководитель']];
-async function partyKeyLoad(force = false) {
-  if (!api.partyKey || (partyKeyHas !== null && !force)) return partyKeyHas;
-  try { partyKeyHas = !!(await api.partyKey())?.has; } catch { partyKeyHas = false; }
-  return partyKeyHas;
+const partyOn = () => !!state.remote?.server?.party;            // the server has the key
+const partyServer = () => !!state.remote && !!api.partyLookup;   // this Пульт works with the server
+// What the card says under the INN before any lookup.
+function partyIntro(o) {
+  const box = $('#o-party');
+  if (!box) return;
+  const gip = A.isGip(state.me);
+  const msg = !partyServer() ? (o.id ? '' : 'Название, КПП, ОГРН, адрес и руководитель будут подтягиваться по ИНН, когда Пульт подключён к Серверу Пульта.')
+    : !partyOn() ? `Заполнение по ИНН ждёт ключа DaData на сервере.${gip ? ' <button class="linkbtn" type="button" data-act="party-key">Ввести ключ…</button>' : ' Его вводит ГИП.'}`
+    : o.regCheckedAt ? `Сверено с ЕГРЮЛ ${fmtDate(o.regCheckedAt)}${o.regStatus ? ` — <b class="neg">${esc(o.regStatus)}</b>` : ''}.` : '';
+  box.hidden = !msg;
+  box.innerHTML = msg ? `<p class="hint">${msg}</p>` : '';
 }
-// Typing the INN: once it is whole and right, the card asks the registry by itself (with a key); empty fields fill,
-// differing ones are offered with «Заменить» — nothing typed by hand is overwritten silently.
+// Typing the INN: once it is whole and right, the card asks the registry by itself. Empty fields fill, differing ones
+// are offered with «Заменить» — nothing typed by hand is overwritten silently.
 function partyAuto() {
   clearTimeout(partyTimer);
   const inn = val('inn').replace(/\s+/g, '');
-  if (!api.partyByInn || !inn || L.innError(inn) || inn === partyLast) return;
-  partyTimer = setTimeout(async () => { if (await partyKeyLoad()) partyFill(true); }, 350);
+  if (!partyOn() || !inn || L.innError(inn) || inn === partyLast) return;
+  partyTimer = setTimeout(() => partyFill(true), 350);
 }
 async function partyFill(auto = false) {
   const box = $('#o-party');
-  if (!box || !api.partyByInn) return;
+  if (!box) return;
   const inn = val('inn').replace(/\s+/g, ''), bad = inn ? L.innError(inn) : 'Введите ИНН — 10 или 12 цифр.';
   if (bad) { if (!auto) formError(bad, '', 'inn'); return; }
   partyLast = inn;
   box.hidden = false;
   box.innerHTML = '<p class="hint">Ищем в ЕГРЮЛ…</p>';
-  const r = await api.partyByInn(inn);
+  const r = await api.partyLookup([inn]);
   if (!$('#o-party') || val('inn').replace(/\s+/g, '') !== inn) return; // the card closed or the INN changed meanwhile
-  if (!r.ok) {
-    if (r.needKey) partyKeyHas = false;
-    box.innerHTML = `<p class="${r.needKey ? 'hint' : 'neg'}">${esc(r.message)}${r.needKey ? ' <button class="linkbtn" type="button" data-act="party-key">Ввести ключ…</button>' : ''}</p>`;
-    return;
-  }
-  const p = r.party, filled = [];
+  const one = r.ok ? r.results?.[0] : r;
+  if (!one?.ok) { box.innerHTML = `<p class="neg">${esc(one?.message || 'Не получилось.')}</p>`; return; }
+  const p = one.party, filled = [];
+  partySeen = { inn, status: p.status || '' };
   partyDiff = [];
   for (const [k, label] of PARTY_FIELDS) {
     const el = $(`#dform [name="${k}"]`), v = p[k];
@@ -252,10 +259,11 @@ async function partyFill(auto = false) {
   }
   renderPartyBox(p, filled);
 }
+const partyStatusLine = p => (p.status ? `<p class="neg"><b>По ЕГРЮЛ организация ${esc(p.status)}${p.liquidated ? ` (${fmtDate(p.liquidated)})` : ''}.</b> Проверьте, прежде чем заключать договор.</p>` : '');
 function renderPartyBox(p, filled = []) {
   const box = $('#o-party');
   if (!box) return;
-  box.innerHTML = `${p.status ? `<p class="neg"><b>По ЕГРЮЛ организация ${esc(p.status)}${p.liquidated ? ` (${fmtDate(p.liquidated)})` : ''}.</b> Проверьте, прежде чем заключать договор.</p>` : ''}
+  box.innerHTML = `${partyStatusLine(p)}
     ${filled.length ? `<p class="okv">Заполнено из ЕГРЮЛ: ${filled.join(', ')}.</p>` : ''}
     ${partyDiff.length ? `<div class="party-diff">${partyDiff.map(d => `<div class="party-row"><span class="grow"><b>${esc(d.label)}</b> в реестре: ${esc(d.v)}</span><button class="btn ghostbtn sm" type="button" data-act="party-take" data-k="${d.k}">Заменить</button></div>`).join('')}
       ${partyDiff.length > 1 ? '<button class="btn sm" type="button" data-act="party-take-all">Заменить всё по реестру</button>' : ''}</div>` : filled.length ? '' : '<p class="hint">Сведения совпадают с ЕГРЮЛ.</p>'}`;
@@ -267,26 +275,31 @@ function partyTake(keys) {
   if (box && !partyDiff.length) box.innerHTML = '<p class="okv">Заменено по реестру — не забудьте сохранить.</p>';
   else renderPartyBox({});
 }
-// The key: a small dialog of its own (the settings window redraws and would lose the typed text).
+// What the save adds after a lookup of this INN: the date of the check and the registry status.
+const partyStamp = inn => (partySeen && partySeen.inn === inn ? { regCheckedAt: todayStr(), regStatus: partySeen.status } : {});
+
+// The team's key — the GIP enters it once, it stays on the server.
 function openPartyKey() {
+  const has = partyOn();
   const root = document.createElement('div');
   root.className = 'modal-back';
   root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="pk-title" novalidate><h2 id="pk-title">Реквизиты по ИНН</h2>
     <p class="hint">Название, полное наименование, КПП, ОГРН, адрес и руководитель подтягиваются из ЕГРЮЛ и ЕГРИП через сервис DaData. Зарегистрируйтесь на dadata.ru (бесплатный тариф — до 10 000 запросов в день), в личном кабинете скопируйте «API-ключ» и вставьте сюда.</p>
-    <p class="hint">Ключ хранится на этом компьютере в зашифрованном виде. Запросы идут из Пульта в DaData: передаётся только ИНН.</p>
-    <div class="f"><label for="pk-key">API-ключ DaData</label><input id="pk-key" type="password" autocomplete="off" maxlength="80" placeholder="${partyKeyHas ? 'сохранён — оставьте пустым, чтобы не менять' : '40 латинских букв и цифр'}"></div>
+    <p class="hint">Ключ хранится только на Сервере Пульта — на компьютеры и телефоны сотрудников он не попадает; в DaData уходит только ИНН. Работает у всех, кому открыты контрагенты.</p>
+    <div class="f"><label for="pk-key">API-ключ DaData</label><input id="pk-key" type="password" autocomplete="off" maxlength="80" placeholder="${has ? 'сохранён — оставьте пустым, чтобы не менять' : '40 латинских букв и цифр'}"></div>
     <p class="neg" id="pk-err"></p>
-    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button>${api.openDadata ? '<button class="btn ghostbtn" type="button" data-m="site">Открыть dadata.ru</button>' : ''}${partyKeyHas ? '<button class="btn" type="button" data-m="off">Удалить ключ</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button>${api.openDadata ? '<button class="btn ghostbtn" type="button" data-m="site">Открыть dadata.ru</button>' : ''}${has ? '<button class="btn" type="button" data-m="off">Удалить ключ</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
   document.body.append(root);
   const close = () => root.remove();
   root.querySelector('#pk-key').focus();
   const save = async k => {
-    const r = await api.partyKeySet(k);
-    if (!r.ok) { root.querySelector('#pk-err').textContent = r.message; root.querySelector('#pk-key').focus(); return; }
-    partyKeyHas = r.has; close();
-    toast(r.has ? 'Ключ DaData сохранён — теперь реквизиты заполняются по ИНН' : 'Ключ DaData удалён');
-    if (document.querySelector('.settings-modal')) renderSettings();
-    if (r.has && $('#o-party')) { partyLast = ''; partyFill(true); }
+    const r = await api.serverCall('partyKeySet', k);
+    if (!r?.ok) { root.querySelector('#pk-err').textContent = r?.message || 'Не получилось.'; root.querySelector('#pk-key').focus(); return; }
+    close();
+    toast(r.has ? 'Ключ DaData на сервере — реквизиты по ИНН работают у всей команды' : 'Ключ DaData удалён с сервера');
+    await refresh(); await remoteStatus();
+    if ($('#o-party') && state.drawer?.kind === 'org') { partyLast = ''; if (r.has) partyFill(true); else partyIntro(state.orgs.get(state.drawer.id) || {}); }
+    if (state.tab === 'orgs') renderNow();
   };
   root.addEventListener('click', e => {
     if (e.target === root || e.target.dataset.m === 'cancel') close();
@@ -294,7 +307,73 @@ function openPartyKey() {
     if (e.target.dataset.m === 'site') api.openDadata();
   });
   root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const k = root.querySelector('#pk-key').value.trim(); if (!k && partyKeyHas) return close(); if (!k) { root.querySelector('#pk-err').textContent = 'Вставьте ключ.'; return; } save(k); });
+  root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const k = root.querySelector('#pk-key').value.trim(); if (!k && has) return close(); if (!k) { root.querySelector('#pk-err').textContent = 'Вставьте ключ.'; return; } save(k); });
+}
+
+/* ----- «Сверить с ЕГРЮЛ»: every counterparty with an INN at once; differences ticked, «Обновить отмеченное» ----- */
+let orgCheck = null; // { running, done, total, noInn, error, items: [{ id, inn, party?, message?, diffs: [{ k, label, cur, v, on }] }] }
+async function runOrgCheck() {
+  const mine = orgsArr().filter(o => A.orgCard(state.me, o));
+  const list = mine.filter(o => o.inn && !L.innError(o.inn));
+  orgCheck = { running: true, done: 0, total: list.length, noInn: mine.filter(o => !o.inn).length, error: '', items: [] };
+  state.drawer = { kind: 'orgcheck' };
+  state.draft = null;
+  drawerShell({ title: 'Сверка с ЕГРЮЛ', wide: true, form: false, body: '<div id="orgcheck-box"></div>' });
+  renderOrgCheck();
+  for (let i = 0; i < list.length; i += 20) {
+    if (state.drawer?.kind !== 'orgcheck') return; // closed — stop asking
+    const chunk = list.slice(i, i + 20);
+    const r = await api.partyLookup(chunk.map(o => o.inn));
+    if (!r.ok) { orgCheck.error = r.message; break; }
+    const byInn = new Map(r.results.map(x => [x.inn, x]));
+    for (const o of chunk) {
+      const x = byInn.get(o.inn) || { ok: false, message: 'Нет ответа.' };
+      if (!x.ok) { orgCheck.items.push({ id: o.id, inn: o.inn, message: x.message, diffs: [] }); if (x.fatal || /лимит|ключ|Ключ|связи/.test(x.message)) orgCheck.error = x.message; continue; }
+      const p = x.party;
+      // The short name is often our own («Газпром (наш)») — offered, not ticked; empty fields and real changes are ticked.
+      const diffs = PARTY_FIELDS.filter(([k]) => p[k] && String(o[k] || '').trim() !== p[k])
+        .map(([k, label]) => ({ k, label, cur: String(o[k] || '').trim(), v: p[k], on: k !== 'name' || !o[k] }));
+      orgCheck.items.push({ id: o.id, inn: o.inn, party: p, diffs });
+    }
+    orgCheck.done = Math.min(list.length, i + chunk.length);
+    renderOrgCheck();
+    if (orgCheck.error) break;
+  }
+  orgCheck.running = false;
+  renderOrgCheck();
+}
+function renderOrgCheck() {
+  const box = $('#orgcheck-box'), c = orgCheck;
+  if (!box || !c) return;
+  const changed = c.items.filter(x => x.diffs.length), flagged = c.items.filter(x => x.party?.status), missing = c.items.filter(x => !x.party);
+  const ticked = changed.reduce((n, x) => n + x.diffs.filter(d => d.on).length, 0);
+  const show = c.items.filter(x => x.diffs.length || x.party?.status || !x.party);
+  box.innerHTML = `<p>${c.running ? `Проверяем: ${c.done} из ${c.total}…` : `Проверено: ${c.done} из ${c.total}.`}
+      ${changed.length ? ` Расхождения: <b>${changed.length}</b>.` : ''}${flagged.length ? ` <span class="neg">Не действуют: ${flagged.length}.</span>` : ''}${missing.length ? ` Не найдены: ${missing.length}.` : ''}${c.noInn ? ` <span class="hint">Без ИНН (не проверить): ${c.noInn}.</span>` : ''}</p>
+    ${c.error ? `<p class="neg">${esc(c.error)}</p>` : ''}
+    ${!c.running && !show.length && !c.error ? '<p class="okv">Все сведения совпадают с ЕГРЮЛ.</p>' : ''}
+    ${show.map((x, i) => { const o = state.orgs.get(x.id); if (!o) return ''; const n = c.items.indexOf(x);
+      return `<div class="oc-item"><div class="oc-h"><button class="linkbtn" type="button" data-act="open-org" data-id="${esc(o.id)}"><b>${esc(o.name)}</b></button> <span class="hint">ИНН ${esc(x.inn)}</span>
+        ${x.party?.status ? ` <span class="chip tone-bad">${esc(x.party.status)}${x.party.liquidated ? ' ' + fmtDate(x.party.liquidated) : ''}</span>` : ''}${x.party ? '' : ` <span class="hint">${esc(x.message || '')}</span>`}</div>
+        ${x.diffs.map(d => `<label class="chk oc-row"><input type="checkbox" data-oc-pick="${n}:${d.k}"${d.on ? ' checked' : ''}> <span class="oc-f">${esc(d.label)}</span>
+          <span class="oc-v">${d.cur ? `<s class="hint">${esc(d.cur)}</s> → ` : '<span class="hint">пусто</span> → '}${esc(d.v)}</span></label>`).join('')}</div>`; }).join('')}
+    ${changed.length || flagged.length ? `<div class="oc-acts"><button class="btn primary" type="button" data-act="orgcheck-apply"${c.running ? ' disabled title="Дождитесь окончания проверки"' : ''}>Обновить отмеченное (${ticked})</button>
+      <button class="btn ghostbtn sm" type="button" data-act="orgcheck-all" data-on="1">Отметить всё</button><button class="btn ghostbtn sm" type="button" data-act="orgcheck-all" data-on="0">Снять всё</button></div>` : ''}`;
+}
+async function applyOrgCheck() {
+  const c = orgCheck, today = todayStr(), ops = [];
+  if (!c || c.running) return;
+  let fields = 0;
+  for (const x of c.items) {
+    const o = state.orgs.get(x.id);
+    if (!o || !x.party) continue;
+    const patch = { regCheckedAt: today, regStatus: x.party.status || '' };
+    for (const d of x.diffs) if (d.on) { patch[d.k] = d.v; fields++; }
+    ops.push(op.update('orgs', o.id, patch));
+    if (patch.name && patch.name !== o.name && A.canManageCatalog(state.me)) for (const p of orgProjects(o.id)) ops.push(op.update('projects', p.id, { client: patch.name }));
+  }
+  if (!ops.length) return;
+  if (await write(ops, fields ? `Обновлено по ЕГРЮЛ: полей ${fields}` : 'Отмечено: сверено с ЕГРЮЛ')) { closeDrawer(); orgCheck = null; }
 }
 
 /* ----- the customer cabinet from the company's card: a login for each contact person, all projects of the customer ----- */
@@ -443,4 +522,7 @@ onAct({
   'party-take': ({ el }) => { partyTake([el.dataset.k]); },
   'party-take-all': () => { partyTake(partyDiff.map(d => d.k)); },
   'party-key': () => { openPartyKey(); },
+  'orgcheck': () => { runOrgCheck(); },
+  'orgcheck-apply': ({ el }) => { el.disabled = true; applyOrgCheck().finally(() => { el.disabled = false; }); },
+  'orgcheck-all': ({ el }) => { for (const x of orgCheck?.items || []) for (const d of x.diffs) d.on = el.dataset.on === '1'; renderOrgCheck(); },
 });

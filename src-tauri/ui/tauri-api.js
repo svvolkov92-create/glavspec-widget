@@ -327,7 +327,7 @@
     serverCall: async (fn, ...args) => {
       const c = await ready();
       if (!c.remote) return { ok: false, message: 'Пульт работает со своим файлом, а не с сервером.' };
-      if (!['accounts', 'inviteCreate', 'accountDisable', 'accountReset', 'passwordChange', 'signOutOthers'].includes(fn)) return { ok: false, message: 'Неизвестная команда.' };
+      if (!['accounts', 'inviteCreate', 'accountDisable', 'accountReset', 'passwordChange', 'signOutOthers', 'partyKeySet'].includes(fn)) return { ok: false, message: 'Неизвестная команда.' };
       return c.remote.call(fn, ...args);
     },
     // 65 «Обновление Пульта». Compares versions as numbers: 4.10.0 is newer than 4.9.3.
@@ -423,10 +423,12 @@
     cabinetCustomerDelete: async id => (await ready()).cabinet.customerDelete(id),
     cabinetRead: async (ids, read) => (await ready()).cabinet.read(ids, read),
     cabinetOpen: async projectId => (await ready()).cabinet.open(projectId),
-    // Requisites by INN from DaData (src/core/party.js).
-    partyKey: async () => (await ready()).party.keyInfo(),
-    partyKeySet: async k => (await ready()).party.setKey(k),
-    partyByInn: async inn => (await ready()).party.find(inn),
+    // Requisites by INN: the Сервер Пульта asks DaData with the team's key (server/pult-server.js, /api/party).
+    partyLookup: async inns => {
+      const c = await ready();
+      if (!c.remote) return { ok: false, noServer: true, message: 'Реквизиты по ИНН подтягивает Сервер Пульта — подключите Пульт к нему.' };
+      return c.remote.party(inns);
+    },
     openDadata: () => invoke('open_url', { url: 'https://dadata.ru/api/' }),
 
     getWindowState: async () => { await startLook(); return windowState(); },

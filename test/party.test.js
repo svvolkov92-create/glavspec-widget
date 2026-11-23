@@ -58,3 +58,20 @@ test('find: no key, wrong INN, HTTP errors, a found company; the key', async () 
   assert.match((await off.find('7707083893')).message, /Нет связи.*timeout/);
   assert.deepEqual(await party.setKey(''), { ok: true, has: false });
 });
+
+test('findMany: several INNs, a fatal answer stops the rest', async () => {
+  const seen = [];
+  const party = P.createParty({ key: { get: async () => 'k', set: async () => {} }, http: async req => {
+    const inn = JSON.parse(req.body).query; seen.push(inn);
+    if (inn === '500100732259') return { status: 429, body: '' };
+    return { status: 200, body: JSON.stringify(inn === '7707083893' ? LEGAL : { suggestions: [] }) };
+  } });
+  const ok = await party.findMany(['7707083893', '7707083893', '7736050003'], { parallel: 1 });
+  assert.deepEqual(ok.map(r => [r.inn, r.ok]), [['7707083893', true], ['7736050003', false]], 'duplicates asked once');
+  seen.length = 0;
+  const lim = await party.findMany(['500100732259', '7707083893', '7736050003'], { parallel: 1 });
+  assert.equal(seen.length, 1, 'after the limit nothing more is asked');
+  assert.ok(lim.every(r => !r.ok && /лимит/.test(r.message)));
+  const nokey = P.createParty({ key: { get: async () => '', set: async () => {} }, http: async () => { throw new Error('asked'); } });
+  assert.ok((await nokey.findMany(['7707083893'])).every(r => r.needKey === true || /Ключ/.test(r.message)));
+});

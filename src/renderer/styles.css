@@ -1949,3 +1949,9 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 .party-diff { display: flex; flex-direction: column; gap: 4px; align-items: flex-start }
 .party-row { display: flex; align-items: center; gap: 8px; width: 100% }
 .party-row .grow { flex: 1; min-width: 0; overflow-wrap: anywhere }
+.oc-item { padding: 8px 0; border-top: 1px solid var(--line) }
+.oc-h { margin-bottom: 4px }
+.oc-row { display: flex !important; align-items: baseline; gap: 8px; width: 100%; padding: 2px 0 2px 4px }
+.oc-row .oc-f { flex: 0 0 170px; color: var(--muted, inherit) }
+.oc-row .oc-v { flex: 1; min-width: 0; overflow-wrap: anywhere }
+.oc-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--line) }

@@ -111,7 +111,7 @@
   const canSeeContacts = u => isGip(u) || (isChief(u) && !!u.canSeeContacts);
   const canSeeOrgs = u => canSeeContacts(u) || canSeeMoney(u);
   const ORG_BASE = ['name', 'roles'];
-  const ORG_CARD = ['fullName', 'director', 'inn', 'kpp', 'ogrn', 'address', 'phone', 'email', 'site', 'requisites', 'contacts', 'note', 'createdAt', 'createdBy', 'deletedAt'];
+  const ORG_CARD = ['fullName', 'director', 'regCheckedAt', 'regStatus', 'inn', 'kpp', 'ogrn', 'address', 'phone', 'email', 'site', 'requisites', 'contacts', 'note', 'createdAt', 'createdBy', 'deletedAt'];
   // Whether `user` works with the whole card of `o` (contacts, requisites), and the fields open to them; null — all (GIP).
   function orgCard(user, o) {
     if (isGip(user)) return true;
@@ -139,7 +139,7 @@
     if (o.roles !== undefined && (!Array.isArray(o.roles) || o.roles.some(r => !ORG_ROLES[r]))) return 'Роль контрагента: заказчик, подрядчик или поставщик.';
     if (o.fullName !== undefined && (typeof o.fullName !== 'string' || o.fullName.length > 500)) return 'Полное наименование — до 500 знаков.';
     if (o.inn && !/^\d{10}$|^\d{12}$/.test(String(o.inn))) return 'ИНН — 10 цифр у организации или 12 у ИП.';
-    for (const k of ['kpp', 'ogrn', 'phone', 'email', 'site', 'director']) if (o[k] !== undefined && (typeof o[k] !== 'string' || o[k].length > 200)) return 'Проверьте реквизиты контрагента.';
+    for (const k of ['kpp', 'ogrn', 'phone', 'email', 'site', 'director', 'regStatus', 'regCheckedAt']) if (o[k] !== undefined && (typeof o[k] !== 'string' || o[k].length > 200)) return 'Проверьте реквизиты контрагента.';
     if (o.contacts !== undefined && (!Array.isArray(o.contacts) || o.contacts.length > 50 || o.contacts.some(x => !x || typeof x.id !== 'string' || typeof x.name !== 'string' || x.name.length > 160 || (x.cabinetId !== undefined && typeof x.cabinetId !== 'string')))) return 'Список контактных лиц повреждён.';
     if (o.contracts !== undefined && (!Array.isArray(o.contracts) || o.contracts.length > 200 || o.contracts.some(x => !x || typeof x.id !== 'string' || String(x.no ?? '').length > 80 || !isDateStr(x.date) || !(Number(x.sum ?? 0) >= 0)))) return 'Проверьте договоры контрагента.';
     return null;

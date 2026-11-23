@@ -110,6 +110,8 @@ async function serverDialog(tab = '') {
         <p class="hint">Пульт скачает установщик с сервера, проверит, что файл тот самый, и запустит его — нажмите в нём «Далее». Ваши данные не затрагиваются.</p>
         ${upd.gip ? `<p class="hint">ГИП: скачайте с GitHub новый установщик (PultGlavspeca_…_x64-setup.exe) и положите его сюда — у всех появится «Обновить».</p>
           <div class="row-in"><button class="btn sm" type="button" data-sv="upd-put">Положить новую версию на сервер…</button><span class="hint" id="sv-upd-st"></span></div>` : ''}` : ''}
+      ${gip ? `<h3>Реквизиты по ИНН</h3><p class="hint">${info.server?.party ? 'Ключ DaData введён: у всех, кому открыты контрагенты, реквизиты подтягиваются по ИНН, работает «Сверить с ЕГРЮЛ».' : 'Введите ключ DaData один раз — и у всех, кому открыты контрагенты, название, КПП, ОГРН, адрес и руководитель будут подтягиваться по ИНН.'}</p>
+        <div class="row-in"><button class="btn sm" type="button" data-sv="party-key">${info.server?.party ? 'Изменить ключ…' : 'Ввести ключ DaData…'}</button></div>` : ''}
       <h3>Мой вход</h3>
       <div class="row-in">${field('sv-old', 'Текущий пароль', 'password')}${field('sv-new', 'Новый пароль', 'password')}<button class="btn sm" type="button" data-sv="pw">Сменить пароль</button></div>
       <div class="err" id="sv-err" hidden></div>
@@ -196,6 +198,7 @@ async function serverDialog(tab = '') {
       if (!r?.ok) return err(r?.message || 'Не получилось.');
       root.remove(); toast(`Пульт ${version} на сервере — у всех появится «Обновить»`); return serverDialog();
     }
+    if (a === 'party-key') { root.remove(); return openPartyKey(); }
     if (a === 'others') { const r = await api.serverCall('signOutOthers'); toast(r?.ok ? 'Другие устройства вышли' : (r?.message || 'Не получилось'), !r?.ok); return; }
     if (a === 'disconnect') {
       if (!(await confirmBox('Отключить этот Пульт от сервера? Он вернётся к своему файлу на этом компьютере — к данным на момент переноса или подключения. Общая база на сервере останется.', 'Отключить'))) return;

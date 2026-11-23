@@ -118,7 +118,8 @@
     },
     // «Сервер Пульта»
     serverInfo: async () => { await readyP; return { mode: 'server', ...remote.status(), login: LS.get('login'), web: true, conflicts: remote.state.conflicts.map((x, i) => ({ i, at: x.at, list: x.list })) }; },
-    serverCall: async (fn, ...args) => (['accounts', 'inviteCreate', 'accountDisable', 'accountReset', 'passwordChange', 'signOutOthers'].includes(fn) ? C(fn, ...args) : { ok: false, message: 'Неизвестная команда.' }),
+    partyLookup: async inns => { await readyP; return remote.party(inns); },
+    serverCall: async (fn, ...args) => (['accounts', 'inviteCreate', 'accountDisable', 'accountReset', 'passwordChange', 'signOutOthers', 'partyKeySet'].includes(fn) ? C(fn, ...args) : { ok: false, message: 'Неизвестная команда.' }),
     serverResolve: (i, keep) => readyP.then(() => remote.resolve(i, keep)),
     serverDisconnect: async () => { LS.set('token', null); LS.set('cache', null); location.reload(); return { ok: true }; },
     // The window

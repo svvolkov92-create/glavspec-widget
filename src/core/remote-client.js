@@ -257,8 +257,14 @@ function createRemote(deps) {
     throw new Error(r?.message || 'Обновления на сервере нет.');
   }
 
+  /* ---------- 4.9.2: requisites by INN — the server asks DaData with the team's key ---------- */
+  async function party(inns) {
+    try { return await request('POST', '/api/party', { inns }, { timeout: 120000 }); }
+    catch (e) { return { ok: false, message: e.auth ? e.message : `Сервер Пульта: ${e.message}` }; }
+  }
+
   return {
-    state, call, resolve, refresh, upload, download, uploadUpdate, downloadUpdate,
+    state, call, resolve, refresh, upload, download, uploadUpdate, downloadUpdate, party,
     view: () => state.view,
     status: () => ({ online: state.online, pending: state.queue.length, conflicts: state.conflicts.length, failed: state.failed.splice(0), lastError: state.lastError, server: state.server, url: base, authLost: state.authLost, outdated: state.outdated }),
     start() { stopped = false; loop(); },

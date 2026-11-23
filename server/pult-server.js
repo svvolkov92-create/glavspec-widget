@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.2.1';
+const VERSION = '1.3.0';
 // The version of the exchange with Пульты (src/core/remote-client.js: PROTOCOL). MIN_CLIENT — the oldest one this
 // server still accepts: raise it when old Пульты would write something the server no longer understands.
 const PROTOCOL = 1, MIN_CLIENT = 1;
@@ -26,6 +26,7 @@ const Composition = require(path.join(LIB, 'renderer', 'composition.js'));
 const JournalDiff = require(path.join(LIB, 'core', 'journal-diff.js'));
 const createCore = require(path.join(LIB, 'core', 'handlers.js'));
 const createChats = require(path.join(LIB, 'core', 'chats.js'));
+const Party = require(path.join(LIB, 'core', 'party.js'));
 
 /* ---------------- config ---------------- */
 function loadConfig(overrides = {}) {
@@ -211,6 +212,21 @@ function createServer(cfgIn = {}) {
     try { return await fn(); } finally { actor = was; }
   }
 
+  // 4.9.2: requisites by INN from DaData. The key is the team's, entered by the GIP, kept here only (party.json, not in
+  // the base and its copies); cfg.dadataKey (config.json) works too. Lookups run outside the queue of rules.
+  const partyFile = path.join(cfg.dataDir, 'party.json');
+  let partyKey = String(readJson(partyFile, {})?.key || cfg.dadataKey || '');
+  const party = Party.createParty({
+    key: {
+      get: async () => partyKey,
+      set: async k => { partyKey = k; writeAtomic(partyFile, JSON.stringify({ key: k })); try { fs.chmodSync(partyFile, 0o600); } catch { /* Windows */ } },
+    },
+    http: async req => {
+      const r = await fetch(req.url, { method: req.method, headers: req.headers, body: req.body, signal: AbortSignal.timeout(15_000) });
+      return { status: r.status, body: await r.text() };
+    },
+  });
+
   // 65: the Пульт installer the GIP put on the server (version, size, SHA-256 — the Пульт checks the file by it).
   const updDir = path.join(cfg.dataDir, 'updates');
   function pultUpdate() {
@@ -376,6 +392,12 @@ function createServer(cfgIn = {}) {
       saveAcc();
       return RPC.inviteCreate(me, userId);
     },
+    partyKeySet: async (me, k) => {
+      if (!A.isGip(store.data.users[me.userId])) return { ok: false, message: 'Ключ DaData вводит ГИП.' };
+      const r = await party.setKey(k);
+      if (r.ok) store.save(); // every Пульт gets the news in /api/view (server.party)
+      return r;
+    },
     signOutOthers: me => {
       for (const [k, s] of Object.entries(acc.sessions)) if (s.userId === me.userId && k !== me.sessionKey) delete acc.sessions[k];
       saveAcc();
@@ -528,7 +550,16 @@ function createServer(cfgIn = {}) {
 
       if (p === '/api/view') {
         const data = await asUser(me.userId, () => core.userView());
-        return json(res, 200, { ok: true, rev: store.rev, data, server: { name: cfg.name, version: VERSION, protocol: PROTOCOL, cabinetUrl: cfg.cabinetUrl || '', pult: pultUpdate() } });
+        return json(res, 200, { ok: true, rev: store.rev, data, server: { name: cfg.name, version: VERSION, protocol: PROTOCOL, cabinetUrl: cfg.cabinetUrl || '', pult: pultUpdate(), party: !!partyKey } });
+      }
+
+      /* --- 4.9.2: requisites by INN (up to 50 at a time) for those who work with counterparties --- */
+      if (p === '/api/party' && req.method === 'POST') {
+        if (!A.canSeeOrgs(store.data.users[me.userId])) return json(res, 403, { ok: false, message: 'Реквизиты по ИНН — для тех, кому открыты контрагенты.' });
+        const b = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}') || {};
+        const inns = Array.isArray(b.inns) ? b.inns.map(String).filter(x => /^\d{10}$|^\d{12}$/.test(x)) : [];
+        if (!inns.length || inns.length > 50) return json(res, 400, { ok: false, message: 'Нужно от 1 до 50 ИНН за раз.' });
+        return json(res, 200, { ok: true, results: await party.findMany(inns) });
       }
 
       /* --- 65: the new Пульт for Windows, put here by the GIP; every Пульт offers «Обновить» --- */

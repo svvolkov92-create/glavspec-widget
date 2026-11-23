@@ -19,7 +19,7 @@ fs.copyFileSync(path.join(__dirname, 'tauri-windows.js'), path.join(to, 'tauri-w
 fs.copyFileSync(path.join(__dirname, 'tauri-api.js'), path.join(to, 'tauri-api.js'));
 fs.copyFileSync(path.join(__dirname, 'tauri-core.js'), path.join(to, 'tauri-core.js'));
 // The shared rules of the Electron main process (src/core), loaded after logic.js / access.js / composition.js.
-const CORE = ['store-core.js', 'journal-diff.js', 'handlers.js', 'chats.js', 'files.js', 'cabinet-rules.js', 'remote-client.js', 'party.js'];
+const CORE = ['store-core.js', 'journal-diff.js', 'handlers.js', 'chats.js', 'files.js', 'cabinet-rules.js', 'remote-client.js'];
 fs.mkdirSync(path.join(to, 'core'));
 for (const f of CORE) fs.copyFileSync(path.join(root, 'src', 'core', f), path.join(to, 'core', f));
 

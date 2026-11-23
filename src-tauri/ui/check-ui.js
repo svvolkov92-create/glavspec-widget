@@ -692,6 +692,53 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await js(() => [...document.querySelectorAll('.modal [data-m="yes"]')].pop()?.click()); await wait(2500);
     check('update: the same installer is started', sysCalls.includes('update:9.1.0') && fsMem.__update?.equals(exe), sysCalls.filter(x => x.startsWith('update')).join(','));
     await js(() => document.querySelector('.srv-modal')?.remove());
+    // 4.9.2: requisites by INN through the server — the GIP enters the DaData key once, a card fills by INN, «Сверить с ЕГРЮЛ».
+    {
+      const REG = {
+        '7736050003': { type: 'LEGAL', kpp: '772801001', ogrn: '1027700070518', name: { full_with_opf: 'ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО «ГАЗПРОМ»', short_with_opf: 'ПАО «ГАЗПРОМ»' }, management: { post: 'ПРЕДСЕДАТЕЛЬ ПРАВЛЕНИЯ', name: 'Миллер Алексей Борисович' }, address: { unrestricted_value: '197229, г Санкт-Петербург, Лахтинский пр-кт, д 2 к 3 стр 1' }, state: { status: 'ACTIVE' } },
+        '7707083893': { type: 'LEGAL', kpp: '773601001', ogrn: '1027700132195', name: { full_with_opf: 'ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО «СБЕРБАНК РОССИИ»', short_with_opf: 'ПАО СБЕРБАНК' }, address: { unrestricted_value: '117312, г Москва, ул Вавилова, д 19' }, state: { status: 'ACTIVE' } },
+        '500100732259': { type: 'INDIVIDUAL', ogrn: '304500116000157', name: { full_with_opf: 'Индивидуальный предприниматель Иванов Иван Иванович', short_with_opf: 'ИП Иванов Иван Иванович' }, address: { value: 'Московская обл, г Коломна' }, state: { status: 'LIQUIDATED', liquidation_date: 1700000000000 } },
+      };
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = async (u, o) => {
+        if (!String(u).startsWith('https://suggestions.dadata.ru/')) return realFetch(u, o);
+        if (o.headers.Authorization !== 'Token 0123456789abcdef0123456789abcdef01234567') return new Response('', { status: 403 });
+        const inn = JSON.parse(o.body).query, d = REG[inn];
+        return new Response(JSON.stringify({ suggestions: d ? [{ value: d.name.short_with_opf, data: { ...d, inn } }] : [] }), { status: 200 });
+      };
+      try {
+        const at = new Date().toISOString();
+        await js(at => window.api.write([
+          { type: 'set', col: 'orgs', id: 'chk-o1', data: { name: 'Газпром (наш)', roles: ['supplier'], inn: '7736050003', kpp: '000000000', contacts: [], createdAt: at } },
+          { type: 'set', col: 'orgs', id: 'chk-o2', data: { name: 'ИП Иванов', roles: ['contractor'], inn: '500100732259', contacts: [], createdAt: at } },
+          { type: 'set', col: 'orgs', id: 'chk-o3', data: { name: 'Без ИНН', roles: ['customer'], contacts: [], createdAt: at } },
+        ], { action: 'test' }), at); await wait(1500);
+        await js(() => document.querySelector('[data-act="tab"][data-id="orgs"]').click()); await wait(400);
+        check('4.9.2: no key on the server — no «Сверить с ЕГРЮЛ»', await js(() => !document.querySelector('[data-act="orgcheck"]')));
+        await js(() => document.querySelector('#srv-chip').click()); await wait(700);
+        check('4.9.2: the GIP sees «Реквизиты по ИНН» in «Сервер Пульта»', await js(() => !!document.querySelector('.srv-modal [data-sv="party-key"]')));
+        await js(() => document.querySelector('.srv-modal [data-sv="party-key"]').click()); await wait(300);
+        await js(() => { const i = document.querySelector('#pk-key'); i.value = '0123456789abcdef0123456789abcdef01234567'; i.closest('form').requestSubmit(); }); await wait(2500);
+        const pj = (() => { try { return JSON.parse(fs.readFileSync(require('path').join(pDir, 'party.json'), 'utf8')); } catch { return null; } })();
+        check('4.9.2: the key is on the server, not in the window\'s settings', pj?.key?.length === 40 && !JSON.stringify(disk.settings).includes('0123456789abcdef'), JSON.stringify(Object.keys(disk.settings)));
+        check('4.9.2: «Сверить с ЕГРЮЛ» appears', await js(() => !!document.querySelector('[data-act="orgcheck"]')));
+        await js(() => document.querySelector('[data-act="new-org"]').click()); await wait(500);
+        await js(() => { const i = document.querySelector('#o-inn'); i.value = '7707083893'; i.dispatchEvent(new Event('input', { bubbles: true })); }); await wait(1800);
+        const f = await js(() => ({ name: document.querySelector('#o-name').value, kpp: document.querySelector('#o-kpp').value, addr: document.querySelector('#o-address').value }));
+        check('4.9.2: a new card fills by INN through the server', f.name === 'ПАО СБЕРБАНК' && f.kpp === '773601001' && f.addr.startsWith('117312'), JSON.stringify(f));
+        await js(() => document.querySelector('[data-act="discard"]').click()); await wait(300);
+        await js(() => document.querySelector('[data-act="orgcheck"]').click()); await wait(2500);
+        const box = await js(() => document.querySelector('#orgcheck-box')?.textContent || '');
+        check('4.9.2: the check lists differences, a liquidated ИП and those without INN', /Проверено: 2 из 2/.test(box) && /Расхождения/.test(box) && /ликвидирована/.test(box) && /Без ИНН.*1/.test(box), box.replace(/\s+/g, ' ').slice(0, 300));
+        const picks = await js(() => Object.fromEntries([...document.querySelectorAll('[data-oc-pick]')].map(i => [i.dataset.ocPick.split(':')[1] + ':' + i.dataset.ocPick.split(':')[0], i.checked])));
+        check('4.9.2: our own short name is not ticked, a wrong KPP is', Object.entries(picks).some(([k, v]) => k.startsWith('name:') && !v) && Object.entries(picks).some(([k, v]) => k.startsWith('kpp:') && v), JSON.stringify(picks));
+        await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-orgcheck.png' }).catch(() => {});
+        await js(() => document.querySelector('[data-act="orgcheck-apply"]').click()); await wait(2500);
+        const o1 = pult.store.data.orgs['chk-o1'], o2 = pult.store.data.orgs['chk-o2'];
+        check('4.9.2: «Обновить отмеченное» — KPP and the rest by the registry, our name kept', o1.kpp === '772801001' && o1.name === 'Газпром (наш)' && o1.fullName?.includes('ГАЗПРОМ') && !!o1.regCheckedAt, JSON.stringify(o1));
+        check('4.9.2: the liquidated ИП is marked in the base and in the list', o2.regStatus === 'ликвидирована' && await js(() => /ликвидирована/.test(document.querySelector('.org-t')?.textContent || '')), JSON.stringify(o2));
+      } finally { globalThis.fetch = realFetch; }
+    }
     // The user picker: no switching on the server.
     await js(() => document.querySelector('#btn-user').click()); await wait(200);
     check('server: no switching between people', await js(() => !document.querySelector('#user-menu [data-act="switch-user"]') && !!document.querySelector('#user-menu [data-act="server"]')));

@@ -131,6 +131,30 @@ test('pult server: setup, invitations, rights, conflicts, live updates, files', 
     assert.equal((await s.rpc(chief, 'write', [{ type: 'update', col: 'orgs', id: 'o-cust', data: { name: 'Х' } }], {})).ok, false);
     assert.ok((await s.rpc(chief, 'write', [{ type: 'update', col: 'orgs', id: 'o-sub', data: { contracts: [] } }], {})).ok);
 
+    // 4.9.2: requisites by INN through the server — the team's DaData key is here, never on the computers.
+    assert.equal((await s.call('GET', '/api/view', null, chief)).body.server.party, false);
+    assert.equal((await s.call('POST', '/api/party', { inns: ['7707083893'] }, spec)).status, 403, 'not for a specialist');
+    const nokey = (await s.call('POST', '/api/party', { inns: ['7707083893'] }, chief)).body;
+    assert.match(nokey.results[0].message, /Ключ DaData/);
+    assert.equal((await s.rpc(chief, 'partyKeySet', '0123456789abcdef0123456789abcdef01234567')).ok, false, 'the key is the GIP\'s');
+    assert.ok((await s.rpc(gip, 'partyKeySet', '0123456789abcdef0123456789abcdef01234567')).ok);
+    assert.equal((await s.call('GET', '/api/view', null, chief)).body.server.party, true);
+    assert.ok(!JSON.stringify(s.app.store.data).includes('0123456789abcdef'), 'the key is not in the base');
+    const realFetch = globalThis.fetch, asked = [];
+    globalThis.fetch = async (u, o) => {
+      if (!String(u).startsWith('https://suggestions.dadata.ru/')) return realFetch(u, o);
+      asked.push([o.headers.Authorization, JSON.parse(o.body).query]);
+      const inn = JSON.parse(o.body).query;
+      return new Response(JSON.stringify({ suggestions: inn === '7707083893' ? [{ value: 'ПАО СБЕРБАНК', data: { type: 'LEGAL', inn, kpp: '773601001', ogrn: '1027700132195', name: { short_with_opf: 'ПАО СБЕРБАНК' }, state: { status: 'ACTIVE' } } }] : [] }), { status: 200 });
+    };
+    try {
+      const two = (await s.call('POST', '/api/party', { inns: ['7707083893', '7736050003'] }, chief)).body;
+      assert.equal(two.results[0].party.kpp, '773601001');
+      assert.match(two.results[1].message, /не найден/);
+      assert.equal(asked[0][0], 'Token 0123456789abcdef0123456789abcdef01234567');
+    } finally { globalThis.fetch = realFetch; }
+    assert.equal((await s.call('POST', '/api/party', { inns: [] }, chief)).status, 400);
+
     // The specialist: own cards, own project; may not edit someone else's card.
     const sv = (await s.call('GET', '/api/view', null, spec)).body.data;
     assert.deepEqual(sv.tasks.map(t => t.id), ['t2']);
