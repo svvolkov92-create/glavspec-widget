@@ -137,3 +137,18 @@ test('readiness: fixed by status, manual 1…90 in work', () => {
   assert.match(A.checkWrite(users[0], 'tasks', t, { ...t, readiness: 95 }, users), /от 1 до 90/);
   assert.match(A.checkWrite(users[1], 'tasks', t, { ...t, readiness: 60 }, users), /Специалист/);
 });
+
+test('INN check digits and company name keys (4.9)', () => {
+  assert.equal(L.innError(''), '');
+  assert.equal(L.innError('7707083893'), '');
+  assert.equal(L.innError('7707 083 893'), '');
+  assert.equal(L.innError('500100732259'), '');
+  assert.match(L.innError('7707083894'), /контрольной/);
+  assert.match(L.innError('500100732258'), /контрольной/);
+  assert.match(L.innError('12345'), /10 цифр/);
+  assert.equal(L.orgKey('ООО «Альфа-Строй»'), 'альфа строй');
+  assert.equal(L.orgKey('Альфа строй, ООО'), 'альфа строй');
+  assert.equal(L.orgKey('Общество с ограниченной ответственностью "Альфа Строй"'), 'альфа строй');
+  assert.equal(L.orgKey('АО «Дальтрансуголь»'), L.orgKey('Дальтрансуголь АО'));
+  assert.notEqual(L.orgKey('ООО «Ёлка»'), L.orgKey('ООО «Белка»'));
+});

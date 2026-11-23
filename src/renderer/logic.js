@@ -577,6 +577,25 @@
     for (const t of tasks) for (const c of t.comments || []) if (c.userId === uid) n += (c.thanks || []).filter(x => x !== uid).length;
     return n;
   }
+  // Counterparties (4.9): the INN check digits (10 digits — a company, 12 — a person or ИП); '' when fine or empty.
+  function innError(v) {
+    const s = String(v ?? '').replace(/\s+/g, '');
+    if (!s) return '';
+    if (!/^\d{10}$|^\d{12}$/.test(s)) return 'ИНН — 10 цифр у организации или 12 у ИП.';
+    const d = [...s].map(Number);
+    const sum = (w, n) => (w.reduce((a, x, i) => a + x * d[i], 0) % 11) % 10 === d[n];
+    const ok = s.length === 10 ? sum([2, 4, 10, 3, 5, 9, 4, 6, 8], 9)
+      : sum([7, 2, 4, 10, 3, 5, 9, 4, 6, 8], 10) && sum([3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8], 11);
+    return ok ? '' : 'ИНН не сходится по контрольной цифре — проверьте, нет ли опечатки.';
+  }
+  // A company name without the legal form and quotes: «ООО "Альфа-Строй"» and «Альфа-строй ООО» are the same key.
+  const LEGAL_FORMS = new Set(['ооо', 'оао', 'зао', 'пао', 'ао', 'нао', 'ип', 'муп', 'гуп', 'фгуп', 'кгбу', 'кгку', 'кгау', 'мбу', 'мку', 'мау', 'ано', 'тсж']);
+  function orgKey(name) {
+    const s = String(name ?? '').toLowerCase().replace(/ё/g, 'е')
+      .replace(/общество с ограниченной ответственностью|(публичное |закрытое |открытое )?акционерное общество|индивидуальный предприниматель/g, ' ');
+    return s.split(/[^a-zа-я0-9]+/).filter(t => t && !LEGAL_FORMS.has(t)).join(' ');
+  }
+
   const paymentPlan = memo(paymentPlanRaw), milestonesOf = memo(milestonesOfRaw);
   const shiftsOf = memo(t => shiftsOfRaw(t));
 
@@ -584,6 +603,6 @@
     STATUSES, ACTIVE, PROJECT_STATUSES, PHASES, phaseLabel, defaultPhases, phaseState, projectNow, phaseDays, planPhases, criticalPath, shiftFollowers, DOC_KINDS, docRule, docUntil, docKindOf, TRANSITIONS, firstTime, projectGoal, thanksFor, MARK_GROUPS, SHIFT_REASONS, PAY_TRIGGERS, progress, readiness, readinessManual, READY_MIN, READY_MAX,
     normalizeMarks, splitMarks, sectionsOf, todayStr, isDate, dayNum, addDays, fmtDate, parseMoney, cents,
     budgetOf, paidOf, restOf, timing, totals, sortByDeadline,
-    visible, historyOf, shiftsOf, depsOf, dependencyIssues, wouldCycle, Cal, reviewStats, lateness, reliability, paymentPlan, milestonesOf, matchCount, attention, digestText,
+    visible, historyOf, shiftsOf, depsOf, dependencyIssues, wouldCycle, Cal, reviewStats, lateness, reliability, paymentPlan, milestonesOf, matchCount, attention, digestText, innError, orgKey,
   };
 });

@@ -139,3 +139,30 @@ test('absences, inbox, activity, reviewers', () => {
   assert.equal(A.checkWrite(users[1], 'users', before, { ...before, absences: [] }, users, 's'), null);
   assert.match(A.checkWrite(users[2], 'users', before, { ...before, directions: ['el', 'ss'] }, users, 's'), /ГИП/);
 });
+
+test('counterparties (4.9): customers to contacts people, contractors and contracts to budget people, names to all', () => {
+  const gip = { id: 'g', role: 'gip' }, cont = { id: 'c', role: 'chief', canSeeContacts: true }, bud = { id: 'b', role: 'chief', canSeeBudget: true }, sp = { id: 's', role: 'specialist' };
+  const cust = { id: 'o1', name: 'ООО «А»', roles: ['customer'], inn: '7707083893', contacts: [{ id: 'k', name: 'Иван' }], contracts: [{ id: 'x', no: '1', date: '2026-01-01', sum: 5 }] };
+  const sub = { id: 'o2', name: 'ООО «Б»', roles: ['contractor'], requisites: 'р/с', contracts: [{ id: 'y', no: '2', date: '2026-01-01', sum: 7 }] };
+  const gone = { id: 'o3', name: 'В', roles: [], deletedAt: '2026-01-01' };
+  const view = u => Object.fromEntries(A.viewFor(u, { orgs: [cust, sub, gone], users: [] }).orgs.map(o => [o.id, o]));
+  assert.equal(Object.keys(view(gip)).length, 3, 'the GIP sees the trash too');
+  assert.deepEqual(view(cont).o1.contacts, cust.contacts);
+  assert.equal(view(cont).o1.contracts, undefined, 'a customer\'s contract is the project «Договор» — the GIP\'s');
+  assert.deepEqual(Object.keys(view(cont).o2).sort(), ['id', 'name', 'roles']);
+  assert.deepEqual(view(bud).o2.contracts, sub.contracts);
+  assert.deepEqual(Object.keys(view(bud).o1).sort(), ['id', 'name', 'roles']);
+  assert.deepEqual(Object.keys(view(sp).o1).sort(), ['id', 'name', 'roles']);
+  assert.equal(view(sp).o3, undefined);
+
+  assert.equal(A.checkWrite(cont, 'orgs', null, { name: 'ООО «Г»', roles: ['customer'], contacts: [] }, []), null);
+  assert.match(A.checkWrite(cont, 'orgs', sub, { ...sub, name: 'Х' }, []), /не открыты/);
+  assert.match(A.checkWrite(cont, 'orgs', cust, { ...cust, roles: ['customer', 'supplier'] }, []), /бюджет/);
+  assert.match(A.checkWrite(bud, 'orgs', cust, { ...cust, roles: [] }, []), /заказчик/);
+  assert.equal(A.checkWrite(bud, 'orgs', sub, { ...sub, contracts: [] }, []), null);
+  assert.match(A.checkWrite(cont, 'orgs', cust, null, []), /ГИП/);
+  assert.match(A.checkWrite(sp, 'orgs', null, { name: 'Д' }, []), /ГИП/);
+  assert.match(A.checkWrite(gip, 'orgs', null, { name: 'Д', inn: '123' }, []), /ИНН/);
+  assert.match(A.checkWrite(gip, 'orgs', null, { name: ' ' }, []), /название/);
+  assert.match(A.checkWrite(gip, 'orgs', null, { name: 'Д', roles: ['boss'] }, []), /Роль/);
+});

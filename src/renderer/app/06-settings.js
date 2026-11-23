@@ -22,7 +22,7 @@ function renderSettings() {
   const body = $('#set-body');
   if (!body) return;
   const top = body.scrollTop;
-  const tabs = orderedTabs();
+  const tabs = visibleTabs();
   body.innerHTML = `<section class="set-sec" data-sec-id="view"><h3>Вид и окно</h3>${viewSectionsHtml(true)}<p class="hint">Прозрачность, «поверх окон» и сквозные клики — в меню «Окно» в заголовке.</p></section>
     <section class="set-sec" data-sec-id="tabs"><h3>Порядок вкладок</h3><p class="hint">Вкладки можно и просто перетащить мышью на панели.</p>${tabs.map((x, i) => `<div class="cols-row"><span>${icon(x.id)} ${esc(x.label)}</span><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'}>↑</button><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="1"${i < tabs.length - 1 ? '' : ' disabled'}>↓</button></div>`).join('')}
       <button class="btn ghostbtn sm" type="button" data-act="tabs-reset">Как было</button></section>

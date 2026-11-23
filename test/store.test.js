@@ -33,7 +33,7 @@ test('stored id field cannot override the record key', () => {
 });
 
 test('a broken data file: unknown or broken collections become empty, a non-object root is refused', () => {
-  assert.deepEqual(snapshot(fromParsed({ tasks: 'x', projects: { p: { n: 1 } } })), { projects: [{ id: 'p', n: 1 }], contractors: [], tasks: [], users: [], chats: [], depts: [] });
+  assert.deepEqual(snapshot(fromParsed({ tasks: 'x', projects: { p: { n: 1 } } })), { projects: [{ id: 'p', n: 1 }], contractors: [], tasks: [], users: [], chats: [], depts: [], orgs: [] });
   assert.throws(() => fromParsed([1, 2]));
 });
 

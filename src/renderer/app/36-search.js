@@ -7,6 +7,7 @@ function noteRecent(kind, id) {
   recents = [{ kind, id }, ...recents.filter(r => !(r.kind === kind && r.id === id))].slice(0, RECENT_MAX);
   saveLocal('recents', recents);
 }
+const orgSub = o => `контрагент${A.orgRoles(o).length ? ' · ' + A.orgRoles(o).map(r => A.ORG_ROLES[r].toLowerCase()).join(', ') : ''}${o.inn ? ' · ИНН ' + o.inn : ''}`;
 const recentRank = it => { const i = recents.findIndex(r => r.kind === it.kind && r.id === it.id); return i < 0 ? RECENT_MAX : i; };
 // With an empty query: the recent items that still exist, newest first.
 function recentItems() {
@@ -15,6 +16,7 @@ function recentItems() {
     if (r.kind === 'task') { const t = state.tasks.get(r.id); if (t) out.push({ kind: 'task', id: t.id, title: marksText(t), sub: `${projectOf(t)?.name || '—'} · ${executorOf(t)?.name || 'нет исполнителя'} · ${timing(t).text}` }); }
     else if (r.kind === 'project') { const p = state.projects.get(r.id); if (p) out.push({ kind: 'project', id: p.id, title: p.name, sub: `проект${p.code ? ' · ' + p.code : ''}${p.archived ? ' · в архиве' : ''}` }); }
     else if (r.kind === 'contractor') { const c = state.contractors.get(r.id); if (c) out.push({ kind: 'contractor', id: c.id, title: c.name, sub: `подрядчик${c.specialty ? ' · ' + c.specialty : ''}` }); }
+    else if (r.kind === 'org') { const o = state.orgs?.get(r.id); if (o) out.push({ kind: 'org', id: o.id, title: o.name, sub: orgSub(o) }); }
   }
   return out;
 }
@@ -34,6 +36,9 @@ function searchAll(query) {
   }
   for (const c of state.contractors.values()) {
     if (match(norm([c.name, c.specialty, c.phone, c.email, c.messenger].join(' ')))) out.push({ kind: 'contractor', id: c.id, rank: 2, title: c.name, sub: `подрядчик${c.specialty ? ' · ' + c.specialty : ''}` });
+  }
+  if (A.canSeeOrgs(state.me)) for (const o of state.orgs?.values() || []) {
+    if (match(norm([o.name, o.inn, ...(o.contacts || []).map(k => k.name)].join(' ')))) out.push({ kind: 'org', id: o.id, rank: 2, title: o.name, sub: orgSub(o) });
   }
   return out.sort((a, b) => a.archived - b.archived || recentRank(a) - recentRank(b) || a.rank - b.rank).slice(0, 14);
 }
@@ -143,6 +148,7 @@ function openPalette(opts = {}) {
     if (state.win.compact) { api.setCompact(false); state.win.compact = false; }
     if (it.kind === 'task') openTask(it.id);
     else if (it.kind === 'contractor') openContractor(it.id);
+    else if (it.kind === 'org') openOrg(it.id);
     else {
       const p = state.projects.get(it.id);
       if (p?.archived) state.showArchive = true;

@@ -18,6 +18,7 @@ const ICON = {
   gantt: '<path d="M2 2v12h12" stroke-linecap="round"/><path d="M4.5 5h5M6.5 8h6M4.5 11h4" stroke-width="2.2" stroke-linecap="round"/>',
   kanban: '<rect x="1.8" y="2" width="3.6" height="11.5" rx=".9"/><rect x="6.2" y="2" width="3.6" height="7.5" rx=".9"/><rect x="10.6" y="2" width="3.6" height="9.5" rx=".9"/>',
   tasks: '<path d="M6 4h8M6 8h8M6 12h8" stroke-linecap="round"/><path d="M2 4h1.4M2 8h1.4M2 12h1.4" stroke-width="1.8" stroke-linecap="round"/>',
+  orgs: '<path d="M2.4 14V2.6h7.2V14M9.6 6.2h4V14M1.4 14h13.2" stroke-linejoin="round" stroke-linecap="round"/><path d="M4.6 5h.8M7 5h.8M4.6 7.6h.8M7 7.6h.8M4.6 10.2h.8M7 10.2h.8M11.4 8.8h.4M11.4 11.2h.4" stroke-linecap="round"/>',
   office: '<path d="M2 14V6.5L8 2l6 4.5V14z" stroke-linejoin="round"/><path d="M6 14v-3.5h4V14M5 7.5h1.5M9.5 7.5H11" stroke-linecap="round"/>',
   detach: '<rect x="1.8" y="4.8" width="9.4" height="9.4" rx="1.2"/><path d="M8.5 2h5.5v5.5M14 2L7.5 8.5" stroke-linecap="round" stroke-linejoin="round"/>',
   dock: '<rect x="1.8" y="1.8" width="12.4" height="12.4" rx="1.4"/><path d="M11 5L6 10M6 6v4h4" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -44,6 +45,7 @@ const TABS = [
   { id: 'overview', label: 'Сводка' },
   { id: 'projects', label: 'Проекты' },
   { id: 'people', label: 'Люди' },
+  { id: 'orgs', label: 'Контрагенты' }, // 4.9 — only for those who work with customers or the budget
   { id: 'office', label: 'Офис' },
   { id: 'gantt', label: 'Диаграмма Ганта' },
   { id: 'kanban', label: 'Канбан' },
@@ -125,7 +127,7 @@ function setNav(patch) {
 }
 const TRASH_DAYS = 30;
 // Tabs depend on the role: a specialist has no outside contractors or team management.
-const visibleTabs = () => orderedTabs(); // 4.1: «Люди» for everyone — a specialist sees staff and the org structure
+const visibleTabs = () => orderedTabs().filter(t => t.id !== 'orgs' || A.canSeeOrgs(state.me)); // 4.1: «Люди» for everyone — a specialist sees staff and the org structure
 
 const state = {
   // Non-deleted records (archived projects included). Deleted ones live in state.trash.
@@ -236,8 +238,8 @@ function setData(snap) {
   state.users = new Map((snap.users || []).filter(u => !u.deletedAt).map(u => [u.id, u]));
   if (prevMe && prevMe !== state.me?.id) { undoStack.length = 0; closeDrawer(); }
   if (!visibleTabs().some(t => t.id === state.tab)) state.tab = 'overview';
-  state.trash = { projects: [], contractors: [], tasks: [] };
-  for (const col of ['projects', 'contractors', 'tasks']) {
+  state.trash = { projects: [], contractors: [], tasks: [], orgs: [] };
+  for (const col of ['projects', 'contractors', 'tasks', 'orgs']) {
     const live = new Map();
     for (const d of snap[col] || []) {
       if (d.deletedAt) state.trash[col].push(d); else live.set(d.id, d);
@@ -250,8 +252,8 @@ function setData(snap) {
   state.loaded = true;
   if (prevMe !== state.me?.id) { mentionSeenTs = null; msg.chatId = SOLO?.kind === 'chat' ? SOLO.id : ''; } // a chat window stays on its chat
   const d = state.drawer;
-  if (d?.id && ['task', 'project', 'contractor'].includes(d.kind)) {
-    const map = { task: state.tasks, project: state.projects, contractor: state.contractors }[d.kind];
+  if (d?.id && ['task', 'project', 'contractor', 'org'].includes(d.kind)) {
+    const map = { task: state.tasks, project: state.projects, contractor: state.contractors, org: state.orgs }[d.kind];
     if (!map.has(d.id)) closeDrawer();
   }
   if (d?.kind === 'trash') renderTrash();
@@ -310,7 +312,7 @@ async function write(ops, okMsg, { undo = true, undoLabel } = {}) {
 async function undoLast() {
   const last = undoStack.pop();
   if (!last) return toast('Отменять нечего.');
-  if (state.drawer && ['task', 'project', 'contractor'].includes(state.drawer.kind)) closeDrawer();
+  if (state.drawer && ['task', 'project', 'contractor', 'org'].includes(state.drawer.kind)) closeDrawer();
   if (await write(last.ops, null, { undo: false, undoLabel: `Отмена: ${last.label}` })) toast(`Отменено: ${last.label.replace(/^[А-ЯЁ]/, c => c.toLowerCase())}`);
 }
 async function refresh() { try { const r = await api.getData(); state.remote = r.remote || null; setData(r.data); renderRemote(); } catch { /* the change event will follow */ } }

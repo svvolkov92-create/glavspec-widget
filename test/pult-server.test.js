@@ -117,6 +117,20 @@ test('pult server: setup, invitations, rights, conflicts, live updates, files', 
     assert.equal(cv2.tasks.find(t => t.id === 't1').budget, 500000);
     assert.equal(cv2.projects.find(p => p.id === 'p1').contract, undefined, 'the customer\'s contract stays with the GIP');
 
+    // Counterparties (4.9): the budget chief sees contractors with contracts, customers by name only; a «set» of what
+    // they see in part keeps the hidden rest.
+    assert.ok((await s.rpc(gip, 'write', [
+      { type: 'set', col: 'orgs', id: 'o-cust', data: { name: 'ООО «Заказчик»', roles: ['customer'], inn: '7707083893', contacts: [{ id: 'k1', name: 'Иванов' }] } },
+      { type: 'set', col: 'orgs', id: 'o-sub', data: { name: 'ООО «Подряд»', roles: ['contractor'], contracts: [{ id: 'd1', no: '1', date: '2026-11-01', sum: 100 }] } },
+    ], {})).ok);
+    const ov = Object.fromEntries((await s.call('GET', '/api/view', null, chief)).body.data.orgs.map(o => [o.id, o]));
+    assert.deepEqual(Object.keys(ov['o-cust']).sort(), ['id', 'name', 'roles']);
+    assert.equal(ov['o-sub'].contracts[0].sum, 100);
+    assert.ok((await s.rpc(chief, 'write', [{ type: 'set', col: 'orgs', id: 'o-cust', data: { name: 'ООО «Заказчик»', roles: ['customer'] } }], {})).ok);
+    assert.equal(s.app.store.data.orgs['o-cust'].contacts[0].name, 'Иванов', 'the hidden contacts stay');
+    assert.equal((await s.rpc(chief, 'write', [{ type: 'update', col: 'orgs', id: 'o-cust', data: { name: 'Х' } }], {})).ok, false);
+    assert.ok((await s.rpc(chief, 'write', [{ type: 'update', col: 'orgs', id: 'o-sub', data: { contracts: [] } }], {})).ok);
+
     // The specialist: own cards, own project; may not edit someone else's card.
     const sv = (await s.call('GET', '/api/view', null, spec)).body.data;
     assert.deepEqual(sv.tasks.map(t => t.id), ['t2']);

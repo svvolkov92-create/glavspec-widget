@@ -11,6 +11,7 @@ function setCab(v) {
   const unreadBefore = cab?.messages?.filter(m => !m.read).length || 0, countBefore = cab?.messages?.length || 0;
   cab = v;
   if (document.querySelector('.settings-modal')) renderSettings();
+  if ($('#org-cab')) renderOrgCabinet();
   if ($('#cab-box')) { renderCabinetBox(); custNav(); if ((cab?.messages?.length || 0) !== countBefore) loadCabCustomers(true); } // «последний вход» moves with new messages
   const unread = cab?.messages?.filter(m => !m.read).length || 0;
   if (state.loaded && (state.tab === 'overview' || unread !== unreadBefore)) render();
@@ -21,6 +22,7 @@ async function loadCabCustomers(force = false) {
   cabLoadErr = r.ok ? '' : r.message;
   cabCustomers = r.ok ? r.customers : cabCustomers;
   renderCabinetBox();
+  renderOrgCabinet();
 }
 // Overview: unread messages from customers, urgent ones first.
 function cabinetInbox() {
@@ -54,6 +56,7 @@ function renderCabinetBox() {
     ${cabPw ? `<div class="cab-pw"><b>Доступ для ${esc(cabPw.name)}</b><div>Адрес: <code>${esc(cab.publicUrl || cab.url)}</code></div><div>Логин: <code>${esc(cabPw.login)}</code> · Пароль: <code>${esc(cabPw.password)}</code></div>
       <span class="hint">Пароль показывается один раз — передайте его заказчику. Забудет — нажмите «Новый пароль».</span><div><button class="btn sm" type="button" data-act="cab-pw-copy">Скопировать для заказчика</button><button class="btn ghostbtn sm" type="button" data-act="cab-pw-hide">Скрыть</button></div></div>` : ''}
     <h4>Кто видит проект</h4>
+    ${state.orgs?.get(state.projects.get(id)?.customerId) ? `<p class="hint">Заказчик из каталога — ${esc(state.orgs.get(state.projects.get(id).customerId).name)}: входы его контактных лиц и все его проекты — в <button class="linkbtn" type="button" data-act="open-org" data-id="${esc(state.projects.get(id).customerId)}">карточке организации</button>.</p>` : ''}
     ${cabLoadErr ? `<p class="neg">${esc(cabLoadErr)} <button class="linkbtn" type="button" data-act="cab-reload">Повторить</button></p>` : !cabCustomers ? '<p class="hint">Загружаем…</p>' : ''}
     ${linked.length ? `<div class="cab-people">${linked.map(c => `<div class="cab-person"><div class="grow"><b>${esc(c.name)}</b> <span class="hint">${esc(c.login)}</span>${c.disabled ? ' <span class="chip tone-bad">вход закрыт</span>' : ''}<br><span class="hint">${c.lastLoginAt ? 'последний вход ' + cabTime(c.lastLoginAt) : 'ещё не входил'}</span></div>
       <div class="acts"><button class="btn ghostbtn sm" type="button" data-act="cab-reset" data-id="${esc(c.id)}">Новый пароль</button><button class="btn ghostbtn sm" type="button" data-act="cab-toggle" data-id="${esc(c.id)}">${c.disabled ? 'Открыть вход' : 'Закрыть вход'}</button><button class="btn ghostbtn sm" type="button" data-act="cab-unlink" data-id="${esc(c.id)}">Убрать из проекта</button></div></div>`).join('')}</div>`
@@ -168,7 +171,7 @@ onAct({
   'cab-reset': ({ id }) => { cabPatch(id, { resetPassword: true }, 'Новый пароль создан, старый больше не действует'); },
   'cab-toggle': ({ id }) => { const c = cabCustomer(id); if (c) cabPatch(id, { disabled: !c.disabled }, c.disabled ? 'Вход открыт' : 'Вход закрыт'); },
   'cab-reload': () => { cabLoadErr = ''; cabCustomers = null; loadCabCustomers(true); },
-  'cab-pw-hide': () => { cabPw = null; renderCabinetBox(); },
+  'cab-pw-hide': () => { cabPw = null; renderCabinetBox(); renderOrgCabinet(); },
   'cab-pw-copy': () => { if (cabPw) copyText(`Кабинет заказчика: ${cab.publicUrl || cab.url}\nЛогин: ${cabPw.login}\nПароль: ${cabPw.password}`).then(ok => toast(ok ? 'Скопировано — вставьте в письмо или мессенджер' : 'Не удалось скопировать', !ok)); },
   'cab-read': ({ id }) => { api.cabinetRead([id]); },
   'cab-got': ({ id }) => { cabMarkGot(id); },

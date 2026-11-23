@@ -39,7 +39,7 @@
     const cutoff = Date.now() - TRASH_DAYS * 864e5;
     const snap = store.snapshot();
     const ops = [];
-    for (const col of ['tasks', 'projects', 'contractors', 'users']) {
+    for (const col of ['tasks', 'projects', 'contractors', 'users', 'orgs']) {
       for (const d of snap[col]) {
         const at = Date.parse(d.deletedAt);
         if (d.deletedAt && Number.isFinite(at) && at < cutoff) ops.push({ type: 'delete', col, id: d.id });
@@ -117,7 +117,7 @@
     } finally {
       // Journal whatever actually changed (also after a partial failure), then sync the UI.
       try {
-        const ctx = { projects: { ...ctxBefore.projects, ...store.data.projects }, contractors: { ...ctxBefore.contractors, ...store.data.contractors }, users: store.data.users };
+        const ctx = { projects: { ...ctxBefore.projects, ...store.data.projects }, contractors: { ...ctxBefore.contractors, ...store.data.contractors }, users: store.data.users, orgs: store.data.orgs };
         const entries = diffBatch(valid, (c, id) => before.get(c + '/' + id) ?? null, (c, id) => store.data[c][id] || null, ctx);
         journal.append(entries, { action: typeof meta?.action === 'string' ? meta.action.slice(0, 120) : '', undo: !!meta?.undo, user: me?.name || '' });
       } catch (e) { console.error('Журнал:', e); }

@@ -46,7 +46,7 @@ const FIELDS = {
     dependsOn: ['Зависимости', v => (Array.isArray(v) && v.length ? `${v.length}` : 'нет')],
   },
   projects: {
-    name: ['Название', v => v || '—'], code: ['Шифр', v => v || '—'], client: ['Заказчик', v => v || '—'],
+    name: ['Название', v => v || '—'], code: ['Шифр', v => v || '—'], client: ['Заказчик', v => v || '—'], customerId: ['Заказчик из каталога', (v, ctx) => (v ? ctx.orgs?.[v]?.name || 'выбран' : 'не выбран')],
     gipId: ['ГИП', (v, ctx) => ctx.users?.[v]?.name || '—'],
     folder: ['Папка', v => v || '—'], archived: ['В архиве', yesNo], note: ['Примечание', () => 'изменено'],
   },
@@ -62,6 +62,12 @@ const FIELDS = {
     canSeeBudget: ['Доступ к бюджету', yesNo],
     absences: ['Отсутствия', v => (Array.isArray(v) && v.length ? v.map(a => `${date(a.from)}–${date(a.to)}`).join(', ') : 'нет')],
     phone: ['Телефон', v => v || '—'], email: ['Почта', v => v || '—'], messenger: ['Мессенджер', v => v || '—'],
+  },
+  orgs: {
+    name: ['Название', v => v || '—'], roles: ['Роль', v => (Array.isArray(v) && v.length ? v.map(r => ({ customer: 'заказчик', contractor: 'подрядчик', supplier: 'поставщик' }[r] || r)).join(', ') : '—')],
+    inn: ['ИНН', v => v || '—'], kpp: ['КПП', v => v || '—'], address: ['Адрес', v => v || '—'], requisites: ['Реквизиты', () => 'изменено'],
+    contacts: ['Контактные лица', v => (Array.isArray(v) ? `${v.length}` : '0')], contracts: ['Договоры', v => (Array.isArray(v) ? `${v.length}` : '0')],
+    note: ['Примечание', () => 'изменено'],
   },
   contractors: {
     name: ['ФИО', v => v || '—'], specialty: ['Специализация', v => v || '—'], phone: ['Телефон', v => v || '—'],

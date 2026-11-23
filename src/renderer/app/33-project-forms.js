@@ -20,7 +20,7 @@ function openProject(id, tab = 'main') {
     <div class="dpanel" data-panel="main"${ptab === 'main' ? '' : ' hidden'}><div class="fgrid">
       <div class="f wide"><label class="req" for="pr-name">Название объекта</label><input id="pr-name" name="name" value="${esc(p.name || '')}" placeholder="ЖК «Северный», корпус 2" maxlength="160"></div>
       <div class="f"><label for="pr-code">Шифр</label><input id="pr-code" name="code" value="${esc(p.code || '')}" placeholder="0425-24" maxlength="40"></div>
-      <div class="f"><label for="pr-client">Заказчик</label><input id="pr-client" name="client" value="${esc(p.client || '')}" placeholder="ООО «…»" maxlength="160"></div>
+      ${customerField(p)}
       <div class="f"><label for="pr-gip">ГИП</label><select id="pr-gip" name="gipId">${gipOptions(id ? p.gipId : (A.isGip(state.me) ? state.me.id : ''))}</select></div>
       <div class="f wide"><span class="lbl-t">Инженерные изыскания</span><div class="seg sv-choice">
         <label class="chk"><input type="radio" name="surveys" value="customer"${p.surveys === 'ours' ? '' : ' checked'}> даёт заказчик — отчёты в «Сборе ИРД»</label>
@@ -51,6 +51,7 @@ function openProject(id, tab = 'main') {
         <button class="btn danger" data-act="ask-delete" type="button">В корзину</button>` : ''}`,
   });
   if (id) { renderComposition(); renderCustomer(); renderCabinetBox(); if (cab?.configured) loadCabCustomers(true); $('#dform').classList.toggle('full', ptab === 'comp'); }
+  customerHint();
   markClean();
   if (!id) $('#pr-name').focus();
 }
@@ -93,11 +94,12 @@ function openContractor(id) {
 
 async function submitSimple(keepOpen = false) {
   const { kind, id } = state.drawer;
+  if (kind === 'org') return submitOrg(keepOpen);
   formError('');
   const created = { createdAt: new Date().toISOString() };
   let ok = false;
   if (kind === 'project') {
-    const data = { name: val('name'), code: val('code'), client: val('client'), gipId: state.users.has(val('gipId')) ? val('gipId') : '', status: L.PROJECT_STATUSES[val('status')] ? val('status') : '', folder: val('folder'), note: val('note'), icon: ICON_OK(val('icon')) ? val('icon') : '', surveys: $('#dform [name="surveys"]:checked')?.value === 'ours' ? 'ours' : 'customer' };
+    const data = { name: val('name'), code: val('code'), ...customerOf(id && state.projects.get(id), val('client')), gipId: state.users.has(val('gipId')) ? val('gipId') : '', status: L.PROJECT_STATUSES[val('status')] ? val('status') : '', folder: val('folder'), note: val('note'), icon: ICON_OK(val('icon')) ? val('icon') : '', surveys: $('#dform [name="surveys"]:checked')?.value === 'ours' ? 'ours' : 'customer' };
     if (!data.name) return formError('Укажите название объекта.', 'main', 'name');
     if (id) {
       if (projectDraftData().error) { const e = projectDraftData(); return formError(e.error, e.tab); }
@@ -105,11 +107,15 @@ async function submitSimple(keepOpen = false) {
       const made = compTaskOps(state.draft.composition, id, data.code);
       const extra = projectDraftData();
       const parts = [made.created ? `задач по разделам: ${made.created}` : '', made.linked ? `привязано карточек: ${made.linked}` : '', made.assigns ? `заданий смежникам: ${made.assigns}` : ''].filter(Boolean);
+      const wasCustomer = state.projects.get(id)?.customerId || '';
       ok = await write([...made.ops, op.update('projects', id, { ...data, ...extra.data })], parts.length ? `Проект сохранён: ${parts.join(', ')}` : 'Проект сохранён');
+      // A project moved to another customer: the logins of both customers' contact people follow.
+      if (ok && wasCustomer !== data.customerId) for (const oid of [wasCustomer, data.customerId]) if (oid) syncOrgCabinet(oid);
     }
     else {
       const pid = newId(), gen = !!$('#pr-gen')?.checked;
       ok = await write(op.set('projects', pid, { ...data, ...created }), 'Проект добавлен');
+      if (ok && data.customerId) syncOrgCabinet(data.customerId);
       if (ok) {
         // The timeline first: the generator then dates sections and assignments from it.
         closeDrawer();
@@ -139,6 +145,8 @@ function askDelete() {
   else if (kind === 'project') {
     const n = [...state.tasks.values()].filter(t => t.projectId === id).length;
     text = n ? `Переместить проект и его карточки (${n}) в корзину? Восстановить можно в течение 30 дней.` : 'Переместить проект в корзину?';
+  } else if (kind === 'org') {
+    if ((state.orgs.get(id)?.contacts || []).some(k => k.cabinetId && cabCustomer(k.cabinetId) && !cabCustomer(k.cabinetId).disabled)) { blocked = true; text = 'У контактных лиц организации открыт вход в кабинет заказчика. Сначала закройте вход (в карточке, «Кабинет заказчика»).'; }
   } else if (kind === 'user') {
     const n = [...state.tasks.values()].filter(t => hasOwner(t, id)).length;
     const subs = usersByRole('specialist').filter(u => u.chiefId === id).length;
@@ -164,8 +172,9 @@ async function doDelete() {
     ops = [...state.tasks.values()].filter(t => t.projectId === id).map(t => op.update('tasks', t.id, { deletedAt: at, deletedWith: id }));
     ops.push(op.update('projects', id, { deletedAt: at }));
   } else if (kind === 'user') ops = [op.update('users', id, { deletedAt: at })];
+  else if (kind === 'org') ops = [op.update('orgs', id, { deletedAt: at })];
   else ops = [op.update('contractors', id, { deletedAt: at })];
-  const what = kind === 'task' ? 'Карточка' : kind === 'project' ? 'Проект' : kind === 'user' ? 'Сотрудник' : 'Исполнитель';
+  const what = kind === 'task' ? 'Карточка' : kind === 'project' ? 'Проект' : kind === 'user' ? 'Сотрудник' : kind === 'org' ? 'Контрагент' : 'Исполнитель';
   if (await write(ops, null, { undoLabel: `${what} — в корзину` })) {
     closeDrawer();
     toast(kind === 'user' ? 'Сотрудник удалён из команды' : `${what}${kind === 'project' && ops.length > 1 ? ` и карточки (${ops.length - 1})` : ''} — в корзине`, false, { label: 'Отменить', run: () => restoreItem(kind === 'task' ? 'tasks' : kind + 's', id) });
@@ -187,7 +196,8 @@ function renderTrash() {
     <button class="btn ghostbtn sm danger" data-act="purge" data-col="${col}" data-id="${esc(x.id)}" type="button">Удалить навсегда</button>
   </div>`;
   const projs = state.trash.projects.map(p => item('projects', p, esc(p.name), `проект${p.code ? ' ' + esc(p.code) : ''}, карточек: ${state.trash.tasks.filter(t => t.deletedWith === p.id).length}`));
-  const people = state.trash.contractors.map(c => item('contractors', c, esc(c.name), 'исполнитель'));
+  const people = state.trash.contractors.map(c => item('contractors', c, esc(c.name), 'исполнитель'))
+    .concat(state.trash.orgs.map(o => item('orgs', o, esc(o.name), `контрагент${A.orgRoles(o).length ? ' · ' + A.orgRoles(o).map(r => A.ORG_ROLES[r].toLowerCase()).join(', ') : ''}`)));
   const cards = state.trash.tasks.filter(t => !t.deletedWith).map(t => item('tasks', t, esc(marksText(t)), `карточка · ${esc(state.projects.get(t.projectId)?.name || 'проект удалён')}`));
   const all = [...projs, ...people, ...cards];
   box.innerHTML = all.length ? `<p class="hint">Удалённое хранится ${TRASH_DAYS} дней, затем стирается при запуске программы.</p><div class="tr-list">${all.join('')}</div>`

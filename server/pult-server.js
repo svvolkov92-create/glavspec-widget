@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 // The version of the exchange with Пульты (src/core/remote-client.js: PROTOCOL). MIN_CLIENT — the oldest one this
 // server still accepts: raise it when old Пульты would write something the server no longer understands.
 const PROTOCOL = 1, MIN_CLIENT = 1;
@@ -306,6 +306,7 @@ function createServer(cfgIn = {}) {
       if (o.col === 'tasks' && !A.canSeeMoney(me)) for (const f of ['budget', 'payments', 'plan', 'invoiceReceived', 'invoiceDate', 'actSigned', 'actDate', 'contractNo', 'contractDate']) if (f in cur && !(f in o.data)) o.data[f] = cur[f];
       if (o.col === 'projects' && !A.isGip(me)) for (const f of ['contract', 'payments', 'bills']) if (f in cur && !(f in o.data)) o.data[f] = cur[f];
       if (o.col === 'contractors') for (const f of ['requisites']) if (f in cur && !(f in o.data)) o.data[f] = cur[f];
+      if (o.col === 'orgs' && !A.isGip(me)) for (const f of Object.keys(cur)) if (!(f in o.data)) o.data[f] = cur[f]; // a non-GIP sees a part of a counterparty
     }
   }
 

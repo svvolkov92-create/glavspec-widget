@@ -102,6 +102,48 @@
   const canUseDataTools = u => isGip(u);                   // import, backup, restore
   const canEditTaskFields = u => isGip(u) || isChief(u);   // dates, marks, owner, contractor…
 
+  // Counterparties (4.9): one catalogue of companies with roles. Customers and their contacts — the GIP and a chief with
+  // «видит заказчиков и их контакты»; contractors and suppliers with their contracts — the GIP and a chief with the budget.
+  // The rest of the team sees only names and roles (a project's customer is no secret).
+  const ORG_ROLES = { customer: 'Заказчик', contractor: 'Подрядчик', supplier: 'Поставщик' };
+  const orgRoles = o => (Array.isArray(o?.roles) ? o.roles.filter(r => ORG_ROLES[r]) : []);
+  const isCustomerOrg = o => orgRoles(o).includes('customer');
+  const canSeeContacts = u => isGip(u) || (isChief(u) && !!u.canSeeContacts);
+  const canSeeOrgs = u => canSeeContacts(u) || canSeeMoney(u);
+  const ORG_BASE = ['name', 'roles'];
+  const ORG_CARD = ['inn', 'kpp', 'ogrn', 'address', 'phone', 'email', 'site', 'requisites', 'contacts', 'note', 'createdAt', 'createdBy', 'deletedAt'];
+  // Whether `user` works with the whole card of `o` (contacts, requisites), and the fields open to them; null — all (GIP).
+  function orgCard(user, o) {
+    if (isGip(user)) return true;
+    const c = isCustomerOrg(o), w = orgRoles(o).some(r => r !== 'customer');
+    return (c && canSeeContacts(user)) || (w && canSeeMoney(user)) || (!c && !w && canSeeOrgs(user));
+  }
+  // Contracts of a contractor or supplier: the budget people. A customer's contract is the project's «Договор» — the GIP's.
+  const canSeeOrgContracts = (user, o) => isGip(user) || (canSeeMoney(user) && !isCustomerOrg(o));
+  function orgFields(user, o) {
+    if (isGip(user)) return null;
+    if (!orgCard(user, o)) return [];
+    return [...ORG_BASE, ...ORG_CARD, ...(canSeeOrgContracts(user, o) ? ['contracts'] : [])];
+  }
+  function orgView(user, o) {
+    const f = orgFields(user, o);
+    if (!f) return o;
+    const out = { id: o.id };
+    for (const k of (f.length ? f : ORG_BASE)) if (k in o) out[k] = o[k];
+    if (o.deletedAt) out.deletedAt = o.deletedAt;
+    return out;
+  }
+  function orgDataError(o) {
+    if (!o) return null;
+    if (typeof o.name !== 'string' || !o.name.trim() || o.name.length > 200) return 'Укажите название контрагента (до 200 знаков).';
+    if (o.roles !== undefined && (!Array.isArray(o.roles) || o.roles.some(r => !ORG_ROLES[r]))) return 'Роль контрагента: заказчик, подрядчик или поставщик.';
+    if (o.inn && !/^\d{10}$|^\d{12}$/.test(String(o.inn))) return 'ИНН — 10 цифр у организации или 12 у ИП.';
+    for (const k of ['kpp', 'ogrn', 'phone', 'email', 'site']) if (o[k] !== undefined && (typeof o[k] !== 'string' || o[k].length > 200)) return 'Проверьте реквизиты контрагента.';
+    if (o.contacts !== undefined && (!Array.isArray(o.contacts) || o.contacts.length > 50 || o.contacts.some(x => !x || typeof x.id !== 'string' || typeof x.name !== 'string' || x.name.length > 160 || (x.cabinetId !== undefined && typeof x.cabinetId !== 'string')))) return 'Список контактных лиц повреждён.';
+    if (o.contracts !== undefined && (!Array.isArray(o.contracts) || o.contracts.length > 200 || o.contracts.some(x => !x || typeof x.id !== 'string' || String(x.no ?? '').length > 80 || !isDateStr(x.date) || !(Number(x.sum ?? 0) >= 0)))) return 'Проверьте договоры контрагента.';
+    return null;
+  }
+
   // Responsible staff of a card: the main one plus co-owners (one job shared by several people).
   const ownersOf = t => [...new Set([t?.ownerId, ...(Array.isArray(t?.coOwnerIds) ? t.coOwnerIds : [])].filter(Boolean))];
 
@@ -154,7 +196,8 @@
     if (!isGip(user)) projects = projects.map(p => { const { contract, payments, bills, ...rest } = p; return Array.isArray(p.phases) ? { ...rest, phases: p.phases.filter(ph => ph.key !== 'contract') } : rest; });
     // The org structure is seen by every staff member (4.1).
     const depts = (snapshot.depts || []).filter(d => !d.deletedAt);
-    return { projects, contractors, tasks, users, chats, depts };
+    const orgs = (snapshot.orgs || []).filter(o => isGip(user) || !o.deletedAt).map(o => orgView(user, o));
+    return { projects, contractors, tasks, users, chats, depts, orgs };
   }
   // A non-GIP saves the plan without the hidden «Договор» row: keep the stored one.
   function keepHiddenPhases(user, before, data) {
@@ -205,6 +248,18 @@
       return 'Состав команды меняет только ГИП.';
     }
     if (col === 'depts') return isGip(user) ? null : 'Оргструктуру ведёт ГИП.';
+    if (col === 'orgs') {
+      if (isGip(user)) return orgDataError(after);
+      if (!canSeeOrgs(user)) return 'Контрагентов ведёт ГИП и те, кому открыты заказчики или бюджет.';
+      if (!after) return 'Контрагента насовсем удаляет ГИП.';
+      const was = orgRoles(before), now = orgRoles(after);
+      const flip = [...was.filter(r => !now.includes(r)), ...now.filter(r => !was.includes(r))];
+      if (flip.includes('customer') && !canSeeContacts(user)) return 'Отметить заказчика может ГИП или тот, кому открыты заказчики и их контакты.';
+      if (flip.some(r => r !== 'customer') && !canSeeMoney(user)) return 'Отметить подрядчика или поставщика может ГИП или тот, кому открыт бюджет.';
+      const may = new Set(orgFields(user, before || after));
+      if (changedKeys(before, after).some(k => k !== 'updatedAt' && !may.has(k))) return 'Эти сведения о контрагенте вам не открыты.';
+      return orgDataError(after);
+    }
     if (col === 'projects' || col === 'contractors') return !canManageCatalog(user) ? 'Проекты и внештатных исполнителей ведут ГИП и главспецы.' : col === 'projects' ? projectDataError(after) : null;
     if (col !== 'tasks') return 'Неизвестный раздел данных.';
     // A card cannot be handed to someone without its direction unless the assigner confirmed it
@@ -286,6 +341,7 @@
     ROLES, ABSENCE_KINDS, absencesOf, absenceHits, absenceText, isUnread, lastActivity, reviewersOf, canEditAbsences, DIRECTIONS, MONEY_FIELDS, SPECIALIST_FIELDS,
     roleOf, isGip, isChief, isSpecialist, titleFor, directionLabels,
     teamIds, canSeeMoney, canCreateTasks, canManageCatalog, canManageUsers, canUseDataTools, canEditTaskFields,
+    ORG_ROLES, orgRoles, isCustomerOrg, canSeeContacts, canSeeOrgs, orgCard, canSeeOrgContracts, orgView,
     canSeeTask, assignableOwners, redactTask, viewFor, canChat, canSeeChat, checkWrite, keepHiddenPhases, projectDataError,
     baseMark, directionOfMark, markKind, userKind, contractorKinds, marksOf, profileGaps, profileMessage, profileText, contractorGaps, ownersOf,
   };

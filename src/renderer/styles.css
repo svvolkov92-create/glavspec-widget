@@ -1924,3 +1924,23 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 /* Own comment / message not sent yet (no connection to the server): grey until it goes out. */
 .msg-item.pending, .chat-msg.pending { opacity: .6 }
 .pending-t { font-style: italic }
+
+/* ---------- «Контрагенты» (4.9) ---------- */
+.org-q { width: 220px; max-width: 100% }
+.org-t td .chip { margin-left: 2px; vertical-align: 1px }
+.org-mig .org-sug { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 0; border-top: 1px solid var(--line) }
+.org-mig .org-sug .grow { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere }
+.org-mig .org-sug select { max-width: 260px }
+.org-roles { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 4px 0 }
+.org-roles .chk { width: auto }
+.org-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px }
+.org-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-bottom: 6px; border-bottom: 1px dashed var(--line) }
+.org-row input, .org-row select { min-width: 0; width: auto }
+.org-row .icon { margin-left: auto }
+.org-contact [data-k="name"] { flex: 2 1 190px } .org-contact [data-k="position"] { flex: 2 1 170px }
+.org-contact [data-k="phone"] { flex: 1 1 130px } .org-contact [data-k="email"] { flex: 1 1 150px }
+.org-contract [data-k="no"] { flex: 0 1 110px } .org-contract [data-k="date"] { flex: 0 0 140px } .org-contract [data-k="sum"] { flex: 1 1 120px }
+.org-contract [data-k="subject"] { flex: 3 1 220px } .org-contract [data-k="projectId"] { flex: 2 1 180px }
+.org-projs { display: flex; flex-wrap: wrap; gap: 4px 14px }
+#org-cab .org-login { width: 160px; min-width: 0 }
+.org-mig > .hint, .org-mig .org-sug { padding-left: 12px; padding-right: 12px }
