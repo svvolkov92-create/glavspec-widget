@@ -2,7 +2,7 @@ name: Pult 4.0 (Tauri)
 
 on:
   push:
-    branches: [tauri-probe]
+    branches: [main, tauri-probe]
     paths: ['src-tauri/**', 'src/renderer/**', 'src/core/**', 'src/report/**', 'src/cabinet.js', 'server/**', 'README-win.txt', '.github/workflows/tauri-probe.yml']
   workflow_dispatch:
 
