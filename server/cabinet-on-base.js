@@ -49,6 +49,7 @@ module.exports = function cabinetOnBase({ cfg, store, core, asUser, inTurnAs, A,
   const gipId = () => Object.keys(acc.byUser).find(id => store.data.users[id]?.role === 'gip' && !store.data.users[id]?.deletedAt && !acc.byUser[id].disabled);
   const asGip = fn => { const g = gipId(); return g && inTurnAs ? inTurnAs(g, fn) : fn(); };
   const seesProject = id => core.userView().projects.some(p => p.id === String(id));
+  const visibleOnly = ids => { const seen = new Set(core.userView().projects.map(p => p.id)); return (Array.isArray(ids) ? ids : []).map(String).filter(id => seen.has(id)); };
   const ALLOWED = {
     view: () => {
       const v = rules.view();
@@ -58,14 +59,21 @@ module.exports = function cabinetOnBase({ cfg, store, core, asUser, inTurnAs, A,
     publish: id => (seesProject(id) ? asGip(() => rules.publish(String(id))) : { ok: false, message: 'Проект не найден.' }),
     unpublish: id => (seesProject(id) ? asGip(() => rules.unpublish(String(id))) : { ok: false, message: 'Проект не найден.' }),
     customers: () => rules.customers(),
-    customerCreate: c => rules.customerCreate(c),
-    customerUpdate: (id, patch) => rules.customerUpdate(id, patch),
+    // 4.9.3: a login opens only projects the person who gives it sees; projects of an existing login that the person
+    // does not see stay as they were (a chief with contacts cannot hand out — or take away — other groups' projects).
+    customerCreate: c => rules.customerCreate({ ...c, projectIds: visibleOnly(c?.projectIds) }),
+    customerUpdate: async (id, patch) => {
+      if (!patch || !('projectIds' in patch)) return rules.customerUpdate(id, patch);
+      const had = (await rules.customers()).customers?.find(x => x.id === id)?.projectIds || [];
+      const seen = new Set(core.userView().projects.map(p => p.id));
+      return rules.customerUpdate(id, { ...patch, projectIds: [...new Set([...had.filter(p => !seen.has(p)), ...visibleOnly(patch.projectIds)])] });
+    },
     customerDelete: id => rules.customerDelete(id),
     read: (ids, isRead) => rules.read(ids, isRead),
   };
   const CONTACTS = new Set(['customers', 'customerCreate', 'customerUpdate', 'customerDelete']);
   function call(me, fn, args) {
-    const f = ALLOWED[fn];
+    const f = Object.prototype.hasOwnProperty.call(ALLOWED, fn) ? ALLOWED[fn] : null; // not «constructor», «toString»…
     if (!f) return { ok: false, message: 'Эта настройка кабинета на сервере не нужна.' };
     if (['sync', 'publish', 'unpublish'].includes(fn) && (!me.user || A.isSpecialist(me.user))) return { ok: false, message: 'Кабинетом заказчика управляют ГИП и главспецы.' };
     if (CONTACTS.has(fn) && !contacts(me.user)) return { ok: false, message: 'Заказчиков и их контакты видит ГИП (или тот, кому он открыл контакты).' };

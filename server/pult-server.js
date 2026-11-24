@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 // The version of the exchange with Пульты (src/core/remote-client.js: PROTOCOL). MIN_CLIENT — the oldest one this
 // server still accepts: raise it when old Пульты would write something the server no longer understands.
 const PROTOCOL = 1, MIN_CLIENT = 1;
@@ -259,7 +259,11 @@ function createServer(cfgIn = {}) {
   }
   // Brute force: 10 wrong passwords from one address → 10 minutes of «подождите».
   const fails = new Map();
-  const clientIp = req => (cfg.trustProxy ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '') || req.socket.remoteAddress || '';
+  // Behind Caddy the LAST X-Forwarded-For entry is the address Caddy saw; earlier ones are whatever the client wrote
+  // (4.9.3 — the first one let anyone pick a new «address» for every guess).
+  const clientIp = req => (cfg.trustProxy ? String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() : '') || req.socket.remoteAddress || '';
+  // Keys: an address («1.2.3.4») or a login («login:volkov»). A login gets 10 wrong passwords in 10 minutes from any
+  // number of addresses (4.9.3): guessing one person's password from many machines stops too.
   function tooMany(ip) { const f = fails.get(ip); return f && f.n >= 10 && Date.now() - f.at < 10 * 60e3; }
   function failed(ip) {
     if (fails.size > 10000) for (const [k, f] of fails) if (Date.now() - f.at > 10 * 60e3) fails.delete(k);
@@ -403,13 +407,17 @@ function createServer(cfgIn = {}) {
       saveAcc();
       return { ok: true };
     },
+    // 4.9.3: guessing the current password with a stolen token counts like wrong logins; a new password signs out
+    // every other device (a stolen token dies with the old password).
     passwordChange: (me, oldPw, newPw) => {
-      const a = acc.byUser[me.userId];
-      if (!a || !checkPassword(oldPw, a.pw)) return { ok: false, message: 'Текущий пароль неверный.' };
+      const a = acc.byUser[me.userId], key = 'login:' + String(a?.login || '').toLowerCase();
+      if (tooMany(key)) return { ok: false, message: 'Слишком много попыток. Подождите 10 минут.' };
+      if (!a || !checkPassword(oldPw, a.pw)) { failed(key); return { ok: false, message: 'Текущий пароль неверный.' }; }
       if (String(newPw || '').length < 8) return { ok: false, message: 'Новый пароль — не короче 8 знаков.' };
       a.pw = hashPassword(newPw);
+      for (const k of Object.keys(acc.sessions)) if (acc.sessions[k].userId === me.userId && k !== me.sessionKey) delete acc.sessions[k];
       saveAcc();
-      return { ok: true };
+      return { ok: true, signedOut: true };
     },
     // The whole base for the GIP's own copy (the «second place» of the backups).
     backupGet: me => {
@@ -502,9 +510,11 @@ function createServer(cfgIn = {}) {
         const ip = clientIp(req);
         if (tooMany(ip)) return json(res, 429, { ok: false, message: 'Слишком много попыток входа. Подождите 10 минут.' });
         const b = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8')) || {};
+        const lkey = 'login:' + String(b.login || '').trim().toLowerCase().slice(0, 60);
+        if (tooMany(lkey)) return json(res, 429, { ok: false, message: 'Слишком много неверных паролей для этого логина. Подождите 10 минут.' });
         const hit = Object.entries(acc.byUser).find(([, a]) => a.login.toLowerCase() === String(b.login || '').trim().toLowerCase());
         const ok = hit && hit[1].pw && !hit[1].disabled && checkPassword(b.password, hit[1].pw) && store.data.users[hit[0]] && !store.data.users[hit[0]].deletedAt;
-        if (!ok) { failed(ip); return json(res, 401, { ok: false, message: hit?.[1]?.disabled ? 'Вход отключён ГИПом.' : 'Неверный логин или пароль.' }); }
+        if (!ok) { failed(ip); if (hit) failed(lkey); return json(res, 401, { ok: false, message: hit?.[1]?.disabled ? 'Вход отключён ГИПом.' : 'Неверный логин или пароль.' }); }
         const u = store.data.users[hit[0]];
         return json(res, 200, { ok: true, token: openSession(hit[0], b.device), me: { id: hit[0], name: u.name, role: u.role } });
       }

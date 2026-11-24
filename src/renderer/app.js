@@ -733,7 +733,7 @@ async function serverDialog(tab = '') {
       if (q('#sv-new').value.length < 8) return err('Новый пароль — не короче 8 знаков.', '#sv-new');
       const r = await api.serverCall('passwordChange', q('#sv-old').value, q('#sv-new').value);
       if (!r?.ok) return err(r?.message || 'Не получилось.', '#sv-old');
-      toast('Пароль изменён'); q('#sv-old').value = ''; q('#sv-new').value = ''; return;
+      toast(r.signedOut ? 'Пароль изменён — на других устройствах нужно войти заново' : 'Пароль изменён'); q('#sv-old').value = ''; q('#sv-new').value = ''; return;
     }
     if (a === 'upd-run') {
       if (!(await confirmBox('Обновить Пульт сейчас? Он закроется и запустится установщик новой версии. Несохранённые карточки сохраните заранее.', 'Обновить'))) return;

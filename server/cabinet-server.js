@@ -135,7 +135,8 @@ function createServer(cfgIn = {}) {
   const send = (res, status, body, type = 'text/html; charset=utf-8', extra = {}) => { headers(res, { 'Content-Type': type, 'Cache-Control': 'no-store', ...extra }); res.statusCode = status; res.end(body); };
   const json = (res, status, obj) => send(res, status, JSON.stringify(obj), 'application/json; charset=utf-8');
   const redirect = (res, to, extra = {}) => { headers(res, { Location: to, 'Cache-Control': 'no-store', ...extra }); res.statusCode = 303; res.end(); };
-  const clientIp = req => (cfg.trustProxy && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0].trim() : req.socket.remoteAddress) || '?';
+  // The last X-Forwarded-For entry is the one the proxy (Caddy) added; earlier ones are written by the client.
+  const clientIp = req => (cfg.trustProxy && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',').pop().trim() : req.socket.remoteAddress) || '?';
   const secure = req => !!cfg.tls || (cfg.trustProxy && req.headers['x-forwarded-proto'] === 'https');
 
   /* ----- sessions ----- */

@@ -212,11 +212,22 @@
     const users = store.snapshot().users;
     const money = A.canSeeMoney(me);
     const moneyLabels = new Set(['Бюджет', 'Платёж внесён', 'Платёж удалён', 'График платежей', 'Договор', 'Счёт получен', 'Акт подписан']);
+    // Projects: only those the user sees. Counterparties: only cards open to the user, contracts only to budget
+    // people (4.9.3 — the journal had shown other groups' projects, customers' addresses and contractors' contracts).
+    const projects = new Set(userView().projects.map(p => p.id));
+    const orgOk = e => { const o = store.data.orgs?.[e.id]; return !!o && A.orgCard(me, o); };
+    const orgChanges = e => {
+      const o = store.data.orgs[e.id];
+      return !e.changes || A.canSeeOrgContracts(me, o) ? e : { ...e, changes: e.changes.filter(c => c.f !== 'contracts') };
+    };
     return all.filter(e => {
+      if (e.col === 'projects') return A.isChief(me) && projects.has(e.id);
+      if (e.col === 'orgs') return orgOk(e);
       if (e.col !== 'tasks') return A.isChief(me) && e.col !== 'users';
       const t = store.data.tasks[e.id];
       return t && A.canSeeTask(me, t, users);
-    }).map(e => (money || !e.changes ? e : { ...e, changes: e.changes.filter(c => !moneyLabels.has(c.label)) }))
+    }).map(e => (e.col === 'orgs' ? orgChanges(e) : e))
+      .map(e => (money || !e.changes ? e : { ...e, changes: e.changes.filter(c => !moneyLabels.has(c.label)) }))
       .filter(e => !e.changes || e.changes.length || e.kind !== 'update');
   }
 

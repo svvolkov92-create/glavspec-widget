@@ -76,6 +76,10 @@ jobs:
           npm install --no-save --no-package-lock playwright@1.48.2
           npx playwright install --with-deps chromium
           node test/web-check.js
+      - name: Security check (≈90 attacks on a live server) and stored XSS in the web version
+        run: |
+          node test/security-check.js
+          node test/xss-check.js
       - name: Build the installer
         run: bash server/build-installer.sh
       - uses: actions/upload-artifact@v4
@@ -83,3 +87,23 @@ jobs:
           name: PultServer
           path: dist/PultServer/
 
+
+  rust-audit:
+    name: Rust libraries — known vulnerabilities (cargo audit, RustSec)
+    runs-on: ubuntu-latest
+    # Report first: the result is read and decided on; it does not stop the other jobs.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit (the same versions the build takes — no Cargo.lock in the repo)
+        working-directory: src-tauri
+        run: |
+          cargo generate-lockfile
+          cargo audit 2>&1 | tee ../cargo-audit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cargo-audit
+          path: cargo-audit.txt

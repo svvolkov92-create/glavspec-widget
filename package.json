@@ -1,7 +1,7 @@
 {
   "name": "glavspec-widget",
   "productName": "Пульт главспеца",
-  "version": "4.9.2",
+  "version": "4.9.3",
   "description": "Пульт главспеца (Tauri) и Сервер Пульта: карточки разделов, сроки, исполнители, кабинет заказчика",
   "private": true,
   "scripts": {

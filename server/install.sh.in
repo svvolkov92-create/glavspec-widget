@@ -111,10 +111,15 @@ say "Caddy: https://$PULT_HOST и https://$CAB_HOST"
 cat > /etc/caddy/Caddyfile <<CADDY
 $PULT_HOST {
 	encode gzip
+	# 4.9.3: browsers come only by HTTPS for a year (HSTS); no «Server: Caddy» banner
+	header Strict-Transport-Security "max-age=31536000"
+	header -Server
 	reverse_proxy 127.0.0.1:8090
 }
 $CAB_HOST {
 	encode gzip
+	header Strict-Transport-Security "max-age=31536000"
+	header -Server
 	reverse_proxy 127.0.0.1:8091
 }
 CADDY
