@@ -155,7 +155,7 @@ function contractorRow(c, list) {
   return `<div class="co-row${open ? ' open' : ''}" data-drop="contractor:${esc(c.id)}">
     <button class="co-line" type="button" data-act="co-toggle" data-id="${esc(c.id)}" aria-expanded="${open}">
       <span class="tree-tg">${open ? '▾' : '▸'}</span><span class="kicons">${A.contractorKinds(c).map(k => kindIcon(k)).join('')}</span>
-      <b class="co-name">${esc(c.name)}</b><span class="hint co-spec">${esc(c.specialty || '')}</span>
+      <b class="co-name">${esc(c.name)}</b><span class="hint co-spec">${esc(c.specialty || '')}${c.orgId && state.orgs?.get(c.orgId) ? ` · ${esc(state.orgs.get(c.orgId).name)}` : ''}</span>
       <span class="co-n" title="В работе">${x.active ? `в работе <b class="num">${x.active}</b>` : '<span class="hint">свободен</span>'}</span>
       <span class="co-n">${x.overdue ? `<span class="neg">сорвано <b class="num">${x.overdue}</b></span>` : ''}</span>
       ${canMoney() ? `<span class="co-n r">${dueNow > 0 ? `<span class="warnv">пора платить ${money(dueNow)}</span>` : ''}</span>` : `<span class="co-n">${x.review ? `на проверке ${x.review}` : ''}</span>`}

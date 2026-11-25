@@ -272,7 +272,7 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
   }
 
   /* ----- customer side ----- */
-  const KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи' };
+  const KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова' };
   function addMessage(s, projectId, kind, text, request, extra = {}) {
     const m = D().projects[projectId];
     D().seq += 1;
@@ -317,6 +317,14 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
         if (!m || !(s.customer.projectIds || []).includes(pid)) return send(res, 404, 'Проект не найден.', 'text/plain; charset=utf-8');
         const text = str(f.text, 2000);
         const back = (flash, hash = '') => redirect(res, `/p/${encodeURIComponent(pid)}?ok=${flash}${hash}`);
+        // 4.11: a finished project is read-only; only the request to open it again is taken.
+        if (m.project?.closed) {
+          if (p !== '/c/reopen') return back('closed');
+          const dayAgo = new Date(Date.now() - 24 * 3600e3).toISOString(); // one request a day is enough
+          if (D().inbox.some(x => x.projectId === pid && x.kind === 'reopen' && x.customerId === s.customerId && x.ts > dayAgo)) return back('reopen');
+          addMessage(s, pid, 'reopen', text || 'Просим открыть проект снова.');
+          return back('reopen');
+        }
         if (p === '/c/answer') {
           const r = (m.project.requests || []).find(x => x.id === f.request);
           // Files sent for approval: «Согласовано» needs no text, remarks do.
@@ -376,7 +384,7 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
       if (mm) {
         const pid = decodeURIComponent(mm[1]), m = D().projects[pid];
         if (!m || !(s.customer.projectIds || []).includes(pid)) return send(res, 404, shell(cfg.title, '<div class="card"><p>Проект не найден.</p><p><a href="/">← Мои проекты</a></p></div>'));
-        const flash = { answer: 'Ответ отправлен главному инженеру проекта.', call: 'Просьба перезвонить отправлена.', urgent: 'Вопрос отправлен — ГИП увидит его сразу.', question: 'Вопрос отправлен.', meeting: 'Просьба перенести встречу отправлена.', empty: 'Напишите текст сообщения.' }[url.searchParams.get('ok')] || '';
+        const flash = { answer: 'Ответ отправлен главному инженеру проекта.', call: 'Просьба перезвонить отправлена.', urgent: 'Вопрос отправлен — ГИП увидит его сразу.', question: 'Вопрос отправлен.', meeting: 'Просьба перенести встречу отправлена.', empty: 'Напишите текст сообщения.', reopen: 'Запрос отправлен ГИПу — он ответит.', closed: 'Проект завершён: писать по нему нельзя, можно запросить повторное открытие.' }[url.searchParams.get('ok')] || '';
         // What this customer sent on this project: shown in «Вопросы» (newest first).
         const messages = D().inbox.filter(x => x.customerId === s.customerId && x.projectId === pid).slice(-40).reverse().map(x => ({ kind: x.kind, text: x.text, to: x.to || '', requestTitle: x.requestTitle || '', ts: x.ts }));
         const html = renderPage(m, { today: today(), logoSvg, fontName, fontUrl: '/font.ttf', cabinet: { csrf: s.csrf, base: '', flash, sent: D().sent[s.customerId]?.[pid] || {}, customerName: s.customer.name, projects: list.length, messages, title: cfg.title === 'Кабинет заказчика' ? 'Мой Тандем' : cfg.title } })

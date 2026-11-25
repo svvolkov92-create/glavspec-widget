@@ -77,6 +77,7 @@ function openContractor(id) {
       <div class="f"><label for="c-phone">Телефон</label><input id="c-phone" name="phone" type="tel" value="${esc(c.phone || '')}" placeholder="+7 900 123-45-67" maxlength="40"></div>
       <div class="f"><label for="c-email">Почта</label><input id="c-email" name="email" type="email" value="${esc(c.email || '')}" maxlength="120"></div>
       <div class="f wide"><label for="c-msg">Мессенджер</label><input id="c-msg" name="messenger" value="${esc(c.messenger || '')}" placeholder="Telegram @petrov_eom" maxlength="120"></div>
+      ${contractorOrgField(c)}
       <details class="f wide more"${c.requisites || c.note ? ' open' : ''}><summary>Дополнительно: реквизиты, примечание</summary><div class="fgrid">
         <div class="f wide"><label for="c-req">Реквизиты</label><textarea id="c-req" name="requisites" maxlength="1000" placeholder="ИНН, р/с, банк — попадут в акт сверки">${esc(c.requisites || '')}</textarea></div>
         <div class="f wide"><label for="c-note">Примечание</label><textarea id="c-note" name="note" maxlength="2000" placeholder="Ставка, особенности">${esc(c.note || '')}</textarea></div>
@@ -126,7 +127,7 @@ async function submitSimple(keepOpen = false) {
       }
     }
   } else if (kind === 'contractor') {
-    const data = { name: val('name'), specialty: val('specialty'), phone: val('phone'), email: val('email'), messenger: val('messenger'), requisites: val('requisites'), note: val('note') };
+    const data = { name: val('name'), specialty: val('specialty'), phone: val('phone'), email: val('email'), messenger: val('messenger'), requisites: val('requisites'), note: val('note'), orgId: contractorOrgPicked() };
     if (!data.name) return formError('Укажите ФИО или название исполнителя.', '', 'name');
     if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.', '', 'email');
     ok = id ? await write(op.update('contractors', id, data), 'Исполнитель сохранён')

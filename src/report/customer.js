@@ -84,6 +84,7 @@ function pageModel({ project: p, tasks, contact, today, team = [] }) {
       ird: show.ird ? pick((p.ird || []).filter(x => x.title), ['id', 'title', 'kind', 'who', 'status', 'due', 'note']) : [],
       meetings: show.meetings ? pick((p.meetings || []).filter(x => x.title || L.isDate(x.date)), ['id', 'date', 'from', 'to', 'title', 'place', 'protocolNo']) : [],
       rdMode: p.rdMode || '',
+      closed: p.status === 'done' || !!p.archived, // 4.11: a finished project — the customer only reads it
       show,
     },
     finance,
@@ -98,6 +99,7 @@ function pageModel({ project: p, tasks, contact, today, team = [] }) {
 /* ---------- icons (stroke, 20×20 box) ---------- */
 const ICONS = {
   home: 'M3 9.5 10 4l7 5.5V16a1 1 0 0 1-1 1h-3.5v-4.5h-5V17H4a1 1 0 0 1-1-1z',
+  lock: 'M5 9h10v8H5zM7 9V6.5a3 3 0 0 1 6 0V9',
   plan: 'M3 3v14h14M6 7h6M8 10.5h7M6 14h5',
   finance: 'M3.5 6h13v10h-13zM3.5 6l2-2.5h8l2 2.5M13 11h1.5',
   ird: 'M3 6.5h5l1.5 1.5H17v8.5H3zM10 10v4.5M8 12.5l2 2 2-2',
@@ -136,7 +138,8 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
   const pdSecs = sections.filter(s => s.group !== 'rd'), rdSecs = sections.filter(s => s.group === 'rd');
   const stage = L.PROJECT_STATUSES[p.status]?.label || now.current?.label || '';
   const requests = (p.requests || []).filter(r => !r.done && r.title);
-  const cab = cabinet, base = cab ? cab.base : '';
+  // 4.11: a finished project is read-only in the cabinet: no forms, only «Запросить повторное открытие».
+  const cab = cabinet && !p.closed ? cabinet : null, base = cabinet ? cabinet.base : '';
   const hid = cab ? `<input type="hidden" name="csrf" value="${esc(cab.csrf)}"><input type="hidden" name="project" value="${esc(p.id)}">` : '';
   const proto = p.protocol && (p.protocol.items || []).some(i => i.text) ? p.protocol : null;
   const docs = (p.docs || []).filter(d => d.title && L.isDate(d.until)).sort((a, b) => a.until.localeCompare(b.until));
@@ -144,7 +147,7 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
   const ird = p.ird || [];
   const meetings = (p.meetings || []).filter(x => L.isDate(x.date)).sort((a, b) => a.date.localeCompare(b.date));
   const nextMeet = meetings.find(x => x.date >= today), pastMeet = meetings.filter(x => x.date < today).reverse();
-  const msgs = cab?.messages || [];
+  const msgs = cabinet?.messages || [];
   const has = { finance: !!fin, ird: show.ird && ird.length > 0, meet: show.meetings && (meetings.length > 0 || !!proto), docs: show.sections && sections.length > 0, plan: show.plan, nav: show.soon, model: show.soon };
   const tabs = TABS.filter(([k]) => has[k] !== false);
   const badge = { ird: ird.filter(x => ['wait', 'clarify', 'remark'].includes(x.status)).length, q: requests.length };
@@ -222,6 +225,11 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
     }).join('')}</section>` : '';
   const adviceBar = advice ? `<section class="card rec"><span class="rec-ic">${ic('bulb')}</span><div class="grow"><div class="lbl">Рекомендуем на этом этапе</div><h3>${esc(advice.title)}</h3>${advice.text ? `<p class="mu">${esc(advice.text)}${contact ? ` — Рекомендует ${esc(contact.role || 'ГИП')} ${esc(contact.name)}` : ''}</p>` : ''}</div>
       ${cab ? pop('Обсудить', 'pri', form('/c/question', `<input type="hidden" name="to" value="${esc(contact?.name || 'ГИП')}"><textarea name="text" required maxlength="2000">Хотим обсудить: ${esc(advice.title)}</textarea>`, 'Отправить')) : mailHref() ? `<a class="btn pri" href="${mailHref(advice.title)}">Обсудить</a>` : ''}</section>` : '';
+  // 4.11: the bar over every page of a finished project; in the cabinet — the request to open it again.
+  const asked = msgs.filter(x => x.kind === 'reopen').at(-1);
+  const closedBox = p.closed ? `<div class="closed-bar">${ic('lock')}<div class="grow"><b>Проект завершён — только просмотр.</b> <span class="mu">Документы, план и история остаются, вопросы и ответы по нему закрыты.</span>
+    ${cabinet ? (asked ? `<p class="sent">✓ Запрос на повторное открытие отправлен ${esc(L.fmtDate(String(asked.ts).slice(0, 10)))} — ГИП ответит.</p>`
+      : `<details class="inl"><summary class="btn sm pri">Запросить повторное открытие</summary><form class="fm" method="post" action="${base}/c/reopen"><input type="hidden" name="csrf" value="${esc(cabinet.csrf)}"><input type="hidden" name="project" value="${esc(p.id)}"><textarea name="text" maxlength="2000" placeholder="Что нужно сделать: изменения, новые требования, замечания экспертизы"></textarea><button class="btn pri" type="submit">Отправить ГИПу</button></form></details>`) : ''}</div></div>` : '';
   const home = `<section class="pg" id="home">
     <div class="hero"><div class="hero-l">${heroLeft}${meetLine}</div><div class="hero-r">${show.plan ? gantt(false) + `<a class="allplan" href="#plan">Весь план работ →</a>` : ''}</div></div>
     ${needCard || protoCard || docsCard ? `<div class="g3">${needCard}${protoCard}${docsCard}</div>` : ''}
@@ -327,7 +335,7 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
   const morePage = `<section class="pg" id="more">${H('Все', 'разделы')}<div class="morelist">${tabs.map(([k, l]) => `<a href="#${k}">${ic(k)}<span>${esc(l)}</span>${badge[k] ? `<i class="bdg">${badge[k]}</i>` : ''}</a>`).join('')}
     ${cab && cab.projects > 1 ? `<a href="${base}/">${ic('briefcase')}<span>Мои проекты</span><i class="bdg neu">${cab.projects}</i></a>` : ''}</div>
     ${contact ? `<section class="card"><div class="lbl">Ваш ГИП</div><div class="gip"><span class="ava ac">${esc(initials(contact.name))}</span><span><b>${esc(contact.name)}</b><br><span class="mu">${esc(contact.role || 'Главный инженер проекта')}</span>${contact.phone ? `<br><a href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ''}${contact.email ? `<br><a href="mailto:${esc(contact.email)}">${esc(contact.email)}</a>` : ''}</span></div></section>` : ''}
-    ${cab ? `<form method="post" action="${base}/logout"><input type="hidden" name="csrf" value="${esc(cab.csrf)}"><button class="btn" type="submit">${ic('out')}Выйти (${esc(cab.customerName || '')})</button></form>` : ''}</section>`;
+    ${cabinet ? `<form method="post" action="${base}/logout"><input type="hidden" name="csrf" value="${esc(cabinet.csrf)}"><button class="btn" type="submit">${ic('out')}Выйти (${esc(cabinet.customerName || '')})</button></form>` : ''}</section>`;
 
   /* ---------- frame: sidebar, top bar, phone bottom bar ---------- */
   const teamBlock = contact || team.length ? `<div class="team"><span class="nav-l">Команда проекта</span>${contact ? `<div class="gip"><span class="ava ac">${esc(initials(contact.name))}</span><span><b>${esc(contact.name)}</b><br><span class="mu">${esc(contact.role || 'ГИП')}</span>${contact.phone ? `<br><a href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ''}${contact.email ? `<br><a href="mailto:${esc(contact.email)}">${esc(contact.email)}</a>` : ''}</span></div>` : ''}
@@ -336,7 +344,7 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
     ${cab && cab.projects > 1 ? `<a class="myp" href="${base}/">${ic('briefcase')}<span>Мои проекты</span><i>${cab.projects}</i></a>` : ''}
     <nav class="tabs" aria-label="Разделы проекта"><span class="nav-l">${esc(p.name)}</span>${tabs.map(([k, l]) => `<a class="tab t-${k}" href="#${k}">${ic(k)}<span>${esc(l)}</span>${badge[k] ? `<i class="bdg">${badge[k]}</i>` : ''}</a>`).join('')}</nav>
     <div class="grow"></div>${teamBlock}
-    ${cab ? `<div class="who"><span class="mu">Вы вошли как</span> <b>${esc(cab.customerName || '')}</b><form method="post" action="${base}/logout"><input type="hidden" name="csrf" value="${esc(cab.csrf)}"><button class="lnk" type="submit">${ic('out')}Выйти</button></form></div>` : `<div class="who mu">${p.client ? esc(p.client) + ' · ' : ''}данные на ${esc(L.fmtDate(today))}</div>`}</aside>`;
+    ${cabinet ? `<div class="who"><span class="mu">Вы вошли как</span> <b>${esc(cabinet.customerName || '')}</b><form method="post" action="${base}/logout"><input type="hidden" name="csrf" value="${esc(cabinet.csrf)}"><button class="lnk" type="submit">${ic('out')}Выйти</button></form></div>` : `<div class="who mu">${p.client ? esc(p.client) + ' · ' : ''}данные на ${esc(L.fmtDate(today))}</div>`}</aside>`;
   const actions = cab
     ? `${pop(`${ic('phone')}<span>Перезвоните мне</span>`, '', form('/c/call', '<input name="text" maxlength="300" placeholder="Когда удобно и по какому вопросу">', 'Попросить звонок'))}${pop(`${ic('fire')}<span>Горящий вопрос</span>`, 'burn', form('/c/urgent', '<textarea name="text" required maxlength="2000" placeholder="Опишите вопрос — ГИП увидит его сразу"></textarea>', 'Отправить ГИПу'))}`
     : `${contact?.phone ? `<a class="btn" href="tel:${esc(contact.phone)}">${ic('phone')}<span>Позвонить ГИПу</span></a>` : ''}${contact?.email ? `<a class="btn burn" href="mailto:${esc(contact.email)}">${ic('q')}<span>Написать</span></a>` : ''}`;
@@ -391,6 +399,7 @@ main{grid-area:main;padding:24px;min-width:0}
 .badge{background:var(--ac);color:#fff;border-radius:12px;min-width:24px;height:24px;display:inline-grid;place-items:center;font-weight:700;font-size:12.5px;padding:0 7px}
 textarea,input[name=text]{width:100%;border:1px solid var(--ln);background:var(--s);padding:10px 12px;font-size:13.5px;min-height:42px}textarea{min-height:84px;resize:vertical}textarea:focus,input:focus{outline:0;border-color:var(--ac)}
 .fm{display:grid;gap:8px;margin-top:10px}.sent{color:var(--ok);font-size:13px;margin-top:8px}
+.closed-bar{display:flex;gap:12px;align-items:flex-start;padding:14px 18px;margin:0 0 16px;background:var(--nb);border-left:3px solid var(--mu)}.closed-bar .grow{flex:1;min-width:0}.closed-bar .ic{flex:none;margin-top:2px}
 .inl>summary{list-style:none;display:inline-flex}.inl>summary::-webkit-details-marker{display:none}.inl[open]>summary{display:none}.inl .fm{margin-top:0}
 .pop{position:relative}.pop>summary{list-style:none}.pop-b{position:absolute;right:0;top:calc(100% + 6px);z-index:6;width:340px;max-width:80vw;background:var(--s);border:1px solid var(--ln);padding:14px;box-shadow:0 10px 28px rgba(29,30,33,.14)}.pop-b .fm{margin:0}
 .seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--ln);background:var(--s)}.seg a{min-height:38px;display:inline-flex;align-items:center;padding:0 12px;border-right:1px solid var(--ln);font-size:12.5px;font-weight:600;color:var(--mu);text-decoration:none}.seg a:last-child{border-right:0}
@@ -453,7 +462,7 @@ ${activeCss}
 @media print{body{display:block;background:#fff}.side,.bnav,.top-a,.pop,.fm,.burnbox,#nav,#model,#more,.seg,.anchor{display:none!important}.pg{display:flex!important;break-before:page}.pg#home{break-before:auto}.top{position:static}.card,.hero,.panel{break-inside:avoid}}
 </style></head><body>
 ${side}${top}
-<main>${home}${plan}${finance}${irdPage}${qPage}${meetPage}${docsPage}${navPage}${modelPage}${morePage}</main>
+<main>${closedBox}${home}${plan}${finance}${irdPage}${qPage}${meetPage}${docsPage}${navPage}${modelPage}${morePage}</main>
 ${bnav}
 </body></html>`;
 }

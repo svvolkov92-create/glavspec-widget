@@ -141,7 +141,8 @@
     if (o.inn && !/^\d{10}$|^\d{12}$/.test(String(o.inn))) return 'ИНН — 10 цифр у организации или 12 у ИП.';
     for (const k of ['kpp', 'ogrn', 'phone', 'email', 'site', 'director', 'regStatus', 'regCheckedAt']) if (o[k] !== undefined && (typeof o[k] !== 'string' || o[k].length > 200)) return 'Проверьте реквизиты контрагента.';
     if (o.contacts !== undefined && (!Array.isArray(o.contacts) || o.contacts.length > 50 || o.contacts.some(x => !x || typeof x.id !== 'string' || typeof x.name !== 'string' || x.name.length > 160 || (x.cabinetId !== undefined && typeof x.cabinetId !== 'string')))) return 'Список контактных лиц повреждён.';
-    if (o.contracts !== undefined && (!Array.isArray(o.contracts) || o.contracts.length > 200 || o.contracts.some(x => !x || typeof x.id !== 'string' || String(x.no ?? '').length > 80 || !isDateStr(x.date) || !(Number(x.sum ?? 0) >= 0)))) return 'Проверьте договоры контрагента.';
+    if (o.contracts !== undefined && (!Array.isArray(o.contracts) || o.contracts.length > 200 || o.contracts.some(x => !x || typeof x.id !== 'string' || String(x.no ?? '').length > 80 || !isDateStr(x.date) || !(Number(x.sum ?? 0) >= 0)
+      || (x.payments !== undefined && (!Array.isArray(x.payments) || x.payments.length > 500 || x.payments.some(y => !y || !isDateStr(y.date) || !(Number(y.sum) > 0))))))) return 'Проверьте договоры контрагента и оплаты по ним.';
     return null;
   }
 

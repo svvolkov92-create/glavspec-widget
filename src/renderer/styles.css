@@ -1965,3 +1965,10 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 html[data-dock-hidden] body::after { content: ''; position: fixed; top: 0; bottom: 0; width: 4px; background: #F26A1F; z-index: 99999; pointer-events: none }
 html[data-dock-hidden][data-dock-edge="left"] body::after { right: 0 }
 html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
+/* 4.11: payments under a contract */
+.org-pay { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 8px 4px; border-bottom: 1px dashed var(--line) }
+.org-pay .pay-chip { display: inline-flex; align-items: center; gap: 4px }
+.org-pay .pay-chip .icon { padding: 0 2px; min-width: 0; height: auto }
+.org-pay .pay-add { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto }
+.org-pay .pay-add input[type=date] { width: 140px } .org-pay .pay-add input { width: 120px }
+.org-contract { border-bottom: 0; padding-bottom: 2px }

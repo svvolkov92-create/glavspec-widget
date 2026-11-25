@@ -1,6 +1,6 @@
 'use strict';
 // 4.9 — «Контрагенты»: customers from the projects' text, a company card (roles, INN, contacts, contracts), the customer
-// picked in the project window, rights by «видит заказчиков» / «видит бюджет», the trash, cabinet logins for contacts.
+// picked in the project window, rights by «видит заказчиков» / «видит бюджет», the trash, cabinet logins for contacts. 4.11: contract payments, a freelancer's firm, a finished project read-only in the cabinet.
 const electron = require('electron');
 const { app } = electron;
 const fs = require('node:fs');
@@ -88,7 +88,7 @@ app.on('browser-window-created', (_e, win) => {
         await setVal('[data-ok="0"][data-k="date"]', '2026-11-20');
         await setVal('[data-ok="0"][data-k="sum"]', '1 250 000,50');
         await setVal('[data-ok="0"][data-k="projectId"]', 'demo-p1');
-        check('the total follows the sum', (await text('#org-ctotal')).replace(/\s/g, '').startsWith('1250000,5'), await text('#org-ctotal'));
+        check('the total follows the sum', (await text('#org-ctotal')).replace(/\s/g, '').includes('1250000,5'), await text('#org-ctotal'));
         await shot('49-02-supplier');
         await save();
         const o = orgByName('ООО «СтройПоставка»')?.[1];
@@ -197,6 +197,70 @@ app.on('browser-window-created', (_e, win) => {
         await setVal('#pr-client', 'АО «Пример-Девелопмент»'); await save(); await wait(1200);
         const c2 = ((await js(`window.api.cabinetCustomers()`)).customers || []).find(x => x.login === 'ivanov');
         check('a project given to the customer joins the login', c2?.projectIds.includes('v49-p3'), JSON.stringify(c2?.projectIds));
+      });
+
+      // ---------- 4.11 ----------
+      await step('4.11: payments under a supplier contract — paid and the balance', async () => {
+        await tab('orgs');
+        const [id] = orgByName('ООО «СтройПоставка»');
+        await click(`.org-t [data-act="open-org"][data-id="${id}"]`); await wait(500);
+        await setVal('#org-pay-s-0', '250 000'); await setVal('#org-pay-n-0', 'п/п 41');
+        await click('[data-act="org-pay-add"][data-i="0"]'); await wait(200);
+        check('the line shows paid and the balance', (await text('[data-pay="0"]')).replace(/\s/g, '').includes('остаток1000000,5'), (await text('[data-pay="0"]')).replace(/\s+/g, ' '));
+        await click('[data-act="org-pay-add"][data-i="0"]'); await wait(200);
+        check('an empty sum is refused', (await js(`document.querySelectorAll('[data-pay="0"] .pay-chip').length`)) === 1);
+        await shot('411-01-payments');
+        await save();
+        const c = data().orgs[id].contracts[0];
+        check('saved: one payment 250 000 with its note', c.payments?.length === 1 && c.payments[0].sum === 250000 && c.payments[0].note === 'п/п 41', JSON.stringify(c.payments));
+        check('the table shows the balance', (await js(`[...document.querySelectorAll('.org-t tr.row')].find(r => r.textContent.includes('СтройПоставка'))?.textContent || ''`)).replace(/\s/g, '').includes('1000000'));
+      });
+
+      await step('4.11: a freelancer linked to his firm; the firm card lists him', async () => {
+        const [id] = orgByName('ООО «СтройПоставка»');
+        await click('[data-act="new-contractor"]'); await wait(500);
+        check('the contractor form offers the firm', await js(`[...document.querySelectorAll('#c-org option')].some(o => o.value === '${id}')`));
+        await setVal('#c-name', 'Сидоров Пётр'); await setVal('#c-org', id);
+        await save();
+        const c = Object.values(data().contractors).find(x => x.name === 'Сидоров Пётр');
+        check('orgId saved', c?.orgId === id, JSON.stringify(c));
+        await tab('orgs');
+        await click(`.org-t [data-act="open-org"][data-id="${id}"]`); await wait(500);
+        check('the firm card lists the person', (await text('#dform')).includes('Сидоров Пётр'));
+        await js(`document.querySelector('[data-act="discard"]').click()`); await wait(200);
+      });
+
+      await step('4.11: a finished project is read-only in the cabinet; «Запросить повторное открытие» → «Открыть проект снова»', async () => {
+        const v = await js(`window.api.cabinetGet()`), port = v.local?.port;
+        check('local cabinet running', !!port);
+        const r = await js(`window.api.cabinetCustomerCreate({ name: 'Заказчик 4.11', login: 'zak411', projectIds: ['demo-p1'] })`);
+        await js(`window.api.write([{ type: 'update', col: 'projects', id: 'demo-p1', data: { status: 'done' } }], { action: 'test' })`); await wait(400);
+        await js(`window.api.cabinetPublish('demo-p1')`); await wait(500);
+        const lr = await fetch(`http://127.0.0.1:${port}/login`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ login: 'zak411', password: r.password }) });
+        const cookie = (lr.headers.get('set-cookie') || '').split(';')[0];
+        const page = await fetch(`http://127.0.0.1:${port}/p/demo-p1`, { headers: { Cookie: cookie } }).then(x => x.text());
+        check('the page says read-only', page.includes('только просмотр'));
+        check('no answer forms, a reopen form', !/c\/question"/.test(page) && !/c\/answer"/.test(page) && /c\/reopen"/.test(page));
+        const csrf = (page.match(/name="csrf" value="([^"]+)"/) || [])[1];
+        const post = (u, body) => fetch(`http://127.0.0.1:${port}${u}`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookie, Origin: `http://127.0.0.1:${port}` }, body: new URLSearchParams(body) });
+        const q = await post('/c/question', { csrf, project: 'demo-p1', text: 'Можно ещё вопрос?' });
+        check('a question is refused with «closed»', /ok=closed/.test(q.headers.get('location') || ''), q.status + ' ' + q.headers.get('location'));
+        const ro = await post('/c/reopen', { csrf, project: 'demo-p1', text: 'Нужна корректировка по замечаниям экспертизы' });
+        check('the reopen request is taken', /ok=reopen/.test(ro.headers.get('location') || ''), ro.status + ' ' + ro.headers.get('location'));
+        const again = await fetch(`http://127.0.0.1:${port}/p/demo-p1`, { headers: { Cookie: cookie } }).then(x => x.text());
+        check('the page says the request was sent', again.includes('Запрос на повторное открытие отправлен'));
+        await js(`window.api.cabinetSync()`); await wait(1200);
+        await tab('projects');
+        await js(`document.querySelector('[data-act="project-back"]')?.click()`); await wait(150);
+        await click('[data-act="open-project"][data-id="demo-p1"]'); await wait(400);
+        await click('[data-act="dtab"][data-id="cust"]'); await wait(1500);
+        check('the GIP sees the request with «Открыть проект снова»', (await text('#cab-box')).includes('Просьба открыть проект снова') && await js(`!!document.querySelector('[data-act="cab-reopen"]')`));
+        await shot('411-02-reopen');
+        await click('[data-act="cab-reopen"]'); await wait(1500);
+        check('the project is back to «На доработке»', data().projects['demo-p1'].status === 'revision', data().projects['demo-p1'].status);
+        const open = await fetch(`http://127.0.0.1:${port}/p/demo-p1`, { headers: { Cookie: cookie } }).then(x => x.text());
+        check('the customer can write again', !open.includes('только просмотр') && /c\/question"/.test(open));
+        await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(200);
       });
     } catch (e) { log.push('[smoke error] ' + (e.stack || e)); }
     fs.writeFileSync(path.join(outDir, 'log.txt'), log.join('\n'));

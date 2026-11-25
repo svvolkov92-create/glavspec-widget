@@ -3,7 +3,7 @@ let cab = null;          // view from the main process: { allowed, configured, u
 let cabCustomers = null; // customer accounts on the server, loaded when the «Для заказчика» tab is shown
 let cabPw = null;        // { name, login, password } — shown once after creating or resetting
 let cabLoadErr = '';
-const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи' };
+const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова' };
 // The customer's verdict on files sent for approval.
 const decisionChip = m => (m?.decision === 'approve' ? ' <span class="chip tone-ok">Согласовано</span>' : m?.decision === 'remarks' ? ' <span class="chip tone-warn">Есть замечания</span>' : '');
 const cabTime = ts => { const d = new Date(ts); return Number.isNaN(+d) ? '' : `${fmtDate(ts.slice(0, 10))} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -65,8 +65,19 @@ function renderCabinetBox() {
       ${others.length ? `<div class="row-in cab-add"><select id="cab-other"><option value="">— уже есть в кабинете —</option>${others.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.login)})</option>`).join('')}</select><button class="btn sm" type="button" data-act="cab-link">Добавить к проекту</button></div>` : ''}` : ''}
     ${msgs.length ? `<h4>Сообщения от заказчика</h4>${msgs.map(m => { const req = m.requestId && state.draft?.requests.find(r => r.id === m.requestId);
       return `<div class="cab-msg${m.read ? ' read' : ''}${m.kind === 'urgent' ? ' urgent' : ''}"><div><b>${esc(CAB_KINDS[m.kind] || 'Сообщение')}${m.requestTitle ? `: ${esc(m.requestTitle)}` : ''}${m.meetingTitle ? `: ${esc(m.meetingTitle)}` : ''}${m.to ? ` → ${esc(m.to)}` : ''}</b>${decisionChip(m)} <span class="hint">${esc(m.customerName)} · ${cabTime(m.ts)}</span></div><div class="cab-text">${esc(m.text)}</div>
-        <div>${m.read ? '' : `<button class="btn ghostbtn sm" type="button" data-act="cab-read" data-id="${esc(m.id)}">Прочитано</button>`}${req && !req.done ? (req.irdId ? `<button class="btn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Принять</button><button class="btn ghostbtn sm" type="button" data-act="cab-remark" data-id="${esc(m.id)}">Вернуть с замечанием</button>` : `<button class="btn ghostbtn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Отметить запрос «получено»</button>`) : ''}</div></div>`; }).join('')}` : ''}
+        <div>${m.kind === 'reopen' && projectClosed(state.projects.get(m.projectId)) && A.canManageCatalog(state.me) ? `<button class="btn sm" type="button" data-act="cab-reopen" data-id="${esc(m.id)}">Открыть проект снова</button>` : ''}${m.read ? '' : `<button class="btn ghostbtn sm" type="button" data-act="cab-read" data-id="${esc(m.id)}">Прочитано</button>`}${req && !req.done ? (req.irdId ? `<button class="btn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Принять</button><button class="btn ghostbtn sm" type="button" data-act="cab-remark" data-id="${esc(m.id)}">Вернуть с замечанием</button>` : `<button class="btn ghostbtn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Отметить запрос «получено»</button>`) : ''}</div></div>`; }).join('')}` : ''}
   </div>`;
+}
+// 4.11: a finished project (status «Завершён» or in the archive) is read-only for the customer; «Открыть проект снова»
+// puts it back to work as «На доработке», out of the archive, and republishes the page.
+const projectClosed = p => !!p && (p.status === 'done' || !!p.archived);
+async function cabReopen(msgId) {
+  const m = (cab?.messages || []).find(x => x.id === msgId), p = m && state.projects.get(m.projectId);
+  if (!p || !projectClosed(p)) return toast('Проект уже открыт.', true);
+  if (!(await write(op.update('projects', p.id, { status: 'revision', archived: false }), `«${p.name}» снова в работе — «На доработке»`))) return;
+  await api.cabinetRead([msgId]).catch(() => {});
+  if (cab?.published?.[p.id]) await api.cabinetPublish(p.id).catch(() => {});
+  renderCabinetBox();
 }
 async function cabAction(promise, okText) {
   const r = await promise;
@@ -174,6 +185,7 @@ onAct({
   'cab-pw-hide': () => { cabPw = null; renderCabinetBox(); renderOrgCabinet(); },
   'cab-pw-copy': () => { if (cabPw) copyText(`Кабинет заказчика: ${cab.publicUrl || cab.url}\nЛогин: ${cabPw.login}\nПароль: ${cabPw.password}`).then(ok => toast(ok ? 'Скопировано — вставьте в письмо или мессенджер' : 'Не удалось скопировать', !ok)); },
   'cab-read': ({ id }) => { api.cabinetRead([id]); },
+  'cab-reopen': ({ el, id }) => { el.disabled = true; cabReopen(id).finally(() => { el.disabled = false; }); },
   'cab-got': ({ id }) => { cabMarkGot(id); },
   'cab-read-all': () => { api.cabinetRead(cab.messages.filter(m => !m.read).map(m => m.id)); },
   'cab-open-msg': ({ id }) => { const m = cab.messages.find(x => x.id === id); if (m) { api.cabinetRead([id]); if (state.projects.has(m.projectId)) openProject(m.projectId, 'cust'); } },

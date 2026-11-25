@@ -349,7 +349,7 @@
     };
     return ctx;
   }
-  const APP_VERSION = '4.10.0';
+  const APP_VERSION = '4.11.0';
   // Sign in / join / move the base (no ctx yet, or switching from the local file).
   const server = {
     async signIn({ url, login, password, code }) {

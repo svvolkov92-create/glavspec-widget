@@ -2993,7 +2993,7 @@ function viewOrgs() {
         const n = orgProjects(o.id).length, k = (o.contacts || [])[0];
         return `<tr class="row" data-act="open-org" data-id="${esc(o.id)}" title="Открыть карточку"><td><b>${esc(o.name)}</b> ${orgChips(o)}${o.regStatus ? ` <span class="chip tone-bad" title="По ЕГРЮЛ${o.regCheckedAt ? ' на ' + fmtDate(o.regCheckedAt) : ''}">${esc(o.regStatus)}</span>` : ''}</td><td class="num hint">${esc(o.inn || '')}</td>
           <td class="hint">${k ? `${esc(k.name)}${k.position ? `, ${esc(k.position)}` : ''}${k.phone ? ` · ${esc(k.phone)}` : ''}${o.contacts.length > 1 ? ` <span class="cnt">+${o.contacts.length - 1}</span>` : ''}` : ''}</td>
-          <td class="r num">${n || '—'}</td>${showMoney ? `<td class="r num">${o.contracts?.length ? `${o.contracts.length} · ${money(contractSum(o))}` : '—'}</td>` : ''}</tr>`;
+          <td class="r num">${n || '—'}</td>${showMoney ? `<td class="r num">${o.contracts?.length ? `${o.contracts.length} · ${money(contractSum(o))}${o.contracts.some(c => contractPaid(c)) ? ` <span class="hint">· остаток ${money(o.contracts.reduce((s, c) => s + contractLeft(c), 0))}</span>` : ''}` : '—'}</td>` : ''}</tr>`;
       }).join('')}</tbody></table></div>`
       : `<p class="hint people-empty">${all.length ? 'Ничего не нашлось — смените фильтр или строку поиска.' : 'Каталог пока пуст. Добавьте заказчиков и подрядчиков кнопкой «+ Контрагент».'}</p>`}`;
 }
@@ -3079,6 +3079,7 @@ function openOrg(id, preset = {}) {
     </div>
     <div class="sub"><h3>Контактные лица</h3><div id="org-contacts"></div></div>
     <div class="sub" id="org-contracts-sub"${orgContractsOn(roles) ? '' : ' hidden'}><h3>Договоры</h3><div id="org-contracts"></div></div>
+    ${id ? orgPeopleHtml(id) : ''}
     ${id && A.isCustomerOrg(o) ? `<div class="sub"><h3>Проекты заказчика</h3>${projectsBox()}</div><div id="org-cab"></div>` : ''}
     <div class="err" id="form-err" hidden></div>`,
     footer: `<button class="btn primary" type="submit">${id ? 'Сохранить' : 'Добавить'}</button>
@@ -3114,14 +3115,30 @@ function renderOrgContracts() {
       <input data-ok="${i}" data-k="sum" value="${esc(c.sum || '')}" inputmode="decimal" placeholder="Сумма, ₽" maxlength="20" aria-label="Сумма">
       <input data-ok="${i}" data-k="subject" value="${esc(c.subject || '')}" placeholder="Предмет: раздел КР, поставка…" maxlength="200" aria-label="Предмет">
       <select data-ok="${i}" data-k="projectId" aria-label="Проект"><option value="">— проект —</option>${projs.map(p => `<option value="${esc(p.id)}"${p.id === c.projectId ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
-      <button class="icon" type="button" data-act="org-contract-del" data-i="${i}" title="Убрать договор" aria-label="Убрать">✕</button></div>`).join('')}</div>
-      <p class="hint">Всего по договорам: <span id="org-ctotal">${money(total)}</span>. Остаток по оплатам появится вместе с «Финансами: заявками».</p>` : '<p class="hint">Договоров пока нет.</p>'}
+      <button class="icon" type="button" data-act="org-contract-del" data-i="${i}" title="Убрать договор" aria-label="Убрать">✕</button></div>
+      ${contractPayHtml(c, i)}`).join('')}</div>
+      <p class="hint" id="org-ctotal">${contractsTotalText(list)}</p>` : '<p class="hint">Договоров пока нет.</p>'}
     <button class="btn sm" type="button" data-act="org-contract-add">+ Договор</button>`;
 }
-// The total under the contracts follows the typed sums without redrawing the rows (the caret stays put).
+// 4.11: payments under a contract — paid so far and what is left.
+const contractPaid = c => (Array.isArray(c.payments) ? c.payments : []).reduce((s, x) => s + (Number(x.sum) || 0), 0);
+const contractLeft = c => (money0(c.sum) || 0) - contractPaid(c);
+function contractsTotalText(list) {
+  const total = list.reduce((s, c) => s + (money0(c.sum) || 0), 0), paid = list.reduce((s, c) => s + contractPaid(c), 0);
+  return `Всего по договорам: ${money(total)} · оплачено ${money(paid)} · остаток ${money(total - paid)}`;
+}
+function contractPayHtml(c, i) {
+  const pays = Array.isArray(c.payments) ? c.payments : [], left = contractLeft(c);
+  return `<div class="org-pay" data-pay="${i}"><span class="hint">Оплачено <b>${money(contractPaid(c))}</b> · остаток <b class="${left < 0 ? 'neg' : ''}">${money(left)}</b>${left < 0 ? ' — переплата' : ''}</span>
+    ${pays.map((x, j) => `<span class="chip pay-chip">${esc(fmtDate(x.date))} — ${money(x.sum)}${x.note ? ` · ${esc(x.note)}` : ''}<button class="icon" type="button" data-act="org-pay-del" data-i="${i}" data-j="${j}" aria-label="Убрать оплату">✕</button></span>`).join('')}
+    <span class="pay-add"><input type="date" id="org-pay-d-${i}" value="${todayStr()}" aria-label="Дата оплаты"><input id="org-pay-s-${i}" inputmode="decimal" placeholder="Сумма, ₽" maxlength="20" aria-label="Сумма оплаты"><input id="org-pay-n-${i}" placeholder="п/п №, за что" maxlength="80" aria-label="Примечание"><button class="btn ghostbtn sm" type="button" data-act="org-pay-add" data-i="${i}">+ оплата</button></span></div>`;
+}
+// The totals follow the typed sums without redrawing the rows (the caret stays put).
 function renderOrgContractsTotal() {
   const el = $('#org-ctotal');
-  if (el && state.draft) el.textContent = money(state.draft.contracts.reduce((s, c) => s + (money0(c.sum) || 0), 0));
+  if (!el || !state.draft) return;
+  el.textContent = contractsTotalText(state.draft.contracts);
+  state.draft.contracts.forEach((c, i) => { const box = document.querySelector(`#org-contracts [data-pay="${i}"] > .hint`); if (box) { const left = contractLeft(c); box.innerHTML = `Оплачено <b>${money(contractPaid(c))}</b> · остаток <b class="${left < 0 ? 'neg' : ''}">${money(left)}</b>${left < 0 ? ' — переплата' : ''}`; } });
 }
 function orgInnHint() {
   const el = $('#o-inn-hint'), v = val('inn');
@@ -3156,7 +3173,8 @@ async function submitOrg(keepOpen = false) {
       if (!no && !subject && !s && !c.date) continue;
       const sum = s ? parseMoney(s) : 0;
       if (Number.isNaN(sum) || sum < 0) return formError(`Сумма договора ${no ? `№ ${no}` : ''} — число, например 1 250 000.`);
-      list.push({ id: c.id, no, date: isDate(c.date) ? c.date : '', sum, subject, projectId: state.projects.has(c.projectId) ? c.projectId : '' });
+      list.push({ id: c.id, no, date: isDate(c.date) ? c.date : '', sum, subject, projectId: state.projects.has(c.projectId) ? c.projectId : '',
+        payments: (Array.isArray(c.payments) ? c.payments : []).filter(x => isDate(x.date) && Number(x.sum) > 0).map(x => ({ id: x.id, date: x.date, sum: Number(x.sum), note: String(x.note || '').slice(0, 80) })) });
     }
     data.contracts = list;
   }
@@ -3456,6 +3474,22 @@ async function orgFromProject() {
   }
 }
 
+/* ----- 4.11: a contractor (a person from «Люди → Подрядчики») and his ИП or firm in the catalogue ----- */
+// Everyone who sees «Люди» sees the companies' names; picking is for whoever edits the contractor (GIP, chiefs).
+const workOrgs = () => orgsArr().filter(o => A.orgRoles(o).some(r => r !== 'customer'));
+function contractorOrgField(c) {
+  const list = workOrgs(), cur = c.orgId && state.orgs.get(c.orgId);
+  if (!list.length && !cur) return '';
+  return `<div class="f wide"><label for="c-org">ИП или фирма (каталог контрагентов)</label><select id="c-org" name="orgId"><option value="">— не указана —</option>${(cur && !list.includes(cur) ? [cur, ...list] : list).map(o => `<option value="${esc(o.id)}"${o.id === c.orgId ? ' selected' : ''}>${esc(o.name)}${o.inn ? ` · ИНН ${esc(o.inn)}` : ''}</option>`).join('')}</select>
+    <span class="hint">Через неё идут договоры и оплаты. Сама карточка подрядчика — для назначения на разделы.${cur && A.canSeeOrgs(state.me) ? ` <button class="linkbtn" type="button" data-act="open-org" data-id="${esc(cur.id)}">Карточка организации</button>` : ''}</span></div>`;
+}
+const contractorOrgPicked = () => { const v = $('#dform [name="orgId"]')?.value || ''; return state.orgs?.has(v) ? v : ''; };
+// The people of a company: contractors linked to it (shown in its card).
+function orgPeopleHtml(id) {
+  const ps = [...state.contractors.values()].filter(c => c.orgId === id && !c.deletedAt).sort(byName);
+  return ps.length ? `<div class="sub"><h3>Исполнители этой организации</h3><div class="org-projs">${ps.map(c => `<button class="linkbtn" type="button" data-act="open-contractor" data-id="${esc(c.id)}">${esc(c.name)}${c.specialty ? ` <span class="hint">${esc(c.specialty)}</span>` : ''}</button>`).join('')}</div></div>` : '';
+}
+
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
   'org-filter': ({ el }) => { orgFilter = el.dataset.v; saveLocal('orgFilter', orgFilter); renderNow(); },
@@ -3469,6 +3503,15 @@ onAct({
   },
   'org-contract-add': () => { state.draft.contracts.push({ id: newId(), no: '', date: '', sum: '', subject: '', projectId: '' }); renderOrgContracts(); $(`#org-contracts [data-ok="${state.draft.contracts.length - 1}"][data-k="no"]`)?.focus(); },
   'org-contract-del': ({ el }) => { state.draft.contracts.splice(Number(el.dataset.i), 1); renderOrgContracts(); },
+  'org-pay-add': ({ el }) => {
+    const i = Number(el.dataset.i), c = state.draft.contracts[i];
+    const date = $(`#org-pay-d-${i}`)?.value, sum = parseMoney($(`#org-pay-s-${i}`)?.value || ''), note = ($(`#org-pay-n-${i}`)?.value || '').trim();
+    if (!c || !isDate(date)) return toast('Укажите дату оплаты.', true);
+    if (!(sum > 0)) { toast('Сумма оплаты — число больше нуля, например 150 000.', true); return $(`#org-pay-s-${i}`)?.focus(); }
+    c.payments = [...(c.payments || []), { id: newId(), date, sum, note }].sort((a, b) => a.date.localeCompare(b.date));
+    renderOrgContracts();
+  },
+  'org-pay-del': ({ el }) => { const c = state.draft.contracts[Number(el.dataset.i)]; if (c?.payments) { c.payments.splice(Number(el.dataset.j), 1); renderOrgContracts(); } },
   'org-mig-link': ({ el }) => { el.disabled = true; orgMigLink(el).finally(() => { el.disabled = false; }); },
   'org-mig-skip': ({ el }) => { const k = el.closest('.org-sug')?.dataset.key; if (k) { orgDismissed.add(k); saveLocal('orgDismissed', [...orgDismissed]); renderNow(); } },
   'org-cab-open': ({ id }) => { orgCabOpen(id); },
@@ -3641,7 +3684,7 @@ function contractorRow(c, list) {
   return `<div class="co-row${open ? ' open' : ''}" data-drop="contractor:${esc(c.id)}">
     <button class="co-line" type="button" data-act="co-toggle" data-id="${esc(c.id)}" aria-expanded="${open}">
       <span class="tree-tg">${open ? '▾' : '▸'}</span><span class="kicons">${A.contractorKinds(c).map(k => kindIcon(k)).join('')}</span>
-      <b class="co-name">${esc(c.name)}</b><span class="hint co-spec">${esc(c.specialty || '')}</span>
+      <b class="co-name">${esc(c.name)}</b><span class="hint co-spec">${esc(c.specialty || '')}${c.orgId && state.orgs?.get(c.orgId) ? ` · ${esc(state.orgs.get(c.orgId).name)}` : ''}</span>
       <span class="co-n" title="В работе">${x.active ? `в работе <b class="num">${x.active}</b>` : '<span class="hint">свободен</span>'}</span>
       <span class="co-n">${x.overdue ? `<span class="neg">сорвано <b class="num">${x.overdue}</b></span>` : ''}</span>
       ${canMoney() ? `<span class="co-n r">${dueNow > 0 ? `<span class="warnv">пора платить ${money(dueNow)}</span>` : ''}</span>` : `<span class="co-n">${x.review ? `на проверке ${x.review}` : ''}</span>`}
@@ -7122,7 +7165,7 @@ let cab = null;          // view from the main process: { allowed, configured, u
 let cabCustomers = null; // customer accounts on the server, loaded when the «Для заказчика» tab is shown
 let cabPw = null;        // { name, login, password } — shown once after creating or resetting
 let cabLoadErr = '';
-const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи' };
+const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова' };
 // The customer's verdict on files sent for approval.
 const decisionChip = m => (m?.decision === 'approve' ? ' <span class="chip tone-ok">Согласовано</span>' : m?.decision === 'remarks' ? ' <span class="chip tone-warn">Есть замечания</span>' : '');
 const cabTime = ts => { const d = new Date(ts); return Number.isNaN(+d) ? '' : `${fmtDate(ts.slice(0, 10))} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -7184,8 +7227,19 @@ function renderCabinetBox() {
       ${others.length ? `<div class="row-in cab-add"><select id="cab-other"><option value="">— уже есть в кабинете —</option>${others.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.login)})</option>`).join('')}</select><button class="btn sm" type="button" data-act="cab-link">Добавить к проекту</button></div>` : ''}` : ''}
     ${msgs.length ? `<h4>Сообщения от заказчика</h4>${msgs.map(m => { const req = m.requestId && state.draft?.requests.find(r => r.id === m.requestId);
       return `<div class="cab-msg${m.read ? ' read' : ''}${m.kind === 'urgent' ? ' urgent' : ''}"><div><b>${esc(CAB_KINDS[m.kind] || 'Сообщение')}${m.requestTitle ? `: ${esc(m.requestTitle)}` : ''}${m.meetingTitle ? `: ${esc(m.meetingTitle)}` : ''}${m.to ? ` → ${esc(m.to)}` : ''}</b>${decisionChip(m)} <span class="hint">${esc(m.customerName)} · ${cabTime(m.ts)}</span></div><div class="cab-text">${esc(m.text)}</div>
-        <div>${m.read ? '' : `<button class="btn ghostbtn sm" type="button" data-act="cab-read" data-id="${esc(m.id)}">Прочитано</button>`}${req && !req.done ? (req.irdId ? `<button class="btn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Принять</button><button class="btn ghostbtn sm" type="button" data-act="cab-remark" data-id="${esc(m.id)}">Вернуть с замечанием</button>` : `<button class="btn ghostbtn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Отметить запрос «получено»</button>`) : ''}</div></div>`; }).join('')}` : ''}
+        <div>${m.kind === 'reopen' && projectClosed(state.projects.get(m.projectId)) && A.canManageCatalog(state.me) ? `<button class="btn sm" type="button" data-act="cab-reopen" data-id="${esc(m.id)}">Открыть проект снова</button>` : ''}${m.read ? '' : `<button class="btn ghostbtn sm" type="button" data-act="cab-read" data-id="${esc(m.id)}">Прочитано</button>`}${req && !req.done ? (req.irdId ? `<button class="btn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Принять</button><button class="btn ghostbtn sm" type="button" data-act="cab-remark" data-id="${esc(m.id)}">Вернуть с замечанием</button>` : `<button class="btn ghostbtn sm" type="button" data-act="cab-got" data-id="${esc(m.id)}">Отметить запрос «получено»</button>`) : ''}</div></div>`; }).join('')}` : ''}
   </div>`;
+}
+// 4.11: a finished project (status «Завершён» or in the archive) is read-only for the customer; «Открыть проект снова»
+// puts it back to work as «На доработке», out of the archive, and republishes the page.
+const projectClosed = p => !!p && (p.status === 'done' || !!p.archived);
+async function cabReopen(msgId) {
+  const m = (cab?.messages || []).find(x => x.id === msgId), p = m && state.projects.get(m.projectId);
+  if (!p || !projectClosed(p)) return toast('Проект уже открыт.', true);
+  if (!(await write(op.update('projects', p.id, { status: 'revision', archived: false }), `«${p.name}» снова в работе — «На доработке»`))) return;
+  await api.cabinetRead([msgId]).catch(() => {});
+  if (cab?.published?.[p.id]) await api.cabinetPublish(p.id).catch(() => {});
+  renderCabinetBox();
 }
 async function cabAction(promise, okText) {
   const r = await promise;
@@ -7293,6 +7347,7 @@ onAct({
   'cab-pw-hide': () => { cabPw = null; renderCabinetBox(); renderOrgCabinet(); },
   'cab-pw-copy': () => { if (cabPw) copyText(`Кабинет заказчика: ${cab.publicUrl || cab.url}\nЛогин: ${cabPw.login}\nПароль: ${cabPw.password}`).then(ok => toast(ok ? 'Скопировано — вставьте в письмо или мессенджер' : 'Не удалось скопировать', !ok)); },
   'cab-read': ({ id }) => { api.cabinetRead([id]); },
+  'cab-reopen': ({ el, id }) => { el.disabled = true; cabReopen(id).finally(() => { el.disabled = false; }); },
   'cab-got': ({ id }) => { cabMarkGot(id); },
   'cab-read-all': () => { api.cabinetRead(cab.messages.filter(m => !m.read).map(m => m.id)); },
   'cab-open-msg': ({ id }) => { const m = cab.messages.find(x => x.id === id); if (m) { api.cabinetRead([id]); if (state.projects.has(m.projectId)) openProject(m.projectId, 'cust'); } },
@@ -7376,6 +7431,7 @@ function openContractor(id) {
       <div class="f"><label for="c-phone">Телефон</label><input id="c-phone" name="phone" type="tel" value="${esc(c.phone || '')}" placeholder="+7 900 123-45-67" maxlength="40"></div>
       <div class="f"><label for="c-email">Почта</label><input id="c-email" name="email" type="email" value="${esc(c.email || '')}" maxlength="120"></div>
       <div class="f wide"><label for="c-msg">Мессенджер</label><input id="c-msg" name="messenger" value="${esc(c.messenger || '')}" placeholder="Telegram @petrov_eom" maxlength="120"></div>
+      ${contractorOrgField(c)}
       <details class="f wide more"${c.requisites || c.note ? ' open' : ''}><summary>Дополнительно: реквизиты, примечание</summary><div class="fgrid">
         <div class="f wide"><label for="c-req">Реквизиты</label><textarea id="c-req" name="requisites" maxlength="1000" placeholder="ИНН, р/с, банк — попадут в акт сверки">${esc(c.requisites || '')}</textarea></div>
         <div class="f wide"><label for="c-note">Примечание</label><textarea id="c-note" name="note" maxlength="2000" placeholder="Ставка, особенности">${esc(c.note || '')}</textarea></div>
@@ -7425,7 +7481,7 @@ async function submitSimple(keepOpen = false) {
       }
     }
   } else if (kind === 'contractor') {
-    const data = { name: val('name'), specialty: val('specialty'), phone: val('phone'), email: val('email'), messenger: val('messenger'), requisites: val('requisites'), note: val('note') };
+    const data = { name: val('name'), specialty: val('specialty'), phone: val('phone'), email: val('email'), messenger: val('messenger'), requisites: val('requisites'), note: val('note'), orgId: contractorOrgPicked() };
     if (!data.name) return formError('Укажите ФИО или название исполнителя.', '', 'name');
     if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.', '', 'email');
     ok = id ? await write(op.update('contractors', id, data), 'Исполнитель сохранён')
