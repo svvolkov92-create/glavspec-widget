@@ -78,6 +78,7 @@ function openContractor(id) {
       <div class="f"><label for="c-email">Почта</label><input id="c-email" name="email" type="email" value="${esc(c.email || '')}" maxlength="120"></div>
       <div class="f wide"><label for="c-msg">Мессенджер</label><input id="c-msg" name="messenger" value="${esc(c.messenger || '')}" placeholder="Telegram @petrov_eom" maxlength="120"></div>
       ${contractorOrgField(c)}
+      <div class="f wide">${contractorMoneyHtml({ ...c, id })}</div>
       <details class="f wide more"${c.requisites || c.note ? ' open' : ''}><summary>Дополнительно: реквизиты, примечание</summary><div class="fgrid">
         <div class="f wide"><label for="c-req">Реквизиты</label><textarea id="c-req" name="requisites" maxlength="1000" placeholder="ИНН, р/с, банк — попадут в акт сверки">${esc(c.requisites || '')}</textarea></div>
         <div class="f wide"><label for="c-note">Примечание</label><textarea id="c-note" name="note" maxlength="2000" placeholder="Ставка, особенности">${esc(c.note || '')}</textarea></div>

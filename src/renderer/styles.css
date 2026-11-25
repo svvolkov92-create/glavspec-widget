@@ -2022,3 +2022,16 @@ html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
 .ex-mark { display: inline-block; border: 1.5px solid var(--idle); border-radius: 4px; padding: 0 5px; font-size: 11.5px }
 .ex-modal { width: min(720px, 94vw) }
 .ex-modal textarea { width: 100% }
+/* 4.16: assignments, contractor statement */
+.asg-hold { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 }
+.asg-t td .marks, .asg-t td .mk { vertical-align: middle }
+.cm-sub { margin-top: 6px }
+.cm-kpis { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 10px }
+.cm-kpi { flex: 1; min-width: 140px; border: 1px solid var(--line); border-radius: 9px; padding: 8px 12px; background: var(--surface) }
+.cm-kpi b { display: block; font-size: 18px }
+.cm-kpi b.pos { color: var(--ok) }
+.cm-pays { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0 }
+.cm-rows { display: grid; gap: 0; font-size: 12.5px }
+.cm-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)); gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--line); align-items: start }
+.cm-row .r { text-align: right }
+.cm-hd { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted) }

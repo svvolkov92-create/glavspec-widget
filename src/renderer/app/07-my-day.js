@@ -39,6 +39,9 @@ function viewDay() {
   // 4.15: remarks of the expertise this user answers.
   const rems = myRemarks().slice(0, 6).map(({ p, r }) => `<div class="day-row"><span class="chip tone-${exLate(r) ? 'bad' : 'warn'}">${exLate(r) ? 'замечание просрочено' : `замечание${isDate(r.due) ? ' до ' + fmtDate(r.due).slice(0, 5) : ''}`}</span><button class="linkbtn day-t" type="button" data-act="ex-open" data-id="${esc(p.id)}" data-v="${esc(r.id)}">№ ${esc(r.n)}${r.mark ? ' · ' + esc(r.mark) : ''} · ${esc(String(r.text).slice(0, 70))}<span class="hint"> — ${esc(p.name)}</span></button></div>`);
   first.push(...rems);
+  // 4.16: assignments issued to my sections — accept or return them.
+  const asgIn = tasksArr().filter(t => t.kind === 'assign' && t.status === 'review' && asgTo(t).some(x => hasOwner(x, me?.id)));
+  first.push(...asgIn.slice(0, 6).map(t => `<div class="day-row"><span class="chip tone-review">вам выдано задание</span><button class="linkbtn day-t" type="button" data-act="project-page" data-id="${esc(t.projectId)}">${esc(t.note || t.title)}<span class="hint"> — ${esc(projectOf(t)?.name || '')}</span></button>${A.canEditTaskFields(state.me) ? `<button class="btn okbtn sm" type="button" data-act="asg-accept" data-id="${esc(t.id)}">Принял</button>` : ''}</div>`));
   const todo = [
     ...working.map(t => row(STATUSES[t.status].label.toLowerCase(), 'work', t, `<button class="btn sm${focus?.taskId === t.id ? ' on' : ''}" type="button" data-act="${focus?.taskId === t.id ? 'focus-stop' : 'focus-start'}" data-id="${esc(t.id)}">${focus?.taskId === t.id ? 'Пауза' : '▶ Фокус'}</button>`)),
     ...notStarted.map(t => row('не начат', 'idle', t, `<button class="btn primary sm" type="button" data-act="cm-quick" data-q="start" data-id="${esc(t.id)}">▶ Начать</button>`)),
