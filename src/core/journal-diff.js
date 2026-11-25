@@ -20,6 +20,12 @@ function titleOf(col, doc, ctx) {
     const p = ctx.projects[doc.projectId];
     return `${L.sectionsOf(doc).join(', ') || '—'}${p ? ' · ' + p.name : ''}`;
   }
+  // 4.22: a remark of the expertise and a letter.
+  if (col === 'remarks' || col === 'letters') {
+    const p = ctx.projects[doc.projectId];
+    const what = col === 'remarks' ? `Замечание ${doc.n || ''}${doc.mark ? ' · ' + doc.mark : ''}` : `${doc.dir === 'in' ? 'Вх.' : 'Исх.'} ${doc.seq || ''} · ${doc.subject || ''}`;
+    return `${what}${p ? ' · ' + p.name : ''}`;
+  }
   return doc.name || '';
 }
 
@@ -69,6 +75,16 @@ const FIELDS = {
     inn: ['ИНН', v => v || '—'], kpp: ['КПП', v => v || '—'], address: ['Адрес', v => v || '—'], requisites: ['Реквизиты', () => 'изменено'],
     contacts: ['Контактные лица', v => (Array.isArray(v) ? `${v.length}` : '0')], contracts: ['Договоры', v => (Array.isArray(v) ? `${v.length}` : '0')],
     note: ['Примечание', () => 'изменено'],
+  },
+  remarks: {
+    text: ['Замечание', () => 'изменено'], mark: ['Раздел', v => v || '—'], ownerId: ['Отвечает', (v, ctx) => ctx.users?.[v]?.name || 'не назначен'],
+    due: ['Срок', date], status: ['Статус', v => ({ work: 'в работе', ready: 'ответ готов', returned: 'вернули', closed: 'закрыто' }[v] || 'в работе')],
+    answer: ['Ответ', () => 'изменён'], rvi: ['Изменение (РВИ)', v => (v ? `РВИ-${String(v).padStart(2, '0')}` : '—')],
+  },
+  letters: {
+    date: ['Дата', date], corr: ['Корреспондент', v => v || '—'], subject: ['Тема', v => v || '—'], body: ['Текст', () => 'изменён'],
+    status: ['Состояние', v => ({ new: 'зарегистрировано', answer: 'нужен ответ', done: 'отработано', draft: 'черновик', sent: 'отправлено' }[v] || v || '—')],
+    due: ['Ответить до', date], files: ['Вложения', v => (Array.isArray(v) ? `${v.length}` : '0')],
   },
   contractors: {
     name: ['ФИО', v => v || '—'], specialty: ['Специализация', v => v || '—'], phone: ['Телефон', v => v || '—'],

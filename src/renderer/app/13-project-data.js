@@ -101,16 +101,18 @@ const LETTER_TPL = {
   remarks: { label: 'Ответ на замечания', subject: 'Ответ на замечания по объекту «{project}»', body: 'На Ваше письмо № ___ от ___ сообщаем:\n1. Замечание: \n   Ответ: \n\nИсправленная документация прилагается.' },
 };
 const LETTER_STATUS = { in: { new: ['work', 'зарегистрировано'], answer: ['warn', 'нужен ответ'], done: ['ok', 'отработано'] }, out: { draft: ['idle', 'черновик'], sent: ['ok', 'отправлено'] } };
+// 4.22: the letters are records of their own (state.letters, with projectId); the project's old copy stays untouched.
+const lettersOf = pid => [...state.letters.values()].filter(l => l.projectId === pid);
 // Through numbering per year over all projects: «Исх. 320», «Вх. 246».
 function nextLetterNo(dir, year = state.today.slice(0, 4)) {
   let max = 0;
-  for (const p of state.projects.values()) for (const l of p.letters || []) if (l.dir === dir && String(l.date || '').slice(0, 4) === year) max = Math.max(max, Number(l.seq) || 0);
+  for (const l of state.letters.values()) if (l.dir === dir && String(l.date || '').slice(0, 4) === year) max = Math.max(max, Number(l.seq) || 0);
   return max + 1;
 }
 const letterNo = l => `${l.dir === 'in' ? 'Вх.' : 'Исх.'} ${l.seq}`;
 let letterView = {};
 function lettersBlock(p) {
-  const all = [...(p.letters || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.seq || 0) - (a.seq || 0));
+  const all = lettersOf(p.id).sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.seq || 0) - (a.seq || 0));
   const edit = A.canManageCatalog(state.me) && !p.archived;
   if (!all.length && !edit) return '';
   const v = letterView[p.id] || 'all', list = v === 'all' ? all : all.filter(l => l.dir === v);
@@ -169,13 +171,13 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
     if (!l.subject) { q('#let-err').textContent = 'Укажите тему письма.'; q('#let-err').hidden = false; q('#let-subj').classList.add('field-bad'); q('#let-subj').focus(); return false; }
     // The number belongs to the year of the date; a letter moved to another year gets that year's next number.
     if (isNew || String(letter.date).slice(0, 4) !== l.date.slice(0, 4)) l.seq = nextLetterNo(l.dir, l.date.slice(0, 4));
-    const cur = state.projects.get(p.id), list = [...(cur.letters || []).filter(x => x.id !== l.id), l];
-    return write(op.update('projects', p.id, { letters: list }), `${letterNo(l)} от ${fmtDate(l.date)} — ${isNew ? 'зарегистрировано' : 'сохранено'}`);
+    const { id, ...data } = l;
+    return write(isNew || !state.letters.has(id) ? op.set('letters', id, { ...data, projectId: p.id, createdAt: data.createdAt || new Date().toISOString() }) : op.update('letters', id, data), `${letterNo(l)} от ${fmtDate(l.date)} — ${isNew ? 'зарегистрировано' : 'сохранено'}`);
   };
   root.addEventListener('click', async e => {
     const m = e.target.closest('[data-m]')?.dataset.m;
     if (m === 'unf') { l.files.splice(Number(e.target.closest('[data-m]').dataset.i), 1); drawFiles(); }
-    if (m === 'del') { const cur = state.projects.get(p.id); if (await write(op.update('projects', p.id, { letters: (cur.letters || []).filter(x => x.id !== l.id) }), `${letterNo(l)} удалено`)) close(); }
+    if (m === 'del') { if (await write(op.del('letters', l.id), `${letterNo(l)} удалено`)) close(); }
     if (m === 'mail') { if (await save()) { close(); mailLetter(l); } }
   });
   q('form').addEventListener('submit', async e => { e.preventDefault(); e.stopPropagation(); if (await save()) close(); });
@@ -257,6 +259,6 @@ onAct({
   'ird-newfolder': ({ el }) => { const p = state.projects.get(el.dataset.id); if (p) askText('Новая папка', 'Название папки', 'Например: Согласования с сетевыми').then(name => { if (!name?.trim()) return; const id = newId(); irdOpen[p.id] = id; write(op.update('projects', p.id, { irdFolders: [...(p.irdFolders || []), { id, name: name.trim().slice(0, 80) }] }), 'Папка добавлена'); }); },
   'let-view': ({ el }) => { letterView[el.dataset.id] = el.dataset.v; renderNow(); },
   'let-new': ({ el }) => { const p = state.projects.get(el.dataset.id); if (p) askLetter(p, null, el.dataset.v); },
-  'let-edit': ({ el }) => { const p = state.projects.get(el.dataset.id), l = p?.letters?.find(x => x.id === el.dataset.lid); if (l) askLetter(p, l); },
-  'let-mail': ({ el }) => { const p = state.projects.get(el.dataset.id), l = p?.letters?.find(x => x.id === el.dataset.lid); if (l) mailLetter(l); },
+  'let-edit': ({ el }) => { const p = state.projects.get(el.dataset.id), l = state.letters.get(el.dataset.lid); if (p && l) askLetter(p, l); },
+  'let-mail': ({ el }) => { const p = state.projects.get(el.dataset.id), l = state.letters.get(el.dataset.lid); if (p && l) mailLetter(l); },
 });

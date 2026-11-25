@@ -13,7 +13,7 @@ async function loadJournal() {
 }
 function journalMatches(e, j) {
   if (j.type === 'tasks' && e.col !== 'tasks') return false;
-  if (j.type === 'projects' && e.col !== 'projects') return false;
+  if (j.type === 'projects' && !['projects', 'remarks', 'letters'].includes(e.col)) return false;
   if (j.type === 'contractors' && e.col !== 'contractors') return false;
   if (j.type === 'payments' && !(e.changes || []).some(c => c.f === 'payment' || c.f === 'plan' || c.f === 'invoiceReceived' || c.f === 'actSigned')) return false;
   if (j.type === 'dates' && !(e.changes || []).some(c => c.f === 'start' || c.f === 'finish' || c.f === 'milestone')) return false;
@@ -56,7 +56,7 @@ function renderJournal() {
   const entryHtml = e => {
     const live = e.col === 'tasks' ? state.tasks.has(e.id) : e.col === 'projects' ? state.projects.has(e.id) : e.col === 'contractors' ? state.contractors.has(e.id) : false;
     const act = e.col === 'tasks' ? 'open-task' : e.col === 'projects' ? 'open-project' : e.col === 'contractors' ? 'open-contractor' : '';
-    const colLabel = { tasks: 'карточка', projects: 'проект', contractors: 'подрядчик', users: 'сотрудник', all: 'база' }[e.col] || '';
+    const colLabel = { tasks: 'карточка', projects: 'проект', contractors: 'подрядчик', users: 'сотрудник', orgs: 'контрагент', remarks: 'экспертиза', letters: 'письмо', all: 'база' }[e.col] || '';
     return `<div class="jr-item">
       <span class="num hint jr-time">${time(e.ts)}</span>
       <div class="jr-main">

@@ -24,7 +24,7 @@
     const view = userView();
     const p = store.data.projects[projectId];
     if (!p || p.deletedAt || !view.projects.some(x => x.id === projectId)) return null;
-    return pageModel({ project: { ...p, id: projectId }, tasks: view.tasks, contact: files.customerContact(p), team: files.customerTeam(p), today: L.todayStr() });
+    return pageModel({ project: { ...p, id: projectId }, tasks: view.tasks, remarks: view.remarks || [], contact: files.customerContact(p), team: files.customerTeam(p), today: L.todayStr() });
   }
 
   // The window's view of the cabinet: messages only for projects the user sees.

@@ -13,10 +13,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 // The version of the exchange with Пульты (src/core/remote-client.js: PROTOCOL). MIN_CLIENT — the oldest one this
 // server still accepts: raise it when old Пульты would write something the server no longer understands.
-const PROTOCOL = 1, MIN_CLIENT = 1;
+// 2 (4.22): remarks and letters are collections of their own — an older Пульт would edit the old copies inside projects.
+const PROTOCOL = 2, MIN_CLIENT = 2;
 const UPDATE_MAX = 300 * 1024 * 1024;
 const LIB = fs.existsSync(path.join(__dirname, 'lib')) ? path.join(__dirname, 'lib') : path.join(__dirname, '..', 'src');
 const SC = require(path.join(LIB, 'core', 'store-core.js'));
@@ -189,6 +190,9 @@ function createServer(cfgIn = {}) {
   let actor = null;
   const settings = { get: k => (k === 'userId' ? actor : undefined), set: () => {} };
   const core = createCore({ store, journal, settings, A, L, Composition, diffBatch: JournalDiff.diffBatch, StoreError: SC.StoreError });
+  // 4.22: remarks and letters out of the project records (a copy, once; see handlers.js migrateDocs).
+  try { const n = core.migrateDocs(); if (n) console.log(`Замечания экспертизы и письма перенесены в свои коллекции: ${n} записей.`); }
+  catch (e) { console.error('Перенос замечаний и писем не удался:', e); }
   const chats = createChats({ store, A, currentUser: () => core.currentUser() });
   // One request's rules at a time (some are async, e.g. the journal and the cabinet): no mixing of actors.
   let queue = Promise.resolve();
@@ -433,6 +437,7 @@ function createServer(cfgIn = {}) {
       base.flush();
       fs.copyFileSync(base.dataFile, path.join(base.dir, 'backups', `before-restore-${Date.now()}.json`));
       store.replaceAll(parsed.data);
+      core.migrateDocs(); // an older copy: remarks and letters inside projects
       journal.append([{ col: 'users', id: me.userId, kind: 'update', title: 'база', changes: [{ f: 'restore', label: 'Восстановление из копии', to: `${parsed.count} записей` }] }], { action: 'Восстановление из копии', user: me.user.name });
       return { ok: true, count: parsed.count };
     },
@@ -498,6 +503,7 @@ function createServer(cfgIn = {}) {
         const gip = parsed.data.users[b.userId];
         if (!gip || gip.deletedAt || !A.isGip(gip)) return json(res, 400, { ok: false, message: 'Переносить базу должен ГИП: выберите себя пользователем в Пульте.' });
         store.replaceAll(parsed.data);
+        core.migrateDocs();
         if (typeof b.journal === 'string' && b.journal.length < 32 * 1024 * 1024) fs.writeFileSync(base.journalFile, b.journal.endsWith('\n') || !b.journal ? b.journal : b.journal + '\n');
         acc.byUser[b.userId] = { login: b.login, pw: hashPassword(b.password), createdAt: new Date().toISOString() };
         acc.setupCode = null;

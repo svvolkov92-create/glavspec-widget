@@ -1,10 +1,18 @@
 /* ---------- 4.15: «Экспертиза» — remarks of the expertise by cycles, who answers, by when, the answer ---------- */
-// project.expertise = { org, cycles: [{ id, no, date, due, remarks: [{ id, n, mark, text, ownerId, due, status, answer, rvi }] }] }
+// project.expertise = { org, cycles: [{ id, no, date, due }] }; the remarks (4.22) are records of their own in state.remarks:
+// { projectId, cycleId, pos, n, mark, text, ownerId, due, status, answer, rvi }. exOf() puts them back into the cycles, so
+// this part reads the expertise as one object; exSave() writes back only what changed (a project, remarks one by one).
+// Before 4.22 the remarks lived in cycles[].remarks — that copy stays in the project untouched (a way back).
 const EX_STATUS = [['work', 'в работе', 'work'], ['ready', 'ответ готов', 'review'], ['returned', 'вернули', 'warn'], ['closed', 'закрыто', 'ok']];
 const exStatus = k => EX_STATUS.find(s => s[0] === k) || EX_STATUS[0];
 const exOpen = r => r.status !== 'closed';
 const exLate = r => ['work', 'returned'].includes(r.status || 'work') && isDate(r.due) && r.due < state.today;
-const exOf = p => ({ org: '', cycles: [], ...(p?.expertise || {}) });
+const exByPos = (a, b) => (Number(a.pos) || 0) - (Number(b.pos) || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+function exOf(p) {
+  const ex = { org: '', cycles: [], ...(p?.expertise || {}) };
+  const rs = [...state.remarks.values()].filter(r => r.projectId === p?.id).sort(exByPos);
+  return { ...ex, cycles: ex.cycles.map(c => ({ ...c, remarks: rs.filter(r => r.cycleId === c.id) })) };
+}
 let exCycle = {}; // project id → cycle id shown
 function exCycleOf(p) {
   const ex = exOf(p);
@@ -32,10 +40,29 @@ function myRemarks() {
   return out.sort((a, b) => String(a.r.due || '9').localeCompare(String(b.r.due || '9')));
 }
 const canEx = p => A.canManageCatalog(state.me) && !p.archived;
+const REMARK_KEYS = ['n', 'mark', 'text', 'ownerId', 'due', 'status', 'answer', 'rvi'];
+const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 async function exSave(p, mutate, msg) {
-  const ex = clone(exOf(state.projects.get(p.id)));
+  const cur = state.projects.get(p.id), before = exOf(cur), ex = clone(before);
   mutate(ex);
-  return write(op.update('projects', p.id, { expertise: ex }), msg);
+  const ops = [], strip = e => ({ ...e, cycles: e.cycles.map(({ remarks, ...c }) => c) });
+  if (!sameJson(strip(before), strip(ex))) {
+    const old = new Map((cur?.expertise?.cycles || []).map(c => [c.id, c.remarks])), e = strip(ex);
+    ops.push(op.update('projects', p.id, { expertise: { ...e, moved: true, cycles: e.cycles.map(c => (old.get(c.id) ? { ...c, remarks: old.get(c.id) } : c)) } }));
+  }
+  const was = new Map(before.cycles.flatMap(c => c.remarks.map(r => [r.id, r]))), kept = new Set();
+  let pos = Math.max(0, ...[...state.remarks.values()].filter(r => r.projectId === p.id).map(r => Number(r.pos) || 0));
+  for (const c of ex.cycles) for (const r of c.remarks) {
+    kept.add(r.id);
+    const w = was.get(r.id);
+    if (!w) ops.push(op.set('remarks', r.id, { ...Object.fromEntries(REMARK_KEYS.filter(k => r[k] !== undefined).map(k => [k, r[k]])), projectId: p.id, cycleId: c.id, pos: ++pos, createdAt: new Date().toISOString() }));
+    else {
+      const ch = Object.fromEntries(REMARK_KEYS.filter(k => !sameJson(w[k], r[k])).map(k => [k, r[k] ?? null]));
+      if (Object.keys(ch).length) ops.push(op.update('remarks', r.id, ch));
+    }
+  }
+  for (const id of was.keys()) if (!kept.has(id)) ops.push(op.del('remarks', id));
+  return ops.length ? write(ops, msg) : true;
 }
 
 function expertiseBlock(p) {
@@ -82,23 +109,27 @@ function askRemark(p, rid = '') {
   const c = exCycleOf(p);
   if (!c) return;
   const was = rid ? c.remarks.find(r => r.id === rid) : null, edit = canEx(p);
+  // 4.22: the person answering the remark writes the answer, the РВИ and «ответ готов» (the rest stays with the GIP and chiefs).
+  const own = !edit && !!was && was.ownerId === state.me?.id && !p.archived && was.status !== 'closed';
   const nextN = String(c.remarks.reduce((m, r) => Math.max(m, parseInt(r.n, 10) || 0), 0) + 1);
   const r = was ? clone(was) : { id: newId(), n: nextN, mark: '', text: '', ownerId: '', due: c.due || '', status: 'work', answer: '' };
   const marks = projectMarks(p.id);
   const rvis = rviRows(p).filter(x => x.r.rvi);
   const people = liveUsers().slice().sort(byName);
-  const dis = edit ? '' : ' disabled';
+  const dis = edit ? '' : ' disabled', disOwn = edit || own ? '' : ' disabled';
+  const statuses = EX_STATUS.filter(([k]) => edit || ['work', 'ready', r.status || 'work'].includes(k));
   const { root, close } = openModal(`<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exr-t" novalidate><h2 id="exr-t">${was ? `Замечание ${esc(r.n)}` : 'Новое замечание'} <span class="hint">цикл ${esc(c.no)}</span></h2>
+    ${own ? '<p class="hint">Вы отвечаете на это замечание: впишите ответ, укажите изменение (РВИ) и поставьте «ответ готов». Само замечание, срок и ответственного меняют ГИП и главспецы.</p>' : ''}
     <div class="fgrid"><div class="f"><label for="exr-n">№ у экспертизы</label><input id="exr-n" value="${esc(r.n)}" maxlength="12"${dis}></div>
       <div class="f"><label for="exr-mark">Раздел</label><input id="exr-mark" value="${esc(r.mark)}" list="exr-marks" maxlength="20" placeholder="КЖ"${dis}><datalist id="exr-marks">${marks.map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>
       <div class="f wide"><label class="req" for="exr-text">Замечание</label><textarea id="exr-text" rows="3" maxlength="4000"${dis}>${esc(r.text)}</textarea></div>
       <div class="f"><label for="exr-owner">Отвечает</label><select id="exr-owner"${dis}><option value="">— не назначен —</option>${people.map(u => `<option value="${esc(u.id)}"${u.id === r.ownerId ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
       <div class="f"><label for="exr-due">Срок</label><input id="exr-due" type="date" value="${esc(r.due || '')}"${dis}></div>
-      <div class="f"><label for="exr-st">Статус</label><select id="exr-st"${dis}>${EX_STATUS.map(([k, l]) => `<option value="${k}"${(r.status || 'work') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div class="f"><label for="exr-rvi">Изменение (РВИ)</label><select id="exr-rvi"${dis}><option value="">—</option>${rvis.map(({ t, r: x }) => `<option value="${x.rvi}"${Number(r.rvi) === x.rvi ? ' selected' : ''}>${rviNo(x.rvi)} · ${esc(marksText(t))}</option>`).join('')}</select></div>
-      <div class="f wide"><label for="exr-ans">Ответ</label><textarea id="exr-ans" rows="3" maxlength="4000" placeholder="Что исправлено и где: том, листы"${dis}>${esc(r.answer || '')}</textarea></div></div>
+      <div class="f"><label for="exr-st">Статус</label><select id="exr-st"${disOwn}>${statuses.map(([k, l]) => `<option value="${k}"${(r.status || 'work') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="f"><label for="exr-rvi">Изменение (РВИ)</label><select id="exr-rvi"${disOwn}><option value="">—</option>${rvis.map(({ t, r: x }) => `<option value="${x.rvi}"${Number(r.rvi) === x.rvi ? ' selected' : ''}>${rviNo(x.rvi)} · ${esc(marksText(t))}</option>`).join('')}</select></div>
+      <div class="f wide"><label for="exr-ans">Ответ</label><textarea id="exr-ans" rows="3" maxlength="4000" placeholder="Что исправлено и где: том, листы"${disOwn}>${esc(r.answer || '')}</textarea></div></div>
     <div class="err" id="exr-err" hidden></div>
-    <div class="modal-f">${edit ? `<button class="btn primary" type="submit">Сохранить</button>` : ''}<button class="btn" type="button" data-m="cancel">${edit ? 'Отмена' : 'Закрыть'}</button>${was && edit ? '<span class="spacer"></span><button class="btn ghostbtn" type="button" data-m="del">Удалить</button>' : ''}</div></form>`);
+    <div class="modal-f">${edit || own ? `<button class="btn primary" type="submit">Сохранить</button>` : ''}<button class="btn" type="button" data-m="cancel">${edit || own ? 'Отмена' : 'Закрыть'}</button>${was && edit ? '<span class="spacer"></span><button class="btn ghostbtn" type="button" data-m="del">Удалить</button>' : ''}</div></form>`);
   const q = s => root.querySelector(s);
   // A mark typed: the owner of that section's card answers by default.
   q('#exr-mark').addEventListener('change', () => { if (!q('#exr-owner').value) { const o = exOwnerFor(p.id, q('#exr-mark').value); if (o) q('#exr-owner').value = o; } });
@@ -109,6 +140,12 @@ function askRemark(p, rid = '') {
   });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
+    if (own) {
+      const rv = Number(q('#exr-rvi').value) || 0;
+      Object.assign(r, { status: q('#exr-st').value, answer: q('#exr-ans').value.trim(), rvi: rv || undefined });
+      if (await exSave(p, x => { const cc = x.cycles.find(y => y.id === c.id); const i = cc.remarks.findIndex(y => y.id === r.id); if (i >= 0) cc.remarks[i] = r; }, `Замечание ${r.n} — ответ сохранён`)) close();
+      return;
+    }
     const text = q('#exr-text').value.trim();
     if (!text) { q('#exr-err').textContent = 'Впишите текст замечания.'; q('#exr-err').hidden = false; q('#exr-text').classList.add('field-bad'); return q('#exr-text').focus(); }
     const mark = q('#exr-mark').value.trim().toUpperCase();

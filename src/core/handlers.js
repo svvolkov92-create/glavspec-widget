@@ -35,6 +35,42 @@
     settings.set({ userId: 'u-chief' });
   }
 
+  // 4.22: the expertise's remarks and the project letters move out of the project record into their own collections
+  // (a project record is limited in size; two people editing two remarks no longer overwrite each other; the person
+  // who answers a remark may write the answer). A copy: the project keeps its old fields — a way back; the marks
+  // expertise.moved / lettersMoved say it is done. Runs at start and after a base is replaced (a restored copy).
+  function migrateDocs() {
+    const ops = [], now = new Date().toISOString();
+    const freeId = (col, id) => (typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+    for (const [pid, p] of Object.entries(store.data.projects)) {
+      const ex = p.expertise;
+      if (ex && typeof ex === 'object' && Array.isArray(ex.cycles) && !ex.moved) {
+        let pos = 0;
+        for (const c of ex.cycles) for (const r of Array.isArray(c?.remarks) ? c.remarks : []) {
+          pos++;
+          if (!r || typeof r !== 'object') continue;
+          const id = freeId('remarks', r.id);
+          if (store.data.remarks[id]) continue; // already copied
+          const { id: _, ...rest } = r;
+          ops.push({ type: 'set', col: 'remarks', id, data: { ...rest, projectId: pid, cycleId: String(c.id || ''), pos, createdAt: now, ...(p.demo === true ? { demo: true } : {}) } });
+        }
+        ops.push({ type: 'update', col: 'projects', id: pid, data: { expertise: { ...ex, moved: true } } });
+      }
+      if (Array.isArray(p.letters) && p.letters.length && !p.lettersMoved) {
+        for (const l of p.letters) {
+          if (!l || typeof l !== 'object') continue;
+          const id = freeId('letters', l.id);
+          if (store.data.letters[id]) continue;
+          const { id: _, ...rest } = l;
+          ops.push({ type: 'set', col: 'letters', id, data: { ...rest, projectId: pid, createdAt: rest.createdAt || now, ...(p.demo === true ? { demo: true } : {}) } });
+        }
+        ops.push({ type: 'update', col: 'projects', id: pid, data: { lettersMoved: true } });
+      }
+    }
+    if (ops.length) store.applyAll(ops);
+    return ops.length;
+  }
+
   function purgeTrash() {
     const cutoff = Date.now() - TRASH_DAYS * 864e5;
     const snap = store.snapshot();
@@ -195,7 +231,12 @@
   function demoClear() {
     if (!A.canCreateTasks(currentUser())) return { ok: false, message: 'Примеры удаляют ГИП или главспец.' };
     const ops = [];
-    for (const col of COLLECTIONS) for (const [id, d] of Object.entries(store.data[col])) if (d.demo === true) ops.push({ type: 'delete', col, id });
+    // (4.22: the list of collections was a name not defined here — «Удалить примеры» failed with an error.)
+    const cols = Object.keys(store.data).filter(c => store.data[c] && typeof store.data[c] === 'object');
+    for (const col of cols) for (const [id, d] of Object.entries(store.data[col])) if (d.demo === true) ops.push({ type: 'delete', col, id });
+    // Remarks and letters of sample projects go with them.
+    const demoProjects = new Set(Object.entries(store.data.projects).filter(([, p]) => p.demo === true).map(([id]) => id));
+    for (const col of ['remarks', 'letters']) for (const [id, d] of Object.entries(store.data[col] || {})) if (d.demo !== true && demoProjects.has(d.projectId)) ops.push({ type: 'delete', col, id });
     if (!ops.length) return { ok: true };
     if (ops.some(o => o.col === 'users' && o.id === settings.get('userId'))) settings.set({ userId: null });
     store.applyAll(ops);
@@ -224,6 +265,7 @@
     return all.filter(e => {
       if (e.col === 'projects') return (A.isChief(me) || A.isGip(me)) && projects.has(e.id);
       if (e.col === 'orgs') return orgOk(e);
+      if (e.col === 'remarks' || e.col === 'letters') { const d = store.data[e.col][e.id]; return !!d && projects.has(d.projectId); }
       if (e.col !== 'tasks') return A.isGip(me) || (A.isChief(me) && e.col !== 'users');
       const t = store.data.tasks[e.id];
       return t && A.canSeeTask(me, t, users, null, store.data.projects);
@@ -232,5 +274,5 @@
       .filter(e => !e.changes || e.changes.length || e.kind !== 'update');
   }
 
-  return { currentUser, userView, migrateUsers, purgeTrash, switchUser, write, taskSeen, taskComment, taskCommentEdit, taskThank, demoClear, journalGet };
+  return { currentUser, userView, migrateUsers, migrateDocs, purgeTrash, switchUser, write, taskSeen, taskComment, taskCommentEdit, taskThank, demoClear, journalGet };
 });

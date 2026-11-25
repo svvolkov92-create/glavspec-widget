@@ -63,7 +63,7 @@ function sectionRows(project, tasks, today) {
 
 // What the customer may see, extracted once: the desktop builds it, the cabinet server stores and renders it.
 // `team`: participants as { name, role } (only when the GIP shows the team). The «Договор» stage is shown too.
-function pageModel({ project: p, tasks, contact, today, team = [] }) {
+function pageModel({ project: p, tasks, contact, today, team = [], remarks = null }) {
   const own = tasks.filter(t => t.projectId === p.id && !t.deletedAt);
   const pick = (list, keys) => (Array.isArray(list) ? list : []).map(x => Object.fromEntries(keys.map(k => [k, x?.[k] ?? ''])));
   const show = { plan: true, sections: true, advice: true, revisions: false, finance: true, ird: true, meetings: true, team: true, soon: true, passport: true, ...(p.show || {}) };
@@ -86,7 +86,8 @@ function pageModel({ project: p, tasks, contact, today, team = [] }) {
       rdMode: p.rdMode || '',
       // 4.17: «Паспорт объекта»: the object's data and ТЭП as the GIP filled them, the expertise in short.
       passport: show.passport && p.passport ? { ...Object.fromEntries(Object.entries(p.passport).filter(([k, v]) => k !== 'tep' && typeof v === 'string' && v.trim()).map(([k, v]) => [k, v.slice(0, 300)])), tep: pick(p.passport.tep, ['k', 'v']).filter(x => x.k) } : null,
-      expertiseSum: show.passport && p.expertise?.cycles?.length ? (c => ({ org: p.expertise.org || '', cycle: c.no || '', total: (c.remarks || []).length, closed: (c.remarks || []).filter(r => r.status === 'closed').length }))(p.expertise.cycles[p.expertise.cycles.length - 1]) : null,
+      // 4.22: the remarks are records of their own (`remarks`, with cycleId); an older call passes none — the copy in the cycle.
+      expertiseSum: show.passport && p.expertise?.cycles?.length ? (c => { const rs = Array.isArray(remarks) ? remarks.filter(r => r.projectId === p.id && r.cycleId === c.id) : (c.remarks || []); return { org: p.expertise.org || '', cycle: c.no || '', total: rs.length, closed: rs.filter(r => r.status === 'closed').length }; })(p.expertise.cycles[p.expertise.cycles.length - 1]) : null,
       closed: p.status === 'done' || !!p.archived, // 4.11: a finished project — the customer only reads it
       show,
     },
@@ -493,8 +494,8 @@ ${bnav}
 }
 
 // The file version: model and render in one go (desktop «Сохранить и создать страницу»).
-function customerHtml({ project, tasks, contact, today, team, ...render }) {
-  return renderPage(pageModel({ project, tasks, contact, today, team }), { today, ...render });
+function customerHtml({ project, tasks, contact, today, team, remarks, ...render }) {
+  return renderPage(pageModel({ project, tasks, contact, today, team, remarks }), { today, ...render });
 }
 
 // Calendar file of a meeting (cabinet «В календарь»). Times are local («floating»), as the customer reads them.

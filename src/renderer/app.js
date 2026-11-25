@@ -167,7 +167,7 @@ const msgInMenu = () => !SOLO && menuItems().some(t => t.id === 'msgs');
 
 const state = {
   // Non-deleted records (archived projects included). Deleted ones live in state.trash.
-  projects: new Map(), contractors: new Map(), tasks: new Map(),
+  projects: new Map(), contractors: new Map(), tasks: new Map(), remarks: new Map(), letters: new Map(), // remarks, letters — 4.22
   trash: { projects: [], contractors: [], tasks: [] },
   loaded: false,
   tab: ((t) => (TABS.some(x => x.id === t) ? t : 'overview'))(loadLocal('tab', 'overview')),
@@ -309,6 +309,8 @@ function setData(snap) {
   }
   state.chats = new Map((snap.chats || []).map(c => [c.id, c]));
   state.depts = new Map((snap.depts || []).filter(d => !d.deletedAt).map(d => [d.id, d]));
+  state.remarks = new Map((snap.remarks || []).map(r => [r.id, r]));
+  state.letters = new Map((snap.letters || []).map(l => [l.id, l]));
   const first = !state.loaded;
   state.loaded = true;
   if (prevMe !== state.me?.id) { mentionSeenTs = null; msg.chatId = SOLO?.kind === 'chat' ? SOLO.id : ''; } // a chat window stays on its chat
@@ -2890,12 +2892,20 @@ onAct({
   'cm-act': ({ el, id }) => { contractorStatement(id, el.dataset.v); },
 });
 /* ---------- 4.15: «Экспертиза» — remarks of the expertise by cycles, who answers, by when, the answer ---------- */
-// project.expertise = { org, cycles: [{ id, no, date, due, remarks: [{ id, n, mark, text, ownerId, due, status, answer, rvi }] }] }
+// project.expertise = { org, cycles: [{ id, no, date, due }] }; the remarks (4.22) are records of their own in state.remarks:
+// { projectId, cycleId, pos, n, mark, text, ownerId, due, status, answer, rvi }. exOf() puts them back into the cycles, so
+// this part reads the expertise as one object; exSave() writes back only what changed (a project, remarks one by one).
+// Before 4.22 the remarks lived in cycles[].remarks — that copy stays in the project untouched (a way back).
 const EX_STATUS = [['work', 'в работе', 'work'], ['ready', 'ответ готов', 'review'], ['returned', 'вернули', 'warn'], ['closed', 'закрыто', 'ok']];
 const exStatus = k => EX_STATUS.find(s => s[0] === k) || EX_STATUS[0];
 const exOpen = r => r.status !== 'closed';
 const exLate = r => ['work', 'returned'].includes(r.status || 'work') && isDate(r.due) && r.due < state.today;
-const exOf = p => ({ org: '', cycles: [], ...(p?.expertise || {}) });
+const exByPos = (a, b) => (Number(a.pos) || 0) - (Number(b.pos) || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+function exOf(p) {
+  const ex = { org: '', cycles: [], ...(p?.expertise || {}) };
+  const rs = [...state.remarks.values()].filter(r => r.projectId === p?.id).sort(exByPos);
+  return { ...ex, cycles: ex.cycles.map(c => ({ ...c, remarks: rs.filter(r => r.cycleId === c.id) })) };
+}
 let exCycle = {}; // project id → cycle id shown
 function exCycleOf(p) {
   const ex = exOf(p);
@@ -2923,10 +2933,29 @@ function myRemarks() {
   return out.sort((a, b) => String(a.r.due || '9').localeCompare(String(b.r.due || '9')));
 }
 const canEx = p => A.canManageCatalog(state.me) && !p.archived;
+const REMARK_KEYS = ['n', 'mark', 'text', 'ownerId', 'due', 'status', 'answer', 'rvi'];
+const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 async function exSave(p, mutate, msg) {
-  const ex = clone(exOf(state.projects.get(p.id)));
+  const cur = state.projects.get(p.id), before = exOf(cur), ex = clone(before);
   mutate(ex);
-  return write(op.update('projects', p.id, { expertise: ex }), msg);
+  const ops = [], strip = e => ({ ...e, cycles: e.cycles.map(({ remarks, ...c }) => c) });
+  if (!sameJson(strip(before), strip(ex))) {
+    const old = new Map((cur?.expertise?.cycles || []).map(c => [c.id, c.remarks])), e = strip(ex);
+    ops.push(op.update('projects', p.id, { expertise: { ...e, moved: true, cycles: e.cycles.map(c => (old.get(c.id) ? { ...c, remarks: old.get(c.id) } : c)) } }));
+  }
+  const was = new Map(before.cycles.flatMap(c => c.remarks.map(r => [r.id, r]))), kept = new Set();
+  let pos = Math.max(0, ...[...state.remarks.values()].filter(r => r.projectId === p.id).map(r => Number(r.pos) || 0));
+  for (const c of ex.cycles) for (const r of c.remarks) {
+    kept.add(r.id);
+    const w = was.get(r.id);
+    if (!w) ops.push(op.set('remarks', r.id, { ...Object.fromEntries(REMARK_KEYS.filter(k => r[k] !== undefined).map(k => [k, r[k]])), projectId: p.id, cycleId: c.id, pos: ++pos, createdAt: new Date().toISOString() }));
+    else {
+      const ch = Object.fromEntries(REMARK_KEYS.filter(k => !sameJson(w[k], r[k])).map(k => [k, r[k] ?? null]));
+      if (Object.keys(ch).length) ops.push(op.update('remarks', r.id, ch));
+    }
+  }
+  for (const id of was.keys()) if (!kept.has(id)) ops.push(op.del('remarks', id));
+  return ops.length ? write(ops, msg) : true;
 }
 
 function expertiseBlock(p) {
@@ -2973,23 +3002,27 @@ function askRemark(p, rid = '') {
   const c = exCycleOf(p);
   if (!c) return;
   const was = rid ? c.remarks.find(r => r.id === rid) : null, edit = canEx(p);
+  // 4.22: the person answering the remark writes the answer, the РВИ and «ответ готов» (the rest stays with the GIP and chiefs).
+  const own = !edit && !!was && was.ownerId === state.me?.id && !p.archived && was.status !== 'closed';
   const nextN = String(c.remarks.reduce((m, r) => Math.max(m, parseInt(r.n, 10) || 0), 0) + 1);
   const r = was ? clone(was) : { id: newId(), n: nextN, mark: '', text: '', ownerId: '', due: c.due || '', status: 'work', answer: '' };
   const marks = projectMarks(p.id);
   const rvis = rviRows(p).filter(x => x.r.rvi);
   const people = liveUsers().slice().sort(byName);
-  const dis = edit ? '' : ' disabled';
+  const dis = edit ? '' : ' disabled', disOwn = edit || own ? '' : ' disabled';
+  const statuses = EX_STATUS.filter(([k]) => edit || ['work', 'ready', r.status || 'work'].includes(k));
   const { root, close } = openModal(`<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exr-t" novalidate><h2 id="exr-t">${was ? `Замечание ${esc(r.n)}` : 'Новое замечание'} <span class="hint">цикл ${esc(c.no)}</span></h2>
+    ${own ? '<p class="hint">Вы отвечаете на это замечание: впишите ответ, укажите изменение (РВИ) и поставьте «ответ готов». Само замечание, срок и ответственного меняют ГИП и главспецы.</p>' : ''}
     <div class="fgrid"><div class="f"><label for="exr-n">№ у экспертизы</label><input id="exr-n" value="${esc(r.n)}" maxlength="12"${dis}></div>
       <div class="f"><label for="exr-mark">Раздел</label><input id="exr-mark" value="${esc(r.mark)}" list="exr-marks" maxlength="20" placeholder="КЖ"${dis}><datalist id="exr-marks">${marks.map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>
       <div class="f wide"><label class="req" for="exr-text">Замечание</label><textarea id="exr-text" rows="3" maxlength="4000"${dis}>${esc(r.text)}</textarea></div>
       <div class="f"><label for="exr-owner">Отвечает</label><select id="exr-owner"${dis}><option value="">— не назначен —</option>${people.map(u => `<option value="${esc(u.id)}"${u.id === r.ownerId ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
       <div class="f"><label for="exr-due">Срок</label><input id="exr-due" type="date" value="${esc(r.due || '')}"${dis}></div>
-      <div class="f"><label for="exr-st">Статус</label><select id="exr-st"${dis}>${EX_STATUS.map(([k, l]) => `<option value="${k}"${(r.status || 'work') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div class="f"><label for="exr-rvi">Изменение (РВИ)</label><select id="exr-rvi"${dis}><option value="">—</option>${rvis.map(({ t, r: x }) => `<option value="${x.rvi}"${Number(r.rvi) === x.rvi ? ' selected' : ''}>${rviNo(x.rvi)} · ${esc(marksText(t))}</option>`).join('')}</select></div>
-      <div class="f wide"><label for="exr-ans">Ответ</label><textarea id="exr-ans" rows="3" maxlength="4000" placeholder="Что исправлено и где: том, листы"${dis}>${esc(r.answer || '')}</textarea></div></div>
+      <div class="f"><label for="exr-st">Статус</label><select id="exr-st"${disOwn}>${statuses.map(([k, l]) => `<option value="${k}"${(r.status || 'work') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="f"><label for="exr-rvi">Изменение (РВИ)</label><select id="exr-rvi"${disOwn}><option value="">—</option>${rvis.map(({ t, r: x }) => `<option value="${x.rvi}"${Number(r.rvi) === x.rvi ? ' selected' : ''}>${rviNo(x.rvi)} · ${esc(marksText(t))}</option>`).join('')}</select></div>
+      <div class="f wide"><label for="exr-ans">Ответ</label><textarea id="exr-ans" rows="3" maxlength="4000" placeholder="Что исправлено и где: том, листы"${disOwn}>${esc(r.answer || '')}</textarea></div></div>
     <div class="err" id="exr-err" hidden></div>
-    <div class="modal-f">${edit ? `<button class="btn primary" type="submit">Сохранить</button>` : ''}<button class="btn" type="button" data-m="cancel">${edit ? 'Отмена' : 'Закрыть'}</button>${was && edit ? '<span class="spacer"></span><button class="btn ghostbtn" type="button" data-m="del">Удалить</button>' : ''}</div></form>`);
+    <div class="modal-f">${edit || own ? `<button class="btn primary" type="submit">Сохранить</button>` : ''}<button class="btn" type="button" data-m="cancel">${edit || own ? 'Отмена' : 'Закрыть'}</button>${was && edit ? '<span class="spacer"></span><button class="btn ghostbtn" type="button" data-m="del">Удалить</button>' : ''}</div></form>`);
   const q = s => root.querySelector(s);
   // A mark typed: the owner of that section's card answers by default.
   q('#exr-mark').addEventListener('change', () => { if (!q('#exr-owner').value) { const o = exOwnerFor(p.id, q('#exr-mark').value); if (o) q('#exr-owner').value = o; } });
@@ -3000,6 +3033,12 @@ function askRemark(p, rid = '') {
   });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
+    if (own) {
+      const rv = Number(q('#exr-rvi').value) || 0;
+      Object.assign(r, { status: q('#exr-st').value, answer: q('#exr-ans').value.trim(), rvi: rv || undefined });
+      if (await exSave(p, x => { const cc = x.cycles.find(y => y.id === c.id); const i = cc.remarks.findIndex(y => y.id === r.id); if (i >= 0) cc.remarks[i] = r; }, `Замечание ${r.n} — ответ сохранён`)) close();
+      return;
+    }
     const text = q('#exr-text').value.trim();
     if (!text) { q('#exr-err').textContent = 'Впишите текст замечания.'; q('#exr-err').hidden = false; q('#exr-text').classList.add('field-bad'); return q('#exr-text').focus(); }
     const mark = q('#exr-mark').value.trim().toUpperCase();
@@ -3167,16 +3206,18 @@ const LETTER_TPL = {
   remarks: { label: 'Ответ на замечания', subject: 'Ответ на замечания по объекту «{project}»', body: 'На Ваше письмо № ___ от ___ сообщаем:\n1. Замечание: \n   Ответ: \n\nИсправленная документация прилагается.' },
 };
 const LETTER_STATUS = { in: { new: ['work', 'зарегистрировано'], answer: ['warn', 'нужен ответ'], done: ['ok', 'отработано'] }, out: { draft: ['idle', 'черновик'], sent: ['ok', 'отправлено'] } };
+// 4.22: the letters are records of their own (state.letters, with projectId); the project's old copy stays untouched.
+const lettersOf = pid => [...state.letters.values()].filter(l => l.projectId === pid);
 // Through numbering per year over all projects: «Исх. 320», «Вх. 246».
 function nextLetterNo(dir, year = state.today.slice(0, 4)) {
   let max = 0;
-  for (const p of state.projects.values()) for (const l of p.letters || []) if (l.dir === dir && String(l.date || '').slice(0, 4) === year) max = Math.max(max, Number(l.seq) || 0);
+  for (const l of state.letters.values()) if (l.dir === dir && String(l.date || '').slice(0, 4) === year) max = Math.max(max, Number(l.seq) || 0);
   return max + 1;
 }
 const letterNo = l => `${l.dir === 'in' ? 'Вх.' : 'Исх.'} ${l.seq}`;
 let letterView = {};
 function lettersBlock(p) {
-  const all = [...(p.letters || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.seq || 0) - (a.seq || 0));
+  const all = lettersOf(p.id).sort((a, b) => String(b.date).localeCompare(String(a.date)) || (b.seq || 0) - (a.seq || 0));
   const edit = A.canManageCatalog(state.me) && !p.archived;
   if (!all.length && !edit) return '';
   const v = letterView[p.id] || 'all', list = v === 'all' ? all : all.filter(l => l.dir === v);
@@ -3235,13 +3276,13 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
     if (!l.subject) { q('#let-err').textContent = 'Укажите тему письма.'; q('#let-err').hidden = false; q('#let-subj').classList.add('field-bad'); q('#let-subj').focus(); return false; }
     // The number belongs to the year of the date; a letter moved to another year gets that year's next number.
     if (isNew || String(letter.date).slice(0, 4) !== l.date.slice(0, 4)) l.seq = nextLetterNo(l.dir, l.date.slice(0, 4));
-    const cur = state.projects.get(p.id), list = [...(cur.letters || []).filter(x => x.id !== l.id), l];
-    return write(op.update('projects', p.id, { letters: list }), `${letterNo(l)} от ${fmtDate(l.date)} — ${isNew ? 'зарегистрировано' : 'сохранено'}`);
+    const { id, ...data } = l;
+    return write(isNew || !state.letters.has(id) ? op.set('letters', id, { ...data, projectId: p.id, createdAt: data.createdAt || new Date().toISOString() }) : op.update('letters', id, data), `${letterNo(l)} от ${fmtDate(l.date)} — ${isNew ? 'зарегистрировано' : 'сохранено'}`);
   };
   root.addEventListener('click', async e => {
     const m = e.target.closest('[data-m]')?.dataset.m;
     if (m === 'unf') { l.files.splice(Number(e.target.closest('[data-m]').dataset.i), 1); drawFiles(); }
-    if (m === 'del') { const cur = state.projects.get(p.id); if (await write(op.update('projects', p.id, { letters: (cur.letters || []).filter(x => x.id !== l.id) }), `${letterNo(l)} удалено`)) close(); }
+    if (m === 'del') { if (await write(op.del('letters', l.id), `${letterNo(l)} удалено`)) close(); }
     if (m === 'mail') { if (await save()) { close(); mailLetter(l); } }
   });
   q('form').addEventListener('submit', async e => { e.preventDefault(); e.stopPropagation(); if (await save()) close(); });
@@ -3323,8 +3364,8 @@ onAct({
   'ird-newfolder': ({ el }) => { const p = state.projects.get(el.dataset.id); if (p) askText('Новая папка', 'Название папки', 'Например: Согласования с сетевыми').then(name => { if (!name?.trim()) return; const id = newId(); irdOpen[p.id] = id; write(op.update('projects', p.id, { irdFolders: [...(p.irdFolders || []), { id, name: name.trim().slice(0, 80) }] }), 'Папка добавлена'); }); },
   'let-view': ({ el }) => { letterView[el.dataset.id] = el.dataset.v; renderNow(); },
   'let-new': ({ el }) => { const p = state.projects.get(el.dataset.id); if (p) askLetter(p, null, el.dataset.v); },
-  'let-edit': ({ el }) => { const p = state.projects.get(el.dataset.id), l = p?.letters?.find(x => x.id === el.dataset.lid); if (l) askLetter(p, l); },
-  'let-mail': ({ el }) => { const p = state.projects.get(el.dataset.id), l = p?.letters?.find(x => x.id === el.dataset.lid); if (l) mailLetter(l); },
+  'let-edit': ({ el }) => { const p = state.projects.get(el.dataset.id), l = state.letters.get(el.dataset.lid); if (p && l) askLetter(p, l); },
+  'let-mail': ({ el }) => { const p = state.projects.get(el.dataset.id), l = state.letters.get(el.dataset.lid); if (p && l) mailLetter(l); },
 });
 /* ---------- 4.1.1: portfolio chart (item 59) — every project on one time scale, phases inside, studio load below ---------- */
 let projMode = loadLocal('projMode', 'list');
@@ -7217,7 +7258,7 @@ function renderCustomer() {
 }
 // Source data and requests: a row is «asked» when an open request points to it.
 // 4.13: a document that runs out — «Запросить актуализацию» makes an outgoing letter by the template, tied to the document.
-const docLetter = (p, docId) => (p?.letters || []).filter(l => l.docId === docId).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || null;
+const docLetter = (p, docId) => (p ? lettersOf(p.id) : []).filter(l => l.docId === docId).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || null;
 function docRenewHtml(x, i) {
   const p = state.projects.get(state.drawer?.id), l = x.id && docLetter(p, x.id);
   if (l) return `<div class="doc-renew"><span class="chip tone-work" title="${esc(l.subject || '')}">${esc(letterNo(l))} от ${fmtDate(l.date)}</span></div>`;
@@ -8372,7 +8413,7 @@ async function loadJournal() {
 }
 function journalMatches(e, j) {
   if (j.type === 'tasks' && e.col !== 'tasks') return false;
-  if (j.type === 'projects' && e.col !== 'projects') return false;
+  if (j.type === 'projects' && !['projects', 'remarks', 'letters'].includes(e.col)) return false;
   if (j.type === 'contractors' && e.col !== 'contractors') return false;
   if (j.type === 'payments' && !(e.changes || []).some(c => c.f === 'payment' || c.f === 'plan' || c.f === 'invoiceReceived' || c.f === 'actSigned')) return false;
   if (j.type === 'dates' && !(e.changes || []).some(c => c.f === 'start' || c.f === 'finish' || c.f === 'milestone')) return false;
@@ -8415,7 +8456,7 @@ function renderJournal() {
   const entryHtml = e => {
     const live = e.col === 'tasks' ? state.tasks.has(e.id) : e.col === 'projects' ? state.projects.has(e.id) : e.col === 'contractors' ? state.contractors.has(e.id) : false;
     const act = e.col === 'tasks' ? 'open-task' : e.col === 'projects' ? 'open-project' : e.col === 'contractors' ? 'open-contractor' : '';
-    const colLabel = { tasks: 'карточка', projects: 'проект', contractors: 'подрядчик', users: 'сотрудник', all: 'база' }[e.col] || '';
+    const colLabel = { tasks: 'карточка', projects: 'проект', contractors: 'подрядчик', users: 'сотрудник', orgs: 'контрагент', remarks: 'экспертиза', letters: 'письмо', all: 'база' }[e.col] || '';
     return `<div class="jr-item">
       <span class="num hint jr-time">${time(e.ts)}</span>
       <div class="jr-main">

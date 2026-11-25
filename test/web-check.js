@@ -9,7 +9,7 @@ const { createServer } = require(path.join(root, 'server/pult-server.js'));
   const app = createServer({ dataDir: dir, host: '127.0.0.1', configFile: dir + '/none.json', publicUrl: 'http://127.0.0.1:8792' });
   await new Promise(r => app.server.listen(8792, '127.0.0.1', r));
   const B = 'http://127.0.0.1:8792';
-  const post = async (p, b, t) => (await fetch(B + p, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: 'Bearer ' + t } : {}) }, body: JSON.stringify(b) })).json();
+  const post = async (p, b, t) => (await fetch(B + p, { method: 'POST', headers: { 'X-Pult-Protocol': '2', 'Content-Type': 'application/json', ...(t ? { Authorization: 'Bearer ' + t } : {}) }, body: JSON.stringify(b) })).json();
   const now = new Date().toISOString();
   const data = { users: { g: { name: 'Волков С.В.', role: 'gip', createdAt: now }, c: { name: 'Орлов Д.', role: 'chief', directions: ['kr'], createdAt: now } },
     projects: { p1: { name: 'Цех металлоконструкций', code: '25-047', gipId: 'g', members: ['c'] } },

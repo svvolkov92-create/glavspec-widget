@@ -7,7 +7,9 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 'use strict';
 
-const COLLECTIONS = ['projects', 'contractors', 'tasks', 'users', 'chats', 'depts', 'orgs']; // depts — org structure (4.1), orgs — counterparties (4.9)
+// depts — org structure (4.1), orgs — counterparties (4.9), remarks — the expertise's remarks and letters — the project
+// letters (4.22: moved out of the project record, each with its projectId).
+const COLLECTIONS = ['projects', 'contractors', 'tasks', 'users', 'chats', 'depts', 'orgs', 'remarks', 'letters'];
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_DOC_BYTES = 256 * 1024;
 
@@ -20,7 +22,7 @@ function isPlainObject(v) {
 const byteLength = s => new TextEncoder().encode(s).length;
 
 function emptyData() {
-  return { version: 1, projects: {}, contractors: {}, tasks: {}, users: {}, chats: {}, depts: {}, orgs: {} };
+  return { version: 1, projects: {}, contractors: {}, tasks: {}, users: {}, chats: {}, depts: {}, orgs: {}, remarks: {}, letters: {} };
 }
 
 // Parsed data.json → the data set; unknown or broken collections become empty. Throws if the root is not an object.

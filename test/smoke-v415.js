@@ -39,7 +39,12 @@ app.on('browser-window-created', (_e, win) => {
       win.setSize(1400, 950); await wait(900);
       await js(`window.api.switchUser('u-gip')`); await wait(400);
       await click('[data-act="seed-demo"]'); await wait(900);
-      const ex = () => data().projects['demo-p1'].expertise || {};
+      // 4.22: the cycles are in the project, the remarks are records of their own (cycleId, pos).
+      const ex = () => {
+        const d = data(), e = d.projects['demo-p1'].expertise || {};
+        const rs = Object.entries(d.remarks || {}).map(([id, r]) => ({ ...r, id })).filter(r => r.projectId === 'demo-p1').sort((a, b) => a.pos - b.pos);
+        return { ...e, cycles: (e.cycles || []).map(c => ({ ...c, remarks: rs.filter(r => r.cycleId === c.id) })) };
+      };
 
       await step('a cycle and remarks pasted as a list', async () => {
         await js(`window.AppBridge.openTarget('project:demo-p1')`); await wait(700);

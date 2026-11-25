@@ -39,7 +39,7 @@
 | 27-users-team | 01-core (29), 02-render (3), 04-server (1), 08-overview (2), 12-messages (1), 14-projects (1), 15-people (1), 20-filters-usage-help (1), 22-card (6), 29-focus-tour-notify (1), 33-project-forms (1), 34-file-menu (1) |
 | 28-weekly-absences | 01-core (23), 03-dialogs (2), 05-card-widgets (1), 25-card-talk (1), 29-focus-tour-notify (1), 34-file-menu (1), 38-events (1) |
 | 29-focus-tour-notify | 01-core (15), 02-render (1), 05-card-widgets (2), 08-overview (1), 10-tabs (1), 12-messages (1), 34-file-menu (1) |
-| 30-project-customer | 01-core (24), 03-dialogs (1), 07-my-day (1), 08-overview (1), 13-project-data (2), 22-card (1), 27-users-team (1), 32-cabinet (1), 33-project-forms (2), 34-file-menu (1) |
+| 30-project-customer | 01-core (24), 03-dialogs (1), 07-my-day (1), 08-overview (1), 13-project-data (3), 22-card (1), 27-users-team (1), 32-cabinet (1), 33-project-forms (2), 34-file-menu (1) |
 | 31-project-composition | 01-core (17), 03-dialogs (3), 05-card-widgets (1), 22-card (2), 27-users-team (1), 29-focus-tour-notify (1), 30-project-customer (3), 32-cabinet (4), 33-project-forms (1), 34-file-menu (1) |
 | 32-cabinet | 01-core (12), 02-render (1), 03-dialogs (2), 06-settings (1), 08-overview (1), 12-messages (1), 15-counterparties (1), 25-card-talk (1), 29-focus-tour-notify (1), 30-project-customer (2), 33-project-forms (2), 38-events (1) |
 | 33-project-forms | 01-core (22), 02-render (2), 03-dialogs (1), 05-card-widgets (1), 08-overview (1), 09-project-page (1), 12-messages (4), 13-assignments (1), 15-counterparties (7), 22-card (6), 27-users-team (2), 29-focus-tour-notify (1), 30-project-customer (3), 31-project-composition (2), 32-cabinet (4), 34-file-menu (1), 36-search (1) |

@@ -225,7 +225,11 @@
     // The org structure is seen by every staff member (4.1).
     const depts = (snapshot.depts || []).filter(d => !d.deletedAt);
     const orgs = (snapshot.orgs || []).filter(o => isGip(user) || !o.deletedAt).map(o => orgView(user, o));
-    return { projects, contractors, tasks, users, chats, depts, orgs };
+    // 4.22: the expertise's remarks and the letters go with their project.
+    const seen = new Set(projects.map(p => p.id));
+    const remarks = (snapshot.remarks || []).filter(r => seen.has(r.projectId));
+    const letters = (snapshot.letters || []).filter(l => seen.has(l.projectId));
+    return { projects, contractors, tasks, users, chats, depts, orgs, remarks, letters };
   }
   // A non-GIP saves the plan without the hidden «Договор» row: keep the stored one.
   function keepHiddenPhases(user, before, data) {
@@ -265,6 +269,42 @@
       }
     }
     return null;
+  }
+
+  // 4.22: one remark of the expertise and one letter (records of their own since 4.22).
+  const REMARK_STATUS = ['work', 'ready', 'returned', 'closed'];
+  const LETTER_FILE_RE = /^[A-Za-z0-9_-]{1,40}$/;
+  function remarkDataError(r) {
+    if (!r) return null;
+    const str = (v, max) => v === undefined || v === null || (typeof v === 'string' && v.length <= max);
+    if (typeof r.projectId !== 'string' || typeof r.cycleId !== 'string' || typeof r.text !== 'string' || r.text.length > 4000) return 'Проверьте замечание экспертизы.';
+    if (!str(r.answer, 4000) || !str(r.n, 20) || !str(r.mark, 40) || !str(r.ownerId, 64) || !isDateStr(r.due) || (r.status !== undefined && !REMARK_STATUS.includes(r.status))) return 'Проверьте замечание экспертизы.';
+    if (r.rvi !== undefined && r.rvi !== null && !(Number.isInteger(Number(r.rvi)) && Number(r.rvi) >= 0)) return 'Проверьте номер изменения (РВИ).';
+    return null;
+  }
+  function letterDataError(l) {
+    if (!l) return null;
+    const str = (v, max) => v === undefined || v === null || (typeof v === 'string' && v.length <= max);
+    if (typeof l.projectId !== 'string' || !['in', 'out'].includes(l.dir) || !isDateStr(l.date) || !isDateStr(l.due)) return 'Проверьте письмо.';
+    if (!str(l.subject, 300) || !str(l.body, 6000) || !str(l.corr, 160) || !str(l.email, 200)) return 'Проверьте письмо.';
+    if (l.files !== undefined && (!Array.isArray(l.files) || l.files.length > 30 || l.files.some(f => !f || !LETTER_FILE_RE.test(String(f.id)) || String(f.name ?? '').length > 200))) return 'Вложения письма повреждены.';
+    return null;
+  }
+  // Who may change remarks and letters: those who keep the project (the GIP of it or a participant GIP, chiefs);
+  // the person answering a remark — only its answer, РВИ and «ответ готов».
+  function docWriteError(user, col, before, after, projects) {
+    const doc = after || before;
+    if (before && after && before.projectId !== after.projectId) return 'Перенести запись в другой проект нельзя.';
+    const p = findProject(projects, doc.projectId);
+    if (!p || p.deletedAt) return 'Проект не найден.';
+    const keeps = canManageCatalog(user) && (!isGipOnly(user) || !!projectRole(user, p));
+    if (keeps) return col === 'remarks' ? remarkDataError(after) : letterDataError(after);
+    if (col === 'remarks' && before && after && before.ownerId === user.id) {
+      const keys = changedKeys(before, after).filter(k => k !== 'updatedAt');
+      if (keys.every(k => ['answer', 'rvi', 'status'].includes(k)) && (!keys.includes('status') || (before.status !== 'closed' && ['work', 'ready'].includes(after.status)))) return remarkDataError(after);
+      return 'Вы можете вписать ответ, изменение (РВИ) и отметить «ответ готов»; остальное в замечании меняют ГИП и главспецы.';
+    }
+    return col === 'remarks' ? 'Замечания экспертизы ведут ГИП и главспецы.' : 'Письма ведут ГИП и главспецы.';
   }
 
   const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -316,6 +356,7 @@
       return 'Состав команды меняет только ГИП.';
     }
     if (col === 'depts') return isGip(user) ? null : 'Оргструктуру ведёт ГИП.';
+    if (col === 'remarks' || col === 'letters') return docWriteError(user, col, before, after, projects);
     if (col === 'orgs') {
       if (isGip(user)) return orgDataError(after);
       if (!canSeeOrgs(user)) return 'Контрагентов ведёт ГИП и те, кому открыты заказчики или бюджет.';

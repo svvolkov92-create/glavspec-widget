@@ -182,7 +182,7 @@ app.on('browser-window-created', (_e, win) => {
         await setVal('#let-subj', 'График выдачи РД'); await js(`document.querySelector('.let-modal').requestSubmit()`); await wait(500);
         await click('[data-act="let-new"][data-v="in"]'); await wait(200);
         await setVal('#let-corr', 'Минстрой края'); await setVal('#let-subj', 'Замечания к ПД по ОВ'); await js(`document.querySelector('.let-modal').requestSubmit()`); await wait(500);
-        const L = data().projects['demo-p1'].letters || [];
+        const L = Object.values(data().letters || {}).filter(l => l.projectId === 'demo-p1'); // 4.22: letters are records of their own
         check('61: Исх. 1, Исх. 2, Вх. 1 registered', /№ 2/.test(no2) && L.filter(l => l.dir === 'out').map(l => l.seq).sort().join() === '1,2' && L.some(l => l.dir === 'in' && l.seq === 1 && l.status === 'answer'), JSON.stringify(L.map(l => [l.dir, l.seq, l.status])));
         check('61: «ждут ответа 1» in the block head', /ждут ответа 1/.test(await text('.pt-page')));
         await shot('41-21-letters');

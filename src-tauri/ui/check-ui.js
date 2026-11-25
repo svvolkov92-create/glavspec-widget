@@ -698,7 +698,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     let pult = null;
     const up = async () => { pult = createPult({ dataDir: pDir, host: '127.0.0.1', port: PORT, configFile: pDir + '/none.json', devOrigins: ['http://127.0.0.1:8766'], publicUrl: 'http://127.0.0.1:' + PORT }); await new Promise(r => pult.server.listen(PORT, '127.0.0.1', r)); };
     const down = async () => { pult.close(); pult.server.closeAllConnections?.(); await new Promise(r => pult.server.close(r)); };
-    const http2 = async (method, pth, body, tok) => (await fetch(`http://127.0.0.1:${PORT}${pth}`, { method, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: body ? JSON.stringify(body) : undefined })).json();
+    const http2 = async (method, pth, body, tok) => (await fetch(`http://127.0.0.1:${PORT}${pth}`, { method, headers: { 'X-Pult-Protocol': '2', 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: body ? JSON.stringify(body) : undefined })).json();
     await up();
     // the current user must be the GIP
     const gipId = await js(() => [...window.AppBridge.state.users.values()].find(u => u.role === 'gip').id);

@@ -83,7 +83,7 @@ app.on('browser-window-created', (_e, win) => {
         check('the letter is filled from the template', subj.includes('ТУ на водоснабжение') && body.includes('истекает') && body.includes('0425-24'), subj + ' | ' + body.slice(0, 120));
         await shot('413-04-letter');
         await js(`document.querySelector('.let-modal').requestSubmit()`); await wait(800);
-        const l = (data().projects['demo-p1'].letters || []).find(x => x.docId === 'dd1');
+        const l = Object.values(data().letters || {}).find(x => x.projectId === 'demo-p1' && x.docId === 'dd1'); // 4.22: a collection
         check('registered with a number and tied to the document', !!l && l.tpl === 'renew' && l.dir === 'out' && l.seq >= 1, JSON.stringify(l));
         await js(`document.querySelector('[data-act="discard"]')?.click()`); await wait(200);
         await tab('day');

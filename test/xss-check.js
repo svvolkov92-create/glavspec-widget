@@ -11,12 +11,15 @@ const X = n => `«${n}<b data-xss="${n}">B</b><img data-xss="${n}i" src="x"><svg
   const app = createServer({ dataDir: dir, host: '127.0.0.1', configFile: dir + '/none.json', publicUrl: 'http://127.0.0.1:8793' });
   await new Promise(r => app.server.listen(8793, '127.0.0.1', r));
   const B = 'http://127.0.0.1:8793';
-  const post = async (p, b, t) => (await fetch(B + p, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: 'Bearer ' + t } : {}) }, body: JSON.stringify(b) })).json();
+  const post = async (p, b, t) => (await fetch(B + p, { method: 'POST', headers: { 'X-Pult-Protocol': '2', 'Content-Type': 'application/json', ...(t ? { Authorization: 'Bearer ' + t } : {}) }, body: JSON.stringify(b) })).json();
   const now = new Date().toISOString();
   const data = {
     users: { g: { name: 'Волков С.В.', role: 'gip', createdAt: now }, c: { name: 'Орлов ' + X('user'), role: 'chief', directions: ['kr'], position: X('pos'), createdAt: now } },
     projects: { p1: { name: 'Цех ' + X('pname'), code: X('pcode'), client: X('client'), address: X('paddr'), gipId: 'g', members: ['c'], customerId: 'o1',
-      requests: [{ id: 'r1', title: X('req'), why: X('why'), due: '2026-12-01' }], ird: [{ id: 'i1', title: X('ird'), who: X('who'), note: X('irdnote'), status: 'need' }] } },
+      requests: [{ id: 'r1', title: X('req'), why: X('why'), due: '2026-12-01' }], ird: [{ id: 'i1', title: X('ird'), who: X('who'), note: X('irdnote'), status: 'need' }],
+      // 4.22: in the old place — the server moves them into their own records on setup.
+      expertise: { org: X('exorg'), cycles: [{ id: 'c1', no: '1', remarks: [{ id: 'rx', n: '1', mark: X('rmark'), text: X('rtext'), answer: X('rans'), ownerId: 'c', status: 'work' }] }] },
+      letters: [{ id: 'lx', dir: 'in', seq: 1, date: '2026-11-01', corr: X('lcorr'), subject: X('lsubj'), body: X('lbody'), status: 'answer', files: [] }] } },
     tasks: {
       t1: { projectId: 'p1', marks: ['КР'], title: X('ttitle'), note: X('tnote'), ownerId: 'c', status: 'work', start: '2026-11-01', finish: '2026-12-01', budget: 5,
         comments: [{ id: 'c1', ts: now, userId: 'c', user: 'Орлов', text: X('comment') }], history: [{ ts: now, text: X('hist'), user: 'x' }] },
@@ -61,6 +64,10 @@ const X = n => `«${n}<b data-xss="${n}">B</b><img data-xss="${n}i" src="x"><svg
   const ptabs = await p.evaluate(() => [...document.querySelectorAll('[data-act="ptab"],[data-act="ctab"],[data-act="dtab"]')].map(e => [e.dataset.act, e.dataset.id || e.dataset.v]));
   for (const [a, v] of ptabs) { await p.evaluate(([a, v]) => document.querySelector(`[data-act="${a}"][data-id="${v}"],[data-act="${a}"][data-v="${v}"]`)?.click(), [a, v]); await p.waitForTimeout(500); await scan(`project / ${a}=${v}`); }
   await p.evaluate(() => document.querySelector('[data-act="discard"]')?.click()); await p.waitForTimeout(300);
+  // 4.22: the project page — the expertise and the letters, a remark and a letter opened.
+  await p.evaluate(() => window.AppBridge.openTarget('project:p1')); await p.waitForTimeout(900); await scan('project page');
+  await p.evaluate(() => document.querySelector('[data-act="ex-open"]')?.click()); await p.waitForTimeout(400); await scan('remark'); await p.keyboard.press('Escape');
+  await p.evaluate(() => document.querySelector('[data-act="let-edit"]')?.click()); await p.waitForTimeout(400); await scan('letter'); await p.keyboard.press('Escape');
   // Messages, search, the journal.
   await p.evaluate(() => document.querySelector('[data-act="msgs"],[data-act="messages"],#btn-msgs')?.click()); await p.waitForTimeout(700); await scan('messages');
   await p.evaluate(() => document.querySelector('[data-act="chat-open"],[data-act="open-chat"]')?.click()); await p.waitForTimeout(700); await scan('chat');

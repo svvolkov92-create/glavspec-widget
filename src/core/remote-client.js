@@ -12,7 +12,7 @@
 })(typeof self !== 'undefined' ? self : this, Object.assign(createRemote, {
   // The version of the exchange with the server. Raise it when a change needs both sides new; the server's
   // MIN_CLIENT (server/pult-server.js) says which Пульты it still accepts, MIN_SERVER — which servers this Пульт needs.
-  PROTOCOL: 1, MIN_SERVER: 1,
+  PROTOCOL: 2, MIN_SERVER: 2, // 2 (4.22): remarks and letters in collections of their own
 }));
 function createRemote(deps) {
   'use strict';

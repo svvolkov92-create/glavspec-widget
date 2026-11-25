@@ -188,7 +188,7 @@ function renderCustomer() {
 }
 // Source data and requests: a row is «asked» when an open request points to it.
 // 4.13: a document that runs out — «Запросить актуализацию» makes an outgoing letter by the template, tied to the document.
-const docLetter = (p, docId) => (p?.letters || []).filter(l => l.docId === docId).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || null;
+const docLetter = (p, docId) => (p ? lettersOf(p.id) : []).filter(l => l.docId === docId).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || null;
 function docRenewHtml(x, i) {
   const p = state.projects.get(state.drawer?.id), l = x.id && docLetter(p, x.id);
   if (l) return `<div class="doc-renew"><span class="chip tone-work" title="${esc(l.subject || '')}">${esc(letterNo(l))} от ${fmtDate(l.date)}</span></div>`;

@@ -60,6 +60,7 @@
       });
     }
 
+    let migrate = () => {};
     const store = {
       data: loaded.data ? SC.fromParsed(loaded.data) : SC.emptyData(),
       warning: loaded.warning || null,
@@ -76,6 +77,7 @@
       replaceAll(raw) {
         const { data, count } = SC.fromBackup(raw);
         this.data = data;
+        migrate(); // 4.22: an older copy keeps remarks and letters inside projects
         this.save();
         return count;
       },
@@ -114,6 +116,8 @@
     });
     const cabinetRules = await cabinetOf({ store, settings, files, core, dirs, onCabinet: () => onCabinet?.() });
     core.migrateUsers();
+    migrate = () => { try { core.migrateDocs(); } catch (e) { console.error('Не удалось перенести замечания и письма:', e); } };
+    migrate();
     try { chats.migrateProjectChats(); } catch (e) { console.error('Не удалось перенести чаты проектов:', e); }
     try { core.purgeTrash(); } catch (e) { console.error('Не удалось очистить корзину:', e); }
     await flush();
@@ -188,8 +192,8 @@
   // Every file a project refers to: request files, source data, letters, cards.
   function fileRefs(view, projectId) {
     const p = (view?.projects || []).find(x => x.id === projectId) || {};
-    return [...(p.requests || []).flatMap(r => r.files || []), ...(p.irdFiles || []), ...(p.letters || []).flatMap(l => l.files || []),
-      ...(view?.tasks || []).filter(t => t.projectId === projectId).flatMap(t => t.files || [])].filter(f => f && f.id);
+    return [...(p.requests || []).flatMap(r => r.files || []), ...(p.irdFiles || []), ...(view?.letters || []).filter(l => l.projectId === projectId).flatMap(l => l.files || []), ...(p.letters || []).flatMap(l => l.files || []),
+      ...(view?.tasks || []).filter(t => t.projectId === projectId).flatMap(t => t.files || [])].filter((f, i, all) => f && f.id && all.findIndex(x => x?.id === f.id) === i);
   }
   async function remoteInit({ settings, onChanged }) {
     const srv = settings.get('server');
@@ -223,7 +227,7 @@
       store.data = d;
     }
     rebuild();
-    const EMPTY = { projects: [], contractors: [], tasks: [], users: [], chats: [], depts: [], orgs: [], me: null };
+    const EMPTY = { projects: [], contractors: [], tasks: [], users: [], chats: [], depts: [], orgs: [], remarks: [], letters: [], me: null };
     const me = () => remote.view()?.me || null;
     const isGip = () => window.Access.isGip(me());
     const core = {
@@ -349,7 +353,7 @@
     };
     return ctx;
   }
-  const APP_VERSION = '4.21.0';
+  const APP_VERSION = '4.22.0';
   // Sign in / join / move the base (no ctx yet, or switching from the local file).
   const server = {
     async signIn({ url, login, password, code }) {

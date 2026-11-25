@@ -23,8 +23,14 @@ const DATA = {
   },
   projects: {
     p1: { name: 'Цех', code: '25-047', client: 'ООО Заказчик', gipId: 'u-gip', members: ['u-chief', 'u-spec'], contract: { no: '47-П', date: '2026-05-12', sum: 9000000 }, payments: [{ date: '2026-06-01', sum: 100 }] },
+    // 4.22: remarks and letters in the old place (inside the project) — the server moves them out on setup.
+    p5: { name: 'Экспертиза', code: '25-070', client: 'ООО Заказчик', gipId: 'u-gip', members: ['u-chief', 'u-spec'],
+      expertise: { org: 'ГАУ', cycles: [{ id: 'c1', no: '1', date: '2026-11-01', remarks: [{ id: 'r1', n: '1', mark: 'АР', text: 'Нет плана', ownerId: 'u-spec', status: 'work' }, { id: 'r2', n: '2', mark: 'КР', text: 'Нет узла', ownerId: 'u-chief', status: 'work' }] }] },
+      letters: [{ id: 'l1', dir: 'in', seq: 1, date: '2026-11-01', subject: 'Замечания', status: 'answer' }] },
     p4: { name: 'Общий', code: '25-060', client: 'ООО Заказчик', gipId: 'u-gip', members: ['u-gip2'], contract: { no: '60-П', sum: 6666666 } },
-    p2: { name: 'Склад секретный', code: '25-050', client: 'АО Другой', gipId: 'u-gip', members: [], contract: { no: '50-П', sum: 7777777 } },
+    p2: { name: 'Склад секретный', code: '25-050', client: 'АО Другой', gipId: 'u-gip', members: [], contract: { no: '50-П', sum: 7777777 },
+      expertise: { cycles: [{ id: 'c9', no: '1', remarks: [{ id: 'r9', n: '1', text: 'Секретное замечание', ownerId: 'u-other', status: 'work' }] }] },
+      letters: [{ id: 'l9', dir: 'out', seq: 9, date: '2026-11-02', subject: 'Секретное письмо', status: 'sent' }] },
   },
   tasks: {
     t1: { projectId: 'p1', marks: ['КР'], title: 'КР', ownerId: 'u-chief', status: 'work', start: '2026-11-01', finish: '2026-12-01', budget: 500000, history: [] },
@@ -52,7 +58,7 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
   await new Promise(r => app.server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const call = async (method, p, body, tok, headers = {}) => {
-    const r = await fetch(base + p, { method, headers: { ...(body && !(body instanceof Uint8Array) && typeof body !== 'string' ? { 'Content-Type': 'application/json' } : {}), ...(tok ? { Authorization: 'Bearer ' + tok } : {}), ...headers }, body: body instanceof Uint8Array || typeof body === 'string' ? body : body ? JSON.stringify(body) : undefined, redirect: 'manual' });
+    const r = await fetch(base + p, { method, headers: { 'X-Pult-Protocol': '2', ...(body && !(body instanceof Uint8Array) && typeof body !== 'string' ? { 'Content-Type': 'application/json' } : {}), ...(tok ? { Authorization: 'Bearer ' + tok } : {}), ...headers }, body: body instanceof Uint8Array || typeof body === 'string' ? body : body ? JSON.stringify(body) : undefined, redirect: 'manual' });
     const type = r.headers.get('content-type') || '';
     return { status: r.status, headers: r.headers, body: type.includes('json') ? await r.json() : (await r.text()) };
   };
@@ -265,12 +271,33 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
     expect('J5 an invited GIP changes a card budget in another GIP\'s project', wj5.ok === false);
     const wj6 = await w(gip2, [{ type: 'update', col: 'users', id: 'u-gip2', data: { role: 'director' } }]);
     expect('J6 a GIP makes himself director while there is one', wj6.ok === false);
-    const jr = await rpc(gip2, 'journalGet', {});
-    const jl = Array.isArray(jr) ? jr : jr.entries || jr.list || [];
-    expect('J7 the journal of another GIP has no hidden project or card', !jl.some(e => e.id === 'p2' || e.id === 't3'), `${jl.length} entries`);
+    const jr = await rpc(gip2, 'getJournal', '');
+    const jl = Array.isArray(jr) ? jr : jr.result || jr.entries || [];
+    expect('J7 the journal of another GIP has no hidden project or card', jl.length > 0 && !jl.some(e => e.id === 'p2' || e.id === 't3'), `${jl.length} entries ${Array.isArray(jl) ? '' : JSON.stringify(jr).slice(0, 120)}`);
     const ws = await w(gip2, [{ type: 'set', col: 'projects', id: 'p4', data: { ...p4, name: 'Общий (переименован)' } }]);
     const kept = app.store?.data?.projects?.p4?.contract?.sum;
     expect('J8 a «set» of an invited project keeps the hidden contract', ws.ok !== false && (kept === undefined || kept === 6666666), JSON.stringify({ ok: ws.ok, kept }));
+    /* ===== K. Remarks of the expertise and letters as records of their own (4.22) ===== */
+    const vg = await view(gip);
+    const raw = app.store.data;
+    expect('K1 setup moved remarks and letters out of projects, the old copies stay', ['r1', 'r2', 'r9'].every(id => (vg.remarks || []).some(r => r.id === id)) && ['l1', 'l9'].every(id => (vg.letters || []).some(l => l.id === id))
+      && raw.projects.p5.expertise.moved === true && raw.projects.p5.expertise.cycles[0].remarks.length === 2 && raw.projects.p5.lettersMoved === true && raw.projects.p5.letters.length === 1, JSON.stringify({ r: (vg.remarks || []).length, l: (vg.letters || []).length }));
+    const vk = await view(spec2);
+    expect('K2 a specialist sees remarks and letters only of his projects', (vk.remarks || []).some(r => r.id === 'r1') && !(vk.remarks || []).some(r => r.id === 'r9') && !(vk.letters || []).some(l => l.id === 'l9'));
+    expect('K3 another GIP does not see remarks and letters of a project he is not in', !(v2.remarks || []).some(r => r.projectId === 'p5' || r.projectId === 'p2') && !(v2.letters || []).length);
+    expect('K4 a specialist registers a letter', (await w(spec2, [{ type: 'set', col: 'letters', id: 'lx', data: { projectId: 'p5', dir: 'out', seq: 99, date: '2026-11-05', subject: 'Моё' } }])).ok === false);
+    const k5 = await w(spec2, [{ type: 'update', col: 'remarks', id: 'r1', data: { answer: 'Добавлен план, лист 3', status: 'ready' } }]);
+    expect('K5 (allowed) the person answering a remark writes the answer and «ответ готов»', k5.ok !== false && app.store.data.remarks.r1.status === 'ready', JSON.stringify(k5));
+    expect('K6 the person answering rewrites the remark itself', (await w(spec2, [{ type: 'update', col: 'remarks', id: 'r1', data: { text: 'Замечания нет' } }])).ok === false);
+    expect('K7 a specialist answers someone else\'s remark', (await w(spec2, [{ type: 'update', col: 'remarks', id: 'r2', data: { answer: 'x', status: 'ready' } }])).ok === false);
+    expect('K8 the person answering closes his remark', (await w(spec2, [{ type: 'update', col: 'remarks', id: 'r1', data: { status: 'closed' } }])).ok === false);
+    expect('K9 a remark moved to a project the person does not see', (await w(spec2, [{ type: 'update', col: 'remarks', id: 'r1', data: { projectId: 'p2' } }])).ok === false);
+    expect('K10 another GIP adds a remark to a project he is not in', (await w(gip2, [{ type: 'set', col: 'remarks', id: 'rx', data: { projectId: 'p2', cycleId: 'c9', text: 'взлом' } }])).ok === false);
+    expect('K11 a chief writes a broken remark (a script in the status)', (await w(chief, [{ type: 'set', col: 'remarks', id: 'ry', data: { projectId: 'p5', cycleId: 'c1', text: 'x', status: '<img src=x onerror=alert(1)>' } }])).ok === false);
+    await w(gip, [{ type: 'update', col: 'letters', id: 'l9', data: { subject: 'Секретное письмо (изм.)' } }]);
+    const jk = await rpc(spec2, 'getJournal', '');
+    const jsl = Array.isArray(jk) ? jk : jk.result || jk.entries || [];
+    expect('K12 the journal of a specialist has no letters of a hidden project (but his own answer is there)', !jsl.some(e => e.id === 'l9') && jsl.some(e => e.id === 'r1'), `${jsl.length} entries ${JSON.stringify(jk).slice(0, 200)}`);
     // Party lookup for a specialist.
     expect('I1 a specialist uses the INN lookup (the team\'s DaData limit)', (await call('POST', '/api/party', { inns: ['7707083893'] }, spec2)).status === 403);
   } catch (e) { out.push('ERROR ' + (e.stack || e)); }

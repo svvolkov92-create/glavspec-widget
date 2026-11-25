@@ -108,12 +108,14 @@
     if (!me || A.isSpecialist(me)) return { ok: false, message: 'Ответы экспертизе выгружают ГИП и главспецы.' };
     const view = userView(), p = view.projects.find(x => x.id === projectId);
     const c = p && (p.expertise?.cycles || []).find(x => x.id === cycleId);
-    if (!c || !(c.remarks || []).length) return { ok: false, message: 'В цикле нет замечаний.' };
+    // 4.22: remarks are records of their own; in the order they were added.
+    const list = c ? (view.remarks || []).filter(r => r.projectId === projectId && r.cycleId === cycleId).sort((a, b) => (Number(a.pos) || 0) - (Number(b.pos) || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))) : [];
+    if (!c || !list.length) return { ok: false, message: 'В цикле нет замечаний.' };
     const code = String(p.code || '').trim();
     const target = await saveAs({ title: 'Сохранить ответы экспертизе', name: `${code ? safeName(code) + ' ' : ''}Ответы на замечания, цикл ${safeName(String(c.no))} — ${safeName(p.name)}.docx`, ext: 'docx', filter: REPORT_FORMATS.docx });
     if (!target) return { ok: false, canceled: true };
     const rvi = n => (n ? `РВИ-${String(n).padStart(2, '0')}` : '');
-    const rows = c.remarks.map(r => ({ n: r.n || '', mark: r.mark || '', text: r.text || '', answer: r.answer || '', change: rvi(r.rvi) }));
+    const rows = list.map(r => ({ n: r.n || '', mark: r.mark || '', text: r.text || '', answer: r.answer || '', change: rvi(r.rvi) }));
     const out = R.buildRemarksDocx(rows, { title: 'Ответы на замечания экспертизы', project: p.name || '', code, org: p.expertise?.org || '',
       cycle: `цикл ${c.no}${L.isDate(c.date) ? ` от ${L.fmtDate(c.date)}` : ''}`, signer: `Главный инженер проекта ____________ ${me.name || ''}` });
     try { await io.writeFile(target, out); return saved(target); }
@@ -136,7 +138,7 @@
     const montserrat = opts.font === 'montserrat';
     const text = bytes => (typeof bytes === 'string' ? bytes : Buffer.from(bytes).toString('utf8'));
     const html = R.customerHtml({
-      project: { ...p, id: projectId }, tasks: view.tasks, contact: customerContact(p), team: customerTeam(p), today: stamp,
+      project: { ...p, id: projectId }, tasks: view.tasks, remarks: view.remarks || [], contact: customerContact(p), team: customerTeam(p), today: stamp,
       logoSvg: text(await io.asset('brand/tandem-logo.svg')),
       fontName: montserrat ? 'Montserrat' : 'Golos Text',
       fontBase64: Buffer.from(await io.asset(montserrat ? 'fonts/Montserrat.ttf' : 'fonts/GolosText.ttf')).toString('base64'),

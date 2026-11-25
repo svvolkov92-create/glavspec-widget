@@ -164,7 +164,7 @@ const msgInMenu = () => !SOLO && menuItems().some(t => t.id === 'msgs');
 
 const state = {
   // Non-deleted records (archived projects included). Deleted ones live in state.trash.
-  projects: new Map(), contractors: new Map(), tasks: new Map(),
+  projects: new Map(), contractors: new Map(), tasks: new Map(), remarks: new Map(), letters: new Map(), // remarks, letters — 4.22
   trash: { projects: [], contractors: [], tasks: [] },
   loaded: false,
   tab: ((t) => (TABS.some(x => x.id === t) ? t : 'overview'))(loadLocal('tab', 'overview')),
@@ -306,6 +306,8 @@ function setData(snap) {
   }
   state.chats = new Map((snap.chats || []).map(c => [c.id, c]));
   state.depts = new Map((snap.depts || []).filter(d => !d.deletedAt).map(d => [d.id, d]));
+  state.remarks = new Map((snap.remarks || []).map(r => [r.id, r]));
+  state.letters = new Map((snap.letters || []).map(l => [l.id, l]));
   const first = !state.loaded;
   state.loaded = true;
   if (prevMe !== state.me?.id) { mentionSeenTs = null; msg.chatId = SOLO?.kind === 'chat' ? SOLO.id : ''; } // a chat window stays on its chat

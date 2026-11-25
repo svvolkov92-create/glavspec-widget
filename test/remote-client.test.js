@@ -23,7 +23,7 @@ test('remote: «seen» without a connection is kept once and shown at once (no e
 });
 
 test('remote: signed out while sending — the queue is kept, not thrown away', async () => {
-  const fetch = async url => (url.endsWith('/api/view') ? res(200, { ok: true, rev: 5, data: VIEW() }) : res(401, { message: 'Войдите заново.' }));
+  const fetch = async url => (url.endsWith('/api/view') ? res(200, { ok: true, rev: 5, data: VIEW(), server: { protocol: createRemote.PROTOCOL } }) : res(401, { message: 'Войдите заново.' }));
   let lost = 0;
   const r = createRemote({ url: 'https://x', token: 't', fetch, onAuthLost() { lost++; },
     storage: { load: () => ({ view: VIEW(), rev: 5, queue: [{ fn: 'write', args: [[{ type: 'update', col: 'tasks', id: 't1', data: { title: 'Новое' } }], {}, {}], at: 'x' }] }), save() {} } });
@@ -51,7 +51,7 @@ test('remote: a change the server refuses leaves the queue; the next ones go on'
   const sent = [];
   let rev = 5;
   const fetch = async (url, o) => {
-    if (url.endsWith('/api/view')) return res(200, { ok: true, rev, data: VIEW() });
+    if (url.endsWith('/api/view')) return res(200, { ok: true, rev, data: VIEW(), server: { protocol: createRemote.PROTOCOL } });
     const b = JSON.parse(o.body); sent.push(b.args[0]?.[0]?.data?.title);
     rev++;
     return res(200, b.args[0]?.[0]?.data?.title === 'плохо' ? { ok: false, rev, message: 'Сервер не смог выполнить действие' } : { ok: true, rev });
@@ -76,7 +76,7 @@ test('remote: this Пульт and this server can work together (versions of the
 
 test('remote: «Пульт устарел» (426) — nothing more is sent, changes wait for the update', async () => {
   let calls = 0;
-  const fetch = async url => { calls++; return url.endsWith('/api/view') ? res(200, { ok: true, rev: 5, data: VIEW(), server: { protocol: 1 } }) : res(426, { ok: false, outdated: true, message: 'Пульт устарел для сервера 2.0 — обновите Пульт.' }); };
+  const fetch = async url => { calls++; return url.endsWith('/api/view') ? res(200, { ok: true, rev: 5, data: VIEW(), server: { protocol: createRemote.PROTOCOL } }) : res(426, { ok: false, outdated: true, message: 'Пульт устарел для сервера 2.0 — обновите Пульт.' }); };
   const r = createRemote({ url: 'https://x', token: 't', fetch, storage: { load: () => ({ view: VIEW(), rev: 5, queue: [] }), save() {} } });
   await r.refresh();
   const w = await r.call('write', [{ type: 'update', col: 'tasks', id: 't1', data: { title: 'Новое' } }]);
@@ -101,7 +101,7 @@ test('remote: a server older than this Пульт needs — «Сервер ус�
 test('sign-in: the versions are checked before signing in', async () => {
   const { signIn } = createRemote;
   const hello = body => async () => res(200, body);
-  assert.equal((await signIn.hello('https://x', hello({ ok: true, version: '1.0.1', protocol: 1, minProtocol: 1 }))).ok, true);
+  assert.equal((await signIn.hello('https://x', hello({ ok: true, version: '1.6.0', protocol: createRemote.PROTOCOL, minProtocol: createRemote.PROTOCOL }))).ok, true);
   const oldSrv = await signIn.hello('https://x', hello({ ok: true, version: '0.9', protocol: 0 }));
   assert.equal(oldSrv.outdated, 'server');
   const newSrv = await signIn.hello('https://x', hello({ ok: true, version: '9.0', protocol: 9, minProtocol: 9 }));

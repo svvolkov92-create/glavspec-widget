@@ -35,7 +35,7 @@ function start() {
   return new Promise(resolve => app.server.listen(0, '127.0.0.1', () => {
     const base = `http://127.0.0.1:${app.server.address().port}`;
     const call = async (method, p, body, tok, headers = {}) => {
-      const r = await fetch(base + p, { method, headers: { ...(body && !(body instanceof Uint8Array) ? { 'Content-Type': 'application/json' } : {}), ...(tok ? { Authorization: 'Bearer ' + tok } : {}), ...headers }, body: body instanceof Uint8Array ? body : body ? JSON.stringify(body) : undefined });
+      const r = await fetch(base + p, { method, headers: { 'X-Pult-Protocol': '2', ...(body && !(body instanceof Uint8Array) ? { 'Content-Type': 'application/json' } : {}), ...(tok ? { Authorization: 'Bearer ' + tok } : {}), ...headers }, body: body instanceof Uint8Array ? body : body ? JSON.stringify(body) : undefined });
       const type = r.headers.get('content-type') || '';
       return { status: r.status, headers: r.headers, body: type.includes('json') ? await r.json() : Buffer.from(await r.arrayBuffer()) };
     };
@@ -65,8 +65,9 @@ test('pult server: setup, invitations, rights, conflicts, live updates, files', 
     assert.equal((await s.call('GET', '/api/view')).status, 401);
 
     // Versions of the exchange: an older Пульт is told to update (and writes nothing); the server says its own.
-    assert.equal((await s.call('GET', '/api/hello')).body.protocol, 1);
-    const old = await s.call('POST', '/api/rpc', { fn: 'write', args: [[]] }, gip, { 'X-Pult-Protocol': '0' });
+    assert.equal((await s.call('GET', '/api/hello')).body.protocol, 2);
+    // 4.22: a Пульт of protocol 1 (4.21 and older) would edit the old copies of remarks and letters — refused too.
+    const old = await s.call('POST', '/api/rpc', { fn: 'write', args: [[]] }, gip, { 'X-Pult-Protocol': '1' });
     assert.equal(old.status, 426);
     assert.match(old.body.message, /обновите Пульт/);
 
@@ -80,7 +81,7 @@ test('pult server: setup, invitations, rights, conflicts, live updates, files', 
     assert.equal((await s.call('GET', '/api/update/file', null, gip)).body.length, exe.length);
 
     const gv = (await s.call('GET', '/api/view', null, gip)).body;
-    assert.equal(gv.server.protocol, 1);
+    assert.equal(gv.server.protocol, 2);
     assert.equal(gv.server.pult.version, '4.8.0');
     assert.equal(gv.data.tasks.length, 3);
     assert.equal(gv.data.projects.find(p => p.id === 'p1').contract.no, '47-П', 'the GIP sees the contract');
@@ -248,7 +249,7 @@ test('pult server: the customer cabinet on the shared base', async () => {
   const app = createServer({ dataDir: dir, host: '127.0.0.1', configFile: path.join(dir, 'none.json'), cabinetPort: cabPort, cabinetUrl: 'https://kabinet.example.ru' });
   await new Promise(r => app.server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
-  const post = async (p, body, tok) => (await fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) })).json();
+  const post = async (p, body, tok) => (await fetch(base + p, { method: 'POST', headers: { 'X-Pult-Protocol': '2', 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) })).json();
   const rpc = (tok, fn, ...args) => post('/api/rpc', { fn, args }, tok);
   try {
     await new Promise(r => setTimeout(r, 200));
