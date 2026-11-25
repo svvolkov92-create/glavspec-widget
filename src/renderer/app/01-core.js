@@ -57,37 +57,65 @@ const MENU_EXTRA = [{ id: 'msgs', label: 'Сообщения', act: 'msg-full' }
 let tabOrder = loadLocal('tabOrder', []);
 // 4.12: menu items the user took off the menu («Настройки → Меню»). The sections stay reachable from links.
 let hiddenTabs = loadLocal('hiddenTabs', []);
-// Dragging a tab onto another one puts it in that place.
+// 4.12.1: menu items move under the pointer — the item follows the mouse, the others make room smoothly
+// (along the panel: across on top or bottom, down on the left); released — the order is kept.
 let tabDrag = null;
-document.addEventListener('dragstart', e => {
+const tabStart = (r, v) => (v ? r.top : r.left), tabMid = (r, v) => (v ? r.top + r.height / 2 : r.left + r.width / 2);
+document.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || tabDrag) return;
   const tab = e.target.closest?.('#tabs .tab');
-  if (!tab) return;
-  tabDrag = tab.dataset.id;
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', 'tab:' + tabDrag);
-  tab.classList.add('dragging');
+  if (tab) tabDrag = { el: tab, x: e.clientX, y: e.clientY, on: false };
 });
-document.addEventListener('dragover', e => {
-  if (!tabDrag) return;
-  const tab = e.target.closest?.('#tabs .tab');
-  $$('#tabs .tab.drop-ok').forEach(x => { if (x !== tab) x.classList.remove('drop-ok'); });
-  if (!tab || tab.dataset.id === tabDrag) return;
+document.addEventListener('pointermove', e => {
+  const d = tabDrag;
+  if (!d) return;
+  const dx = e.clientX - d.x, dy = e.clientY - d.y;
+  if (!d.on) {
+    if (Math.hypot(dx, dy) < 6) return;
+    d.on = true;
+    d.v = $('#shell')?.classList.contains('nav-left');
+    d.items = [...document.querySelectorAll('#tabs .tab')];
+    d.rects = d.items.map(el => el.getBoundingClientRect());
+    d.from = d.items.indexOf(d.el); d.to = d.from;
+    if (d.from < 0) { tabDrag = null; return; }
+    const r = d.rects[d.from], n = d.rects[d.from + 1] || d.rects[d.from - 1];
+    const gap = n ? Math.max(0, d.from + 1 < d.rects.length ? tabStart(n, d.v) - (d.v ? r.bottom : r.right) : tabStart(r, d.v) - (d.v ? n.bottom : n.right)) : 0;
+    d.step = (d.v ? r.height : r.width) + gap;
+    document.body.classList.add('tab-moving'); d.el.classList.add('dragging');
+  }
   e.preventDefault();
-  tab.classList.add('drop-ok');
+  const delta = d.v ? dy : dx;
+  d.el.style.transform = d.v ? `translateY(${delta}px)` : `translateX(${delta}px)`;
+  const mid = tabMid(d.rects[d.from], d.v) + delta;
+  d.to = d.rects.filter((r, i) => i !== d.from && tabMid(r, d.v) < mid).length;
+  d.items.forEach((el, i) => {
+    if (i === d.from) return;
+    const shift = d.from < i && i <= d.to ? -d.step : d.to <= i && i < d.from ? d.step : 0;
+    el.style.transform = shift ? (d.v ? `translateY(${shift}px)` : `translateX(${shift}px)`) : '';
+  });
 });
-document.addEventListener('drop', e => {
-  if (!tabDrag) return;
-  const tab = e.target.closest?.('#tabs .tab');
-  const from = tabDrag;
+function tabDragEnd(apply) {
+  const d = tabDrag;
   tabDrag = null;
-  if (!tab || tab.dataset.id === from) return;
-  e.preventDefault();
-  const order = orderedTabs().map(x => x.id).filter(id => id !== from);
-  order.splice(order.indexOf(tab.dataset.id) + (orderedTabs().findIndex(x => x.id === from) < orderedTabs().findIndex(x => x.id === tab.dataset.id) ? 1 : 0), 0, from);
-  setTabOrder(order);
-  toast('Порядок вкладок сохранён');
-});
-document.addEventListener('dragend', () => { tabDrag = null; $$('#tabs .dragging, #tabs .drop-ok').forEach(x => x.classList.remove('dragging', 'drop-ok')); });
+  if (!d?.on) return;
+  document.body.classList.remove('tab-moving');
+  d.items.forEach(el => { el.style.transform = ''; el.classList.remove('dragging'); });
+  // The click that ends a drag must not open the section.
+  const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
+  document.addEventListener('click', eat, { capture: true, once: true });
+  setTimeout(() => document.removeEventListener('click', eat, { capture: true }), 80); // no click came (released elsewhere)
+  setTimeout(() => document.body.classList.remove('tab-moving'), 0);
+  if (!apply || d.to === d.from) return;
+  const ids = d.items.map(el => el.dataset.id), moved = ids.splice(d.from, 1)[0];
+  ids.splice(d.to, 0, moved);
+  // Items that are not in the menu (hidden, not for this role) keep their places in the saved order.
+  const full = orderedTabs().map(x => x.id), slots = full.map((id, i) => (ids.includes(id) ? i : -1)).filter(i => i >= 0);
+  slots.forEach((slot, k) => { full[slot] = ids[k]; });
+  setTabOrder(full);
+}
+document.addEventListener('pointerup', () => tabDragEnd(true));
+document.addEventListener('pointercancel', () => tabDragEnd(false));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && tabDrag?.on) tabDragEnd(false); }, true);
 // Light encouragement (first-time acceptance, project goal, «спасибо»): can be switched off in «Настройки».
 let game = loadLocal('game', true) !== false;
 // Closable hint paragraphs: once closed, a hint stays closed on this computer.

@@ -156,7 +156,7 @@ onAct({
   'about': () => { openAbout(); },
   'tips-reset': () => { tipsClosed.clear(); saveLocal('tipsClosed', []); renderNow(); },
   'cols-pop': ({ el }) => { colsOpen = !colsOpen; el.closest('.cols-wrap').querySelector('.cols-menu').hidden = !colsOpen; },
-  'settings': ({ el }) => { openSettings(el.dataset.sec); },
+  'settings': ({ el }) => { closeCardMenu(); openSettings(el.dataset.sec); },
   'set-backdrop': ({ el }) => { api.setBackdrop?.(el.dataset.v).then(ok => { if (ok === false) toast('Этот фон Windows здесь недоступен — осталась своя прозрачность.', true); }); },
   'set-dock': ({ el }) => { api.setDock?.(el.dataset.v); },
   'nav-pos': ({ el }) => { setNav({ pos: el.dataset.v }); },

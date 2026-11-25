@@ -172,6 +172,25 @@ function orderedTabs() {
   all.forEach((x, i) => { if (!order.includes(x.id)) order.splice(Math.min(i, order.length), 0, x.id); });
   return order.map(id => all.find(x => x.id === id));
 }
+// 4.12.1: right click on the menu — take this item off, set the menu up, or put it back as it was.
+document.addEventListener('contextmenu', e => {
+  const tab = e.target.closest?.('#tabs .tab');
+  if (!tab) return;
+  e.preventDefault();
+  closeCardMenu();
+  const label = tab.querySelector('.lbl')?.textContent || '';
+  const m = document.createElement('div');
+  m.className = 'menu card-menu'; m.id = 'card-menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = `<div class="cm-h"><b>Меню</b><span class="hint">перетащите пункт мышью, чтобы поменять порядок</span></div>
+    <button role="menuitem" type="button" data-act="tab-hide-one" data-id="${esc(tab.dataset.id)}">Убрать «${esc(label)}» из меню</button>
+    <button role="menuitem" type="button" data-act="settings" data-sec="tabs">Настроить меню…</button>
+    ${hiddenTabs.length || tabOrder.length ? '<button role="menuitem" type="button" data-act="tabs-reset">Вернуть меню как было</button>' : ''}`;
+  document.body.append(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - r.width - 6))}px`;
+  m.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - r.height - 6))}px`;
+  m.querySelector('button')?.focus();
+});
 // 4.12: hide or show a menu item; at least one section stays in the menu.
 function setTabHidden(id, hide) {
   const next = hide ? [...new Set([...hiddenTabs, id])] : hiddenTabs.filter(x => x !== id);
@@ -190,8 +209,9 @@ function moveTab(id, dir) {
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
   'tab-move': ({ el, id }) => { moveTab(id, Number(el.dataset.dir)); },
-  'tabs-reset': () => { hiddenTabs = []; saveLocal('hiddenTabs', []); setTabOrder([]); },
+  'tabs-reset': () => { closeCardMenu(); hiddenTabs = []; saveLocal('hiddenTabs', []); setTabOrder([]); },
   'tab-hide': ({ el, id }) => { setTabHidden(id, !el.checked); },
+  'tab-hide-one': ({ id }) => { closeCardMenu(); setTabHidden(id, true); toast('Пункт убран из меню. Вернуть — правый щелчок по меню или «Настройки → Меню».'); },
   'tab': ({ e, id }) => { if (e.ctrlKey) { wsAddSection(id); return; } wsRemember(); wsActive = ''; saveWs(); if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); },
   'dtab-close': ({ id }) => { docTabClose(id); },
   'ws-open': ({ el }) => { wsOpen(el.dataset.key); },

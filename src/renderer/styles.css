@@ -657,6 +657,11 @@ td.nowrap { white-space: nowrap; text-align: right }
 .shell:not(.nav-left) .adds [data-act="new-project"] .lbl, .shell:not(.nav-left) .adds [data-act="new-contractor"] .lbl { display: none }
 .shell:not(.nav-left) .adds [data-act="new-project"], .shell:not(.nav-left) .adds [data-act="new-contractor"] { padding: 5px 8px }
 .nav-mini-btn { display: none !important }
+/* 4.12.1: «Настроить меню» — an icon on top/bottom, a full row on the left */
+.nav-cfg-btn { border-color: transparent !important }
+.shell:not(.nav-left) .nav-cfg-btn > .ico { display: block }
+.shell:not(.nav-left) .nav-cfg-btn .lbl { display: none }
+.shell:not(.nav-left) .nav-cfg-btn { padding: 5px 7px }
 
 /* bottom */
 .nav-bottom .body { flex-direction: column-reverse }
@@ -945,8 +950,10 @@ section.panel[id^="p-"], .cards > .card, .kb-lane, #gantt > .tl-row:not(.tl-head
 .menu .menu-h { padding: 10px 8px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em }
 .menu button.dim { opacity: .55 }
 .fmt-p { background: #b42318 }
-#tabs .tab.dragging { opacity: .45 }
-#tabs .tab.drop-ok { box-shadow: inset 3px 0 0 var(--accent) }
+/* 4.12.1: moving a menu item — it rides under the pointer, the others slide aside */
+body.tab-moving, body.tab-moving * { cursor: grabbing !important; user-select: none }
+body.tab-moving #tabs .tab { transition: transform .16s cubic-bezier(.2, .7, .3, 1) }
+#tabs .tab.dragging { transition: none !important; position: relative; z-index: 3; background: var(--surface); box-shadow: 0 6px 18px rgba(20, 24, 33, .22); border-radius: 8px; opacity: .97 }
 th[data-col] { cursor: grab }
 th.dragging { opacity: .45 }
 th.drop-ok { box-shadow: inset 3px 0 0 var(--accent) }
@@ -1977,7 +1984,7 @@ html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
 .org-contract { border-bottom: 0; padding-bottom: 2px }
 
 /* 4.12: «Сообщения» in the menu opens the messenger over the whole window (below the title bar) */
-.msg-panel.full.max { left: 0; top: var(--bar-h, 48px); right: 0; bottom: 0; transform: none; width: auto; height: auto; border-radius: 0; border-width: 1px 0 0; box-shadow: none }
+.msg-panel.full.max { left: 18px; top: calc(var(--bar-h, 48px) + 14px); right: 18px; bottom: 18px; transform: none; width: auto; height: auto }
 .msg-panel.full.max .mp-full { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) }
 /* «О программе» */
 .about { width: min(440px, 94vw) }

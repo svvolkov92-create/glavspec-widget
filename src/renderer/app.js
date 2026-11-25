@@ -60,37 +60,65 @@ const MENU_EXTRA = [{ id: 'msgs', label: 'Сообщения', act: 'msg-full' }
 let tabOrder = loadLocal('tabOrder', []);
 // 4.12: menu items the user took off the menu («Настройки → Меню»). The sections stay reachable from links.
 let hiddenTabs = loadLocal('hiddenTabs', []);
-// Dragging a tab onto another one puts it in that place.
+// 4.12.1: menu items move under the pointer — the item follows the mouse, the others make room smoothly
+// (along the panel: across on top or bottom, down on the left); released — the order is kept.
 let tabDrag = null;
-document.addEventListener('dragstart', e => {
+const tabStart = (r, v) => (v ? r.top : r.left), tabMid = (r, v) => (v ? r.top + r.height / 2 : r.left + r.width / 2);
+document.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || tabDrag) return;
   const tab = e.target.closest?.('#tabs .tab');
-  if (!tab) return;
-  tabDrag = tab.dataset.id;
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', 'tab:' + tabDrag);
-  tab.classList.add('dragging');
+  if (tab) tabDrag = { el: tab, x: e.clientX, y: e.clientY, on: false };
 });
-document.addEventListener('dragover', e => {
-  if (!tabDrag) return;
-  const tab = e.target.closest?.('#tabs .tab');
-  $$('#tabs .tab.drop-ok').forEach(x => { if (x !== tab) x.classList.remove('drop-ok'); });
-  if (!tab || tab.dataset.id === tabDrag) return;
+document.addEventListener('pointermove', e => {
+  const d = tabDrag;
+  if (!d) return;
+  const dx = e.clientX - d.x, dy = e.clientY - d.y;
+  if (!d.on) {
+    if (Math.hypot(dx, dy) < 6) return;
+    d.on = true;
+    d.v = $('#shell')?.classList.contains('nav-left');
+    d.items = [...document.querySelectorAll('#tabs .tab')];
+    d.rects = d.items.map(el => el.getBoundingClientRect());
+    d.from = d.items.indexOf(d.el); d.to = d.from;
+    if (d.from < 0) { tabDrag = null; return; }
+    const r = d.rects[d.from], n = d.rects[d.from + 1] || d.rects[d.from - 1];
+    const gap = n ? Math.max(0, d.from + 1 < d.rects.length ? tabStart(n, d.v) - (d.v ? r.bottom : r.right) : tabStart(r, d.v) - (d.v ? n.bottom : n.right)) : 0;
+    d.step = (d.v ? r.height : r.width) + gap;
+    document.body.classList.add('tab-moving'); d.el.classList.add('dragging');
+  }
   e.preventDefault();
-  tab.classList.add('drop-ok');
+  const delta = d.v ? dy : dx;
+  d.el.style.transform = d.v ? `translateY(${delta}px)` : `translateX(${delta}px)`;
+  const mid = tabMid(d.rects[d.from], d.v) + delta;
+  d.to = d.rects.filter((r, i) => i !== d.from && tabMid(r, d.v) < mid).length;
+  d.items.forEach((el, i) => {
+    if (i === d.from) return;
+    const shift = d.from < i && i <= d.to ? -d.step : d.to <= i && i < d.from ? d.step : 0;
+    el.style.transform = shift ? (d.v ? `translateY(${shift}px)` : `translateX(${shift}px)`) : '';
+  });
 });
-document.addEventListener('drop', e => {
-  if (!tabDrag) return;
-  const tab = e.target.closest?.('#tabs .tab');
-  const from = tabDrag;
+function tabDragEnd(apply) {
+  const d = tabDrag;
   tabDrag = null;
-  if (!tab || tab.dataset.id === from) return;
-  e.preventDefault();
-  const order = orderedTabs().map(x => x.id).filter(id => id !== from);
-  order.splice(order.indexOf(tab.dataset.id) + (orderedTabs().findIndex(x => x.id === from) < orderedTabs().findIndex(x => x.id === tab.dataset.id) ? 1 : 0), 0, from);
-  setTabOrder(order);
-  toast('Порядок вкладок сохранён');
-});
-document.addEventListener('dragend', () => { tabDrag = null; $$('#tabs .dragging, #tabs .drop-ok').forEach(x => x.classList.remove('dragging', 'drop-ok')); });
+  if (!d?.on) return;
+  document.body.classList.remove('tab-moving');
+  d.items.forEach(el => { el.style.transform = ''; el.classList.remove('dragging'); });
+  // The click that ends a drag must not open the section.
+  const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
+  document.addEventListener('click', eat, { capture: true, once: true });
+  setTimeout(() => document.removeEventListener('click', eat, { capture: true }), 80); // no click came (released elsewhere)
+  setTimeout(() => document.body.classList.remove('tab-moving'), 0);
+  if (!apply || d.to === d.from) return;
+  const ids = d.items.map(el => el.dataset.id), moved = ids.splice(d.from, 1)[0];
+  ids.splice(d.to, 0, moved);
+  // Items that are not in the menu (hidden, not for this role) keep their places in the saved order.
+  const full = orderedTabs().map(x => x.id), slots = full.map((id, i) => (ids.includes(id) ? i : -1)).filter(i => i >= 0);
+  slots.forEach((slot, k) => { full[slot] = ids[k]; });
+  setTabOrder(full);
+}
+document.addEventListener('pointerup', () => tabDragEnd(true));
+document.addEventListener('pointercancel', () => tabDragEnd(false));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && tabDrag?.on) tabDragEnd(false); }, true);
 // Light encouragement (first-time acceptance, project goal, «спасибо»): can be switched off in «Настройки».
 let game = loadLocal('game', true) !== false;
 // Closable hint paragraphs: once closed, a hint stays closed on this computer.
@@ -398,7 +426,7 @@ function renderNow() {
   $('#user-name').textContent = state.me ? `${state.me.name}${A.directionLabels(state.me).length ? ' · ' + A.directionLabels(state.me).join(', ') : ''}` : '—';
   document.querySelectorAll('[data-role-hide]').forEach(el => { el.hidden = !roleAllows(el.dataset.roleHide); });
   const mt = msgInMenu() ? msgTotals() : null;
-  $('#tabs').innerHTML = menuItems().map(t => t.act ? `<button class="tab tab-act" type="button" draggable="true" data-act="${t.act}" data-id="${t.id}" title="${t.label} — чаты на всё окно">${icon('chat')}<span class="lbl">${t.label}</span>${mt?.n ? `<span class="cnt">${mt.n}</span>` : ''}${mt?.at ? `<span class="cnt bad" title="Вас упомянули">@${mt.at}</span>` : ''}</button>` : `<button class="tab" role="tab" type="button" draggable="true" data-act="tab" data-id="${t.id}" aria-selected="${state.tab === t.id}" title="${t.label} — перетащите, чтобы поменять порядок вкладок">${icon(t.id)}<span class="lbl">${t.label}</span>${
+  $('#tabs').innerHTML = menuItems().map(t => t.act ? `<button class="tab tab-act" type="button" data-act="${t.act}" data-id="${t.id}" title="${t.label} — чаты на всё окно">${icon('chat')}<span class="lbl">${t.label}</span>${mt?.n ? `<span class="cnt">${mt.n}</span>` : ''}${mt?.at ? `<span class="cnt bad" title="Вас упомянули">@${mt.at}</span>` : ''}</button>` : `<button class="tab" role="tab" type="button" data-act="tab" data-id="${t.id}" aria-selected="${state.tab === t.id}" title="${t.label} — перетащите, чтобы поменять порядок вкладок">${icon(t.id)}<span class="lbl">${t.label}</span>${
     t.id === 'tasks' ? `<span class="cnt">${tasksArr().length}</span>` : t.id === 'overview' && overdueCount ? `<span class="cnt bad">${overdueCount}</span>` : ''}</button>`).join('');
 
   const app = $('#app');
@@ -1264,7 +1292,7 @@ onAct({
   'about': () => { openAbout(); },
   'tips-reset': () => { tipsClosed.clear(); saveLocal('tipsClosed', []); renderNow(); },
   'cols-pop': ({ el }) => { colsOpen = !colsOpen; el.closest('.cols-wrap').querySelector('.cols-menu').hidden = !colsOpen; },
-  'settings': ({ el }) => { openSettings(el.dataset.sec); },
+  'settings': ({ el }) => { closeCardMenu(); openSettings(el.dataset.sec); },
   'set-backdrop': ({ el }) => { api.setBackdrop?.(el.dataset.v).then(ok => { if (ok === false) toast('Этот фон Windows здесь недоступен — осталась своя прозрачность.', true); }); },
   'set-dock': ({ el }) => { api.setDock?.(el.dataset.v); },
   'nav-pos': ({ el }) => { setNav({ pos: el.dataset.v }); },
@@ -2114,6 +2142,25 @@ function orderedTabs() {
   all.forEach((x, i) => { if (!order.includes(x.id)) order.splice(Math.min(i, order.length), 0, x.id); });
   return order.map(id => all.find(x => x.id === id));
 }
+// 4.12.1: right click on the menu — take this item off, set the menu up, or put it back as it was.
+document.addEventListener('contextmenu', e => {
+  const tab = e.target.closest?.('#tabs .tab');
+  if (!tab) return;
+  e.preventDefault();
+  closeCardMenu();
+  const label = tab.querySelector('.lbl')?.textContent || '';
+  const m = document.createElement('div');
+  m.className = 'menu card-menu'; m.id = 'card-menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = `<div class="cm-h"><b>Меню</b><span class="hint">перетащите пункт мышью, чтобы поменять порядок</span></div>
+    <button role="menuitem" type="button" data-act="tab-hide-one" data-id="${esc(tab.dataset.id)}">Убрать «${esc(label)}» из меню</button>
+    <button role="menuitem" type="button" data-act="settings" data-sec="tabs">Настроить меню…</button>
+    ${hiddenTabs.length || tabOrder.length ? '<button role="menuitem" type="button" data-act="tabs-reset">Вернуть меню как было</button>' : ''}`;
+  document.body.append(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = `${Math.max(4, Math.min(e.clientX, innerWidth - r.width - 6))}px`;
+  m.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - r.height - 6))}px`;
+  m.querySelector('button')?.focus();
+});
 // 4.12: hide or show a menu item; at least one section stays in the menu.
 function setTabHidden(id, hide) {
   const next = hide ? [...new Set([...hiddenTabs, id])] : hiddenTabs.filter(x => x !== id);
@@ -2132,8 +2179,9 @@ function moveTab(id, dir) {
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
   'tab-move': ({ el, id }) => { moveTab(id, Number(el.dataset.dir)); },
-  'tabs-reset': () => { hiddenTabs = []; saveLocal('hiddenTabs', []); setTabOrder([]); },
+  'tabs-reset': () => { closeCardMenu(); hiddenTabs = []; saveLocal('hiddenTabs', []); setTabOrder([]); },
   'tab-hide': ({ el, id }) => { setTabHidden(id, !el.checked); },
+  'tab-hide-one': ({ id }) => { closeCardMenu(); setTabHidden(id, true); toast('Пункт убран из меню. Вернуть — правый щелчок по меню или «Настройки → Меню».'); },
   'tab': ({ e, id }) => { if (e.ctrlKey) { wsAddSection(id); return; } wsRemember(); wsActive = ''; saveWs(); if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); },
   'dtab-close': ({ id }) => { docTabClose(id); },
   'ws-open': ({ el }) => { wsOpen(el.dataset.key); },
@@ -2479,7 +2527,7 @@ function renderMsg() {
   const t = msgTotals(), th = msgThread(msg.chatId), c = th?.type === 'chat' ? th.c : null;
   if (msg.chatId && msg.chatId !== 'new' && !th && msg.mode !== 'solo') msg.chatId = ''; // a chat window keeps waiting for its chat
   const pill = `<button class="msg-fab${t.n ? ' has' : ''}" type="button" data-act="msg-open" title="Сообщения: чаты проектов, личные и групповые">${icon('chat')}<span>Сообщения</span>${t.n ? `<i class="mc-n">${t.n}</i>` : ''}${t.at ? `<i class="mc-at" title="Вас упомянули">@${t.at}</i>` : ''}</button>`;
-  if (msg.mode === 'pill') { root.innerHTML = msgInMenu() ? '' : pill; return; } // 4.12: with «Сообщения» in the menu no floating button
+  if (msg.mode === 'pill') { root.innerHTML = pill; return; } // the floating button opens the side panel; «Сообщения» in the menu — the big window
   const head = `<div class="mp-head"><b>Сообщения</b><span class="spacer"></span><button class="btn sm" type="button" data-act="msg-new">+ Новый чат</button>
     <button class="btn ghostbtn sm msg-stick${msg.stick ? ' on' : ''}" type="button" data-act="msg-stick" aria-pressed="${!!msg.stick}" title="${msg.stick ? 'Окно закреплено: остаётся, пока не закроете. В чат можно перетащить карточку. Нажмите, чтобы открепить' : 'Закрепить окно: не будет сворачиваться при щелчке мимо, в чат можно перетащить карточку'}">${icon('pin')}</button>
     <button class="btn ghostbtn sm" type="button" data-act="msg-size" title="${msg.mode === 'full' ? 'Свернуть в боковую панель' : 'Открыть окно со всеми чатами'}">${msg.mode === 'full' ? '⇲' : '⤢'}</button><button class="btn ghostbtn sm" type="button" data-act="msg-close" aria-label="Свернуть">✕</button></div>`;

@@ -245,7 +245,7 @@ function renderMsg() {
   const t = msgTotals(), th = msgThread(msg.chatId), c = th?.type === 'chat' ? th.c : null;
   if (msg.chatId && msg.chatId !== 'new' && !th && msg.mode !== 'solo') msg.chatId = ''; // a chat window keeps waiting for its chat
   const pill = `<button class="msg-fab${t.n ? ' has' : ''}" type="button" data-act="msg-open" title="Сообщения: чаты проектов, личные и групповые">${icon('chat')}<span>Сообщения</span>${t.n ? `<i class="mc-n">${t.n}</i>` : ''}${t.at ? `<i class="mc-at" title="Вас упомянули">@${t.at}</i>` : ''}</button>`;
-  if (msg.mode === 'pill') { root.innerHTML = msgInMenu() ? '' : pill; return; } // 4.12: with «Сообщения» in the menu no floating button
+  if (msg.mode === 'pill') { root.innerHTML = pill; return; } // the floating button opens the side panel; «Сообщения» in the menu — the big window
   const head = `<div class="mp-head"><b>Сообщения</b><span class="spacer"></span><button class="btn sm" type="button" data-act="msg-new">+ Новый чат</button>
     <button class="btn ghostbtn sm msg-stick${msg.stick ? ' on' : ''}" type="button" data-act="msg-stick" aria-pressed="${!!msg.stick}" title="${msg.stick ? 'Окно закреплено: остаётся, пока не закроете. В чат можно перетащить карточку. Нажмите, чтобы открепить' : 'Закрепить окно: не будет сворачиваться при щелчке мимо, в чат можно перетащить карточку'}">${icon('pin')}</button>
     <button class="btn ghostbtn sm" type="button" data-act="msg-size" title="${msg.mode === 'full' ? 'Свернуть в боковую панель' : 'Открыть окно со всеми чатами'}">${msg.mode === 'full' ? '⇲' : '⤢'}</button><button class="btn ghostbtn sm" type="button" data-act="msg-close" aria-label="Свернуть">✕</button></div>`;

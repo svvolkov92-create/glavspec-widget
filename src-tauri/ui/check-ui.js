@@ -75,8 +75,6 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     }
   });
   await ctx.addInitScript(require('./stub-window.js'));
-  // The older checks use the floating «Сообщения» button; 4.12 checks put the item back into the menu.
-  await ctx.addInitScript(() => { try { if (localStorage.getItem('glavspec.hiddenTabs') === null) localStorage.setItem('glavspec.hiddenTabs', '["msgs"]'); } catch { /* none */ } });
   const p = await ctx.newPage();
   const errs = []; p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
   const js = (f, a) => p.evaluate(f, a);
@@ -471,25 +469,41 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await js(() => window.api.setAppIcon(1)); await wait(200);
     // 4.12: the menu — items can be hidden; «Сообщения» in the menu opens the messenger over the whole window; «О программе».
     await js(() => { document.querySelector('.modal-back')?.remove(); const b = document.createElement('button'); b.dataset.act = 'settings'; b.dataset.sec = 'tabs'; document.body.append(b); b.click(); b.remove(); }); await wait(400);
-    check('4.12: «Меню» in the settings lists «Сообщения», unticked by default here', await js(() => { const i = document.querySelector('.settings-modal [data-act="tab-hide"][data-id="msgs"]'); return !!i && !i.checked; }));
-    await js(() => document.querySelector('.settings-modal [data-act="tab-hide"][data-id="msgs"]').click()); await wait(300);
+    check('4.12: «Меню» in the settings lists «Сообщения», ticked', await js(() => { const i = document.querySelector('.settings-modal [data-act="tab-hide"][data-id="msgs"]'); return !!i && i.checked; }));
     await js(() => document.querySelector('.settings-modal [data-act="tab-hide"][data-id="office"]').click()); await wait(300);
-    check('4.12: «Сообщения» is in the menu, «Офис» is not, the floating button is gone', await js(() => !!document.querySelector('#tabs [data-act="msg-full"]') && !document.querySelector('#tabs [data-id="office"]') && !document.querySelector('.msg-fab')));
+    check('4.12: «Сообщения» is in the menu, «Офис» is not, the floating button stays', await js(() => !!document.querySelector('#tabs [data-act="msg-full"]') && !document.querySelector('#tabs [data-id="office"]') && !!document.querySelector('.msg-fab')));
     await js(() => document.querySelector('.settings-modal [data-act="about"]').click()); await wait(400);
     check('4.12: «О программе» shows the version', await js(() => /4\.\d+\.\d+/.test(document.querySelector('.about-modal')?.textContent || '')), await js(() => (document.querySelector('.about-modal')?.textContent || '').replace(/\s+/g, ' ').slice(0, 160)));
     await js(() => { document.querySelector('.about-modal')?.remove(); document.querySelector('.settings-modal')?.remove(); });
     await js(() => document.querySelector('#tabs [data-act="msg-full"]').click()); await wait(500);
     const mr = await js(() => { const r = document.querySelector('.msg-panel.full.max')?.getBoundingClientRect(); return r && { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left) }; });
-    check('4.12: the messenger takes the whole window', !!mr && mr.x === 0 && mr.w >= 1390 && mr.h > 700, JSON.stringify(mr));
+    check('4.12.1: the messenger is a little smaller than the window', !!mr && mr.x > 0 && mr.x < 40 && mr.w > 1300 && mr.w < 1400 && mr.h > 650, JSON.stringify(mr));
     await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-msg-full.png' }).catch(() => {});
     await js(() => document.querySelector('.msg-panel [data-act="msg-close"]').click()); await wait(400);
-    check('4.12: closed — the menu item stays, no floating button', await js(() => !document.querySelector('.msg-panel') && !document.querySelector('.msg-fab')));
+    check('4.12: closed — the menu item and the floating button stay', await js(() => !document.querySelector('.msg-panel') && !!document.querySelector('.msg-fab')));
+    await js(() => document.querySelector('.msg-fab').click()); await wait(400);
+    check('4.12.1: the floating button opens the side panel', await js(() => !!document.querySelector('.msg-panel.side') && !document.querySelector('.msg-panel.max')));
+    await js(() => document.querySelector('.msg-panel [data-act="msg-close"]').click()); await wait(400);
+    // Right click on the menu; moving an item with the mouse.
+    await js(() => document.querySelector('#tabs [data-id="gantt"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 60 }))); await wait(200);
+    check('4.12.1: right click on the menu offers «Убрать» and «Настроить меню…»', await js(() => !!document.querySelector('#card-menu [data-act="tab-hide-one"][data-id="gantt"]') && !!document.querySelector('#card-menu [data-act="settings"][data-sec="tabs"]')));
+    await js(() => document.querySelector('#card-menu')?.remove());
+    check('4.12.1: «Настроить меню» button on the panel', await js(() => !!document.querySelector('#nav [data-act="settings"][data-sec="tabs"]')));
+    const ord0 = await js(() => [...document.querySelectorAll('#tabs .tab')].map(t => t.dataset.id));
+    const tabBox = async id => p.locator(`#tabs [data-id="${id}"]`).boundingBox();
+    const a0 = await tabBox(ord0[1]), b0 = await tabBox(ord0[3]);
+    await p.mouse.move(a0.x + a0.width / 2, a0.y + a0.height / 2); await p.mouse.down();
+    for (let i = 1; i <= 8; i++) await p.mouse.move(a0.x + a0.width / 2 + (b0.x + b0.width / 2 + 6 - a0.x - a0.width / 2) * i / 8, a0.y + a0.height / 2);
+    const mid = await js(() => ({ moving: document.body.classList.contains('tab-moving'), shifted: [...document.querySelectorAll('#tabs .tab:not(.dragging)')].filter(t => t.style.transform).length }));
+    await p.mouse.up(); await wait(400);
+    const ord1 = await js(() => [...document.querySelectorAll('#tabs .tab')].map(t => t.dataset.id));
+    check('4.12.1: an item moves under the mouse, the neighbours slide aside', mid.moving && mid.shifted === 2, JSON.stringify(mid));
+    check('4.12.1: released — the item takes the new place, no section opened by the release', ord1.indexOf(ord0[1]) === 3 && ord1.indexOf(ord0[2]) === 1, ord1.join());
+    await js(() => { const b = document.createElement('button'); b.dataset.act = 'tabs-reset'; document.body.append(b); b.click(); b.remove(); }); await wait(300);
     // Back as before for the later checks: «Офис» in the menu, the floating button instead of the menu item.
     await js(() => { const b = document.createElement('button'); b.dataset.act = 'settings'; b.dataset.sec = 'tabs'; document.body.append(b); b.click(); b.remove(); }); await wait(400);
-    await js(() => { document.querySelector('.settings-modal [data-act="tab-hide"][data-id="office"]').click(); }); await wait(300);
-    await js(() => { document.querySelector('.settings-modal [data-act="tab-hide"][data-id="msgs"]').click(); }); await wait(300);
     await js(() => document.querySelector('.settings-modal')?.remove()); await wait(200);
-    check('4.12: back — «Офис» in the menu, the floating button', await js(() => !!document.querySelector('#tabs [data-id="office"]') && !!document.querySelector('.msg-fab')));
+    check('4.12: «Как было» — «Офис» back in the menu', await js(() => !!document.querySelector('#tabs [data-id="office"]')));
     // 36: a notification with buttons when the window is not in front; «Открыть» opens the card
     const tid = await js(() => [...window.AppBridge.state.tasks.values()].find(t => !t.deletedAt)?.id);
     await js(() => { window.__win.focused = false; });

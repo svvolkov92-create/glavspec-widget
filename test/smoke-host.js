@@ -150,7 +150,7 @@ async function start() {
   });
   await ctx.addInitScript(require(path.join(ROOT, 'src-tauri', 'ui', 'stub-window.js')));
   // 4.3: the role introduction would open over every smoke (fresh profile) and take Esc; smokes test the screens.
-  await ctx.addInitScript(() => { try { localStorage.setItem('glavspec.tourOff', 'true'); if (localStorage.getItem('glavspec.hiddenTabs') === null) localStorage.setItem('glavspec.hiddenTabs', '["msgs"]'); } catch { /* none */ } });
+  await ctx.addInitScript(() => { try { localStorage.setItem('glavspec.tourOff', 'true'); } catch { /* none */ } });
   const page = await ctx.newPage();
   const consoleCbs = [], loadCbs = [];
   page.on('console', m => { const level = { error: 3, warning: 2 }[m.type()] ?? 1; for (const f of consoleCbs) f({}, level, m.text(), m.location()?.lineNumber || 0, m.location()?.url || ''); });

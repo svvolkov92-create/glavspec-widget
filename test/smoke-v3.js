@@ -75,11 +75,11 @@ app.on('browser-window-created', (_e, win) => {
       });
 
       await step('tab order by drag', async () => {
-        await js(`(() => { const a = document.querySelector('#tabs [data-id="tasks"]'), b = document.querySelector('#tabs [data-id="projects"]'); const dt = new DataTransfer();
-          a.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-          b.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
-          b.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
-          a.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt })); })()`);
+        // 4.12.1: moved by the pointer (the item rides under the mouse), not by HTML drag and drop.
+        await js(`(() => { const a = document.querySelector('#tabs [data-id="tasks"]'), b = document.querySelector('#tabs [data-id="projects"]');
+          const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), y = ra.top + ra.height / 2, x0 = ra.left + ra.width / 2, x1 = rb.left + rb.width / 2 - 4;
+          const pe = (type, x, el = document) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y, pointerId: 1 }));
+          pe('pointerdown', x0, a); for (let i = 1; i <= 10; i++) pe('pointermove', x0 + (x1 - x0) * i / 10); pe('pointerup', x1); })()`);
         await wait(200);
         const order = await js(`[...document.querySelectorAll('#tabs .tab')].map(t => t.dataset.id).join()`);
         check('tab moved', order.replace(/^day,/, '').startsWith('overview,tasks,projects'), order); // «Мой день» (4.2) stays first
