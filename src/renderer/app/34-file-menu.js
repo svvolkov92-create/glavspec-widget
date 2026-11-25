@@ -18,6 +18,7 @@ function setFileMenu(open) {
 }
 function updateScopeLabels() {
   const c = state.reportScope.startsWith('c:'), u = state.reportScope.startsWith('u:'), pr = state.reportScope.startsWith('p:');
+  $('#mi-msproject')?.classList.toggle('dim', !pr);
   const mc = $('#mi-customer');
   if (mc) { mc.classList.toggle('dim', !pr); $('#cust-sub').textContent = pr ? `«${state.projects.get(state.reportScope.slice(2))?.name || ''}»: веб-страница — этап, план, «нужно от вас», разделы. Данные — в проекте, вкладка «Для заказчика»` : 'Выберите проект в списке «Отчёт по». Данные для неё — в проекте, вкладка «Для заказчика»'; }
   $('#rep-period-wrap').hidden = !u;
@@ -49,6 +50,18 @@ async function exportReport(format) {
   } finally {
     btn.disabled = false;
   }
+}
+
+async function msProjectExport() {
+  if (!state.reportScope.startsWith('p:')) { toast('Сначала выберите проект в списке «Отчёт по».', true); $('#rep-scope')?.focus(); return; }
+  if (!api.exportMsProject) return toast('Выгрузка в MS Project — в Пульте на компьютере.', true);
+  setFileMenu(false);
+  try {
+    const res = await api.exportMsProject(state.reportScope.slice(2));
+    if (res.canceled) return;
+    if (!res.ok) return toast(res.message, true);
+    toast(`Сохранено: ${res.name} — откройте в MS Project: «Файл → Открыть», тип файла XML`, false, { label: 'Открыть', run: api.openLastReport });
+  } catch (e) { toast('Не удалось выгрузить: ' + (e?.message || e), true); }
 }
 
 async function customerPdf() {
@@ -154,6 +167,14 @@ function renderViewMenu() {
   $('#view-menu-body').innerHTML = viewSectionsHtml(false) + `<div class="vm-sec"><button class="btn sm" type="button" data-act="settings" data-sec="">Все настройки…</button></div>`;
   if (document.querySelector('.settings-modal')) renderSettings();
 }
+// 4.10 (69): «Т из Ганта» in the colours the user picked — the same drawing as tools/make-icons.js.
+const APP_ICON_VARIANTS = [1, 3, 4, 6, 8];
+function appIconSvg(n) {
+  const O = '#F26A1F', W = '#FFFFFF', G = '#2F3033';
+  const [t, c, s] = { 1: [O, W, W], 3: [O, W, G], 4: [W, O, O], 6: [W, O, G], 8: [G, W, W] }[n] || [O, W, W];
+  const tile = t === W ? `<rect x="1" y="1" width="62" height="62" rx="13" fill="${W}" stroke="#E2D6CC" stroke-width="2"/>` : `<rect width="64" height="64" rx="14" fill="${t}"/>`;
+  return `<svg width="40" height="40" viewBox="0 0 64 64" aria-hidden="true">${tile}<rect x="12" y="14" width="40" height="9" rx="2" fill="${c}"/><rect x="25" y="27" width="12" height="7" rx="2" fill="${s}"/><rect x="29" y="38" width="12" height="7" rx="2" fill="${s}" opacity=".85"/><rect x="25" y="49" width="12" height="5" rx="2" fill="${s}" opacity=".7"/></svg>`;
+}
 // `full`: everything (the «Настройки» window); otherwise only theme and zoom (the quick menu in the title bar).
 function viewSectionsHtml(full) {
   const w = state.win, zoom = w.zoom || 1;
@@ -174,9 +195,13 @@ function viewSectionsHtml(full) {
   const backHtml = (w.backdrops || []).length > 1 ? `<div class="vm-sec"><span class="vm-h">Фон окна</span><div class="seg">${w.backdrops.map(k => `<button class="btn sm ${w.backdrop === k ? 'on' : ''}" type="button" data-act="set-backdrop" data-v="${k}">${BACKDROP_L[k]}</button>`).join('')}</div>
     <span class="hint">${w.backdrop && w.backdrop !== 'none' ? 'Фон Windows под окном: размытые обои, цвет темы Windows. Ползунок прозрачности в этом режиме не нужен.' : (w.win11 ? 'Mica — фон Windows 11, как у Проводника и Параметров; акрил — сильнее размытие.' : 'Акрил — размытый фон Windows под окном.')}</span></div>` : '';
   const dockHtml = w.dock ? `<div class="vm-sec"><span class="vm-h">Край экрана</span><div class="seg">${[['off', 'Нет'], ['left', 'Слева'], ['right', 'Справа']].map(([k, l]) => `<button class="btn sm ${w.dock === k ? 'on' : ''}" type="button" data-act="set-dock" data-v="${k}">${l}</button>`).join('')}</div>
-    <span class="hint">Пульт стоит у края во всю высоту, как панель задач: развёрнутые окна других программ не заходят под него. Ширина — нынешняя ширина окна.</span></div>` : '';
+    <label class="chk vm-mini"><input type="checkbox" data-act="set-dock-auto"${w.dockAuto ? ' checked' : ''}> Прятать за край, когда мышь уходит</label>
+    <span class="hint">${w.dockAuto ? 'Окно уезжает за край, остаётся тонкая рыжая полоска — коснитесь её мышью, и Пульт выедет. Пока вы печатаете в нём, он не прячется. Место на экране не занимает.' : 'Пульт стоит у края во всю высоту, как панель задач: развёрнутые окна других программ не заходят под него. Ширина — нынешняя ширина окна.'}</span></div>` : '';
+  // 4.10 (69): the icon of the window, the taskbar button and the tray. The installer and shortcuts keep №1.
+  const iconHtml = w.appIcon ? `<div class="vm-sec"><span class="vm-h">Значок</span><div class="app-icons">${APP_ICON_VARIANTS.map(n => `<button class="app-ic ${w.appIcon === n ? 'on' : ''}" type="button" data-act="set-app-icon" data-v="${n}" title="Значок №${n}${n === 1 ? ' — основной' : ''}" aria-pressed="${w.appIcon === n}">${appIconSvg(n)}</button>`).join('')}</div>
+    <span class="hint">Меняет значок окна, кнопки на панели задач и у часов. Ярлык и установщик остаются с основным (первым).</span></div>` : '';
   if (!full) return theme + backHtml + zoomHtml + densHtml;
-  return theme + backHtml + zoomHtml + densHtml + dockHtml + `
+  return theme + backHtml + zoomHtml + densHtml + dockHtml + iconHtml + `
     <div class="vm-sec"><span class="vm-h">Панель вкладок</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div>
       ${nav.pos === 'left' ? `<label class="chk vm-mini"><input type="checkbox" data-act="nav-mini-chk"${nav.mini ? ' checked' : ''}> Только значки</label>` : ''}</div>
     <div class="vm-sec"><span class="vm-h">Положение окна</span>
@@ -239,6 +264,9 @@ onAct({
   'autobackup': () => { autoBackupMenu(); },
   'set-font': ({ el }) => { brandFont = el.dataset.v === 'montserrat' ? 'montserrat' : 'golos'; saveLocal('brandFont', brandFont); applyBrandFont(); renderViewMenu(); if (document.querySelector('.settings-modal')) renderSettings(); },
   'export': ({ el }) => { exportReport(el.dataset.format); },
+  'ms-project': () => { msProjectExport(); },
+  'set-dock-auto': ({ el }) => { api.setDockAuto?.(el.checked); },
+  'set-app-icon': ({ el }) => { api.setAppIcon?.(Number(el.dataset.v)).then(ok => { if (ok === false) toast('Не удалось сменить значок.', true); }); },
   'import': () => { startImport(); },
   'backup-save': () => { backupSave(); },
   'backup-restore': () => { backupRestore(); },

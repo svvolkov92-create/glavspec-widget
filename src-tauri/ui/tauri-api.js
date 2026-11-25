@@ -9,6 +9,8 @@
   const win = T.window.getCurrentWindow();
   const LogicalSize = (T.dpi && T.dpi.LogicalSize) || T.window.LogicalSize;
   const LogicalPosition = (T.dpi && T.dpi.LogicalPosition) || T.window.LogicalPosition;
+  const PhysicalSize = (T.dpi && T.dpi.PhysicalSize) || T.window.PhysicalSize;
+  const PhysicalPosition = (T.dpi && T.dpi.PhysicalPosition) || T.window.PhysicalPosition;
   const { invoke } = T.core;
   // Same values as src/main.js.
   const APP_TITLE = 'Пульт главспеца';
@@ -20,6 +22,7 @@
   const sys = { desktop: false, autostart: false, win11: false, backdrops: ['none'] }; // asked once at start
   /* ---------- 4.4: Windows 11 look (32, 33), monitors (38), a side of the screen (37) ---------- */
   const BACKDROPS = ['none', 'mica', 'acrylic'], DOCKS = ['off', 'left', 'right'];
+  const APP_ICONS = [1, 3, 4, 6, 8]; // 4.10 (69): «Т из Ганта», №1 is the base (installer, shortcuts)
   // Windows 11 reports platformVersion 13 and up; Mica exists only there, acrylic since Windows 10.
   async function detectWindows() {
     try {
@@ -48,6 +51,9 @@
   // Moves and resizes caused by the docking itself are ignored for a moment.
   let docking = false, dockWant = null, dockQuietUntil = 0, dockRect = '';
   async function applyDock(edge) {
+    // 4.10: with «прятать за край» the window takes no strip of the screen and slides out instead.
+    if (edge !== 'off' && ctx?.settings.get('dockAuto')) return autoStart(edge);
+    if (auto.on) await autoStop();
     dockWant = edge;
     if (docking) return;
     docking = true;
@@ -64,8 +70,61 @@
     docking = false;
   }
   const dockNow = () => (ctx && DOCKS.includes(ctx.settings.get('dock')) ? ctx.settings.get('dock') : 'off');
+
+  /* ---------- 4.10: a side of the screen with auto-hide ---------- */
+  // The window stands at the edge over other windows; when the mouse leaves it slides out and a 4-pixel strip stays;
+  // touching the strip brings it back. Not while something is typed in it or a dialog is open. Physical pixels.
+  const STRIP = 4;
+  const auto = { on: false, hidden: false, edge: 'off', area: null, w: 0, timer: null, moving: false, over: false, before: null };
+  const xFor = hidden => (auto.edge === 'left' ? auto.area.x - (hidden ? auto.w - STRIP : 0) : auto.area.x + auto.area.width - (hidden ? STRIP : auto.w));
+  async function autoMove(hidden, animate = true) {
+    if (!auto.on) return;
+    auto.hidden = hidden;
+    document.documentElement.toggleAttribute('data-dock-hidden', hidden);
+    const to = xFor(hidden), y = auto.area.y;
+    auto.moving = true; dockQuietUntil = Date.now() + 800;
+    try {
+      const from = (await win.outerPosition()).x, steps = animate ? 7 : 1;
+      for (let i = 1; i <= steps; i++) await win.setPosition(new PhysicalPosition(Math.round(from + (to - from) * (1 - (1 - i / steps) ** 2)), y));
+    } catch (e) { console.error('Край экрана:', e); } finally { auto.moving = false; }
+  }
+  async function autoStart(edge) {
+    try {
+      await invoke('appbar_set', { edge: 'off', width: 0 }).catch(() => {}); // no reserved band: other windows keep the screen
+      if (await win.isMaximized()) await win.unmaximize();
+      if (!auto.on) auto.before = await getBounds(); // where the window goes back when the edge is turned off
+      const [area, size, sf] = await Promise.all([invoke('edge_area'), win.outerSize(), win.scaleFactor()]);
+      Object.assign(auto, { on: true, edge, area, w: Math.min(Math.max(size.width, Math.round(320 * sf)), Math.round(area.width / 2)) });
+      document.documentElement.dataset.dockEdge = edge;
+      await win.setSize(new PhysicalSize(auto.w, area.height));
+      await win.setAlwaysOnTop(true);
+      await autoMove(false, false);
+    } catch (e) { console.error('Край экрана:', e); window.AppBridge?.toast(`Не удалось поставить окно к краю: ${e}`, true); }
+  }
+  async function autoStop() {
+    clearTimeout(auto.timer);
+    if (auto.hidden) await autoMove(false, false);
+    auto.on = false; auto.hidden = false;
+    document.documentElement.removeAttribute('data-dock-hidden'); delete document.documentElement.dataset.dockEdge;
+    if (auto.before) { const b = auto.before; auto.before = null; dockQuietUntil = Date.now() + 800; await setBounds(b).catch(() => {}); }
+    if (ctx) await applyLevel(levelOf(ctx.settings));
+  }
+  function autoHideLater(ms = 700) {
+    clearTimeout(auto.timer);
+    auto.timer = setTimeout(() => {
+      if (!auto.on || auto.hidden || auto.over) return;
+      const a = document.activeElement;
+      const typing = document.hasFocus() && a && a.matches?.('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select, [contenteditable="true"]');
+      if (typing || document.querySelector('.modal-back, dialog[open], .ctx-menu:not([hidden])')) return autoHideLater(1500);
+      autoMove(true);
+    }, ms);
+  }
+  document.documentElement.addEventListener('mouseleave', () => { auto.over = false; if (auto.on && !auto.hidden) autoHideLater(); });
+  document.documentElement.addEventListener('mouseenter', () => { auto.over = true; clearTimeout(auto.timer); if (auto.on && auto.hidden && !auto.moving) autoMove(false); });
+  document.addEventListener('mousemove', () => { auto.over = true; if (auto.on && auto.hidden && !auto.moving) autoMove(false); }, { passive: true });
+  win.onFocusChanged(({ payload: focused }) => { if (!focused && auto.on && !auto.over) autoHideLater(400); });
   let dockTimer = null;
-  const redock = () => { if (dockNow() === 'off' || docking || Date.now() < dockQuietUntil) return; clearTimeout(dockTimer); dockTimer = setTimeout(async () => {
+  const redock = () => { if (dockNow() === 'off' || docking || auto.on || Date.now() < dockQuietUntil) return; clearTimeout(dockTimer); dockTimer = setTimeout(async () => {
     // The window is where the strip put it (a late event of the docking itself): nothing to do — no endless re-docking.
     try { if (dockRect && JSON.stringify(await getBounds()) === dockRect) return; } catch { /* apply anyway */ }
     applyDock(dockNow());
@@ -98,7 +157,7 @@
   // reached via the tray icon, as in the Electron version.
   const toBottom = () => invoke('window_to_bottom').catch(() => {});
   async function applyLevel(level) {
-    await win.setAlwaysOnTop(level === 'top').catch(e => console.error('always on top:', e));
+    await win.setAlwaysOnTop(level === 'top' || auto.on).catch(e => console.error('always on top:', e)); // auto-hide at the edge stays on top
     await win.setSkipTaskbar(level === 'desktop').catch(() => {});
     if (level === 'desktop') toBottom();
   }
@@ -134,7 +193,7 @@
   function rememberBounds() {
     clearTimeout(boundsTimer);
     boundsTimer = setTimeout(async () => {
-      if (!ctx || !(await win.isVisible()) || (await win.isMinimized()) || (await win.isMaximized())) return;
+      if (!ctx || auto.on || !(await win.isVisible()) || (await win.isMinimized()) || (await win.isMaximized())) return; // at the edge: not «its place»
       ctx.settings.set({ [boundsKey()]: await getBounds() });
     }, 400);
   }
@@ -189,7 +248,8 @@
       maximized: await win.isMaximized(), opacity: s.get('opacity') ?? 0.82, // translucency is CSS over a transparent window
       clickThrough: ghost.on, autostart: sys.autostart, hotkey: 'Ctrl+Alt+G',
       backdrop: BACKDROPS.includes(s.get('backdrop')) ? s.get('backdrop') : 'none', backdrops: sys.backdrops, win11: sys.win11,
-      dock: DOCKS.includes(s.get('dock')) ? s.get('dock') : 'off',
+      dock: DOCKS.includes(s.get('dock')) ? s.get('dock') : 'off', dockAuto: !!s.get('dockAuto'),
+      appIcon: APP_ICONS.includes(s.get('appIcon')) ? s.get('appIcon') : 1,
     };
   }
   const pushState = async () => { const st = await windowState(); for (const cb of winListeners) cb(st); windows?.state(st); trayLater(); };
@@ -205,6 +265,7 @@
     try { await setBounds(await fitToDisplay(c.settings.get(boundsKey()), st.compact ? COMPACT_DEFAULT : FULL_DEFAULT)); } catch (e) { console.error('Размер окна:', e); }
     await win.show();
     await applyLevel(st.level);
+    if (st.appIcon !== 1) invoke('app_icon', { variant: st.appIcon }).catch(e => console.error('Значок:', e));
     if (st.backdrop !== 'none' && sys.backdrops.includes(st.backdrop)) applyBackdrop(st.backdrop);
     if (st.dock !== 'off') applyDock(st.dock);
     setInterval(() => keepOnScreen().catch(() => {}), 15 * 1000);
@@ -392,6 +453,7 @@
     exportReport: async (format, scope) => (await ready()).files.exportReport(format, scope),
     openLastReport: async () => (await ready()).files.openLast(),
     customerPage: async (projectId, opts) => (await ready()).files.customerPage(projectId, opts),
+    exportMsProject: async projectId => (await ready()).files.msProject(projectId),
     exportComposition: async (projectId, format, opts) => (await ready()).files.composition(projectId, format, opts),
     docDefaults: async () => (await ready()).files.docDefaults(),
     openTemplates: async () => (await ready()).files.openTemplates(),
@@ -493,6 +555,20 @@
     await setting({ dock: edge });
     await applyDock(edge);
     pushState();
+  };
+  known.setDockAuto = async on => {
+    await setting({ dockAuto: !!on });
+    if (dockNow() !== 'off') await applyDock(dockNow());
+    pushState();
+  };
+  // 4.10 (69): the icon of the window, its taskbar button and the tray; the exe and shortcuts keep №1.
+  known.setAppIcon = async n => {
+    n = Number(n);
+    if (!APP_ICONS.includes(n)) return false;
+    await setting({ appIcon: n });
+    try { await invoke('app_icon', { variant: n }); } catch (e) { console.error('Значок:', e); return false; }
+    pushState();
+    return true;
   };
   // 41: Ctrl+Alt+N from any program — the window shows the quick entry; it goes away again after Enter or Esc
   // if it was not in front before.

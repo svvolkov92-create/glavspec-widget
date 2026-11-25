@@ -25,7 +25,7 @@ for (const f of CORE) fs.copyFileSync(path.join(root, 'src', 'core', f), path.jo
 
 // The shared report and import code (CommonJS, written for Node) for the window: a small module loader with
 // browser stand-ins for node:zlib (pako), node:path and node:fs; Buffer comes from shims/buffer.js.
-const NODE_MODULES = ['report/model.js', 'report/xlsx.js', 'report/docx.js', 'report/customer.js', 'report/doc-template.js', 'report/zip.js',
+const NODE_MODULES = ['report/model.js', 'report/xlsx.js', 'report/docx.js', 'report/customer.js', 'report/doc-template.js', 'report/zip.js', 'report/msproject.js',
   'import/read.js', 'contact.js', 'cabinet.js', 'renderer/logic.js', 'renderer/access.js', 'renderer/composition.js', 'renderer/calendar.js'];
 const SHIMS = {
   'node:zlib': `module.exports = {

@@ -464,7 +464,7 @@ function createServer(cfgIn = {}) {
     let html = fs.readFileSync(path.join(cfg.rendererDir, 'index.html'), 'utf8');
     html = html.replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
       `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'">`);
-    html = html.replace('<link rel="stylesheet" href="styles.css">', '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F26A1F"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="web.css">');
+    html = html.replace('<link rel="stylesheet" href="styles.css">', '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F26A1F"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon-192.png"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="web.css">');
     html = html.replace('<script src="calendar.js"></script>', '<script src="core/store-core.js"></script>\n<script src="core/remote-client.js"></script>\n<script src="web-api.js"></script>\n<script src="calendar.js"></script>');
     html = html.replace('<script src="feedback-ui.js"></script>', '');
     webIndexCache = html;

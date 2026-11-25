@@ -68,6 +68,8 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       case 'cabinet_local_stop': return null;
       case 'snap_layouts': sysCalls.push('snap'); return true;
       case 'appbar_set': sysCalls.push(`appbar:${args.edge}:${Math.round(args.width)}`); return args.edge !== 'off';
+      case 'edge_area': return { x: 0, y: 0, width: 1920, height: 1040 };
+      case 'app_icon': sysCalls.push(`icon:${args.variant ?? 'self'}`); return args.variant ?? 1;
       case 'notify_actions': sysCalls.push(`toast:${args.open}:${args.buttons.map(b => b.label).join('/')}:${args.body}`); return true;
       default: throw 'unknown command ' + cmd;
     }
@@ -437,6 +439,25 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     check('4.4: «Справа» keeps the right side of the screen', sysCalls.some(c => /^appbar:right:\d+$/.test(c)) && disk.settings.dock === 'right', sysCalls.filter(c => c.startsWith('appbar')).join());
     await js(() => window.api.setDock('off')); await wait(300);
     check('4.4: «Нет» gives the strip back', sysCalls.at(-1) === 'appbar:off:0' && disk.settings.dock === 'off', sysCalls.at(-1));
+    // 4.10: auto-hide at the edge — no reserved band, on top, slides out leaving 4 px, comes back on the mouse
+    await js(() => window.api.setDockAuto(true)); await js(() => window.api.setDock('left')); await wait(500);
+    const a1 = await js(() => ({ x: window.__win.x, w: window.__win.width, h: window.__win.height, top: window.__win.top }));
+    check('4.10: auto-hide: the window stands at the left edge, full height, on top, no band taken', a1.x === 0 && a1.h === 1040 && a1.top === true && sysCalls.at(-1) === 'appbar:off:0' && disk.settings.dockAuto === true, JSON.stringify(a1));
+    await p.mouse.move(400, 400); await p.mouse.move(-5, -5); await js(() => document.documentElement.dispatchEvent(new MouseEvent('mouseleave'))); await wait(1300);
+    const a2 = await js(() => ({ x: window.__win.x, w: window.__win.width, hidden: document.documentElement.hasAttribute('data-dock-hidden') }));
+    check('4.10: the mouse leaves — the window slides out, a 4-pixel strip stays', a2.hidden && a2.x === -(a2.w - 4), JSON.stringify(a2));
+    await js(() => document.documentElement.dispatchEvent(new MouseEvent('mouseenter'))); await wait(500);
+    check('4.10: touching the strip brings it back', await js(() => window.__win.x === 0 && !document.documentElement.hasAttribute('data-dock-hidden')));
+    await js(() => document.querySelector('#f-q')?.focus()); await js(() => document.documentElement.dispatchEvent(new MouseEvent('mouseleave'))); await wait(1300);
+    check('4.10: not while typing in it', await js(() => window.__win.x === 0));
+    await js(() => document.activeElement?.blur());
+    await js(() => window.api.setDock('off')); await js(() => window.api.setDockAuto(false)); await wait(300);
+    check('4.10: «Нет» — back to normal, the level as set', await js(() => !document.documentElement.dataset.dockEdge));
+    // 4.10 (69): the icon picker
+    await js(() => window.api.setAppIcon(6)); await wait(200);
+    check('4.10: icon №6 — the window and tray get it, the choice is kept', sysCalls.includes('icon:6') && disk.settings.appIcon === 6, sysCalls.filter(c => c.startsWith('icon')).join());
+    check('4.10: an unknown icon is refused', (await js(() => window.api.setAppIcon(2))) === false);
+    await js(() => window.api.setAppIcon(1)); await wait(200);
     // 36: a notification with buttons when the window is not in front; «Открыть» opens the card
     const tid = await js(() => [...window.AppBridge.state.tasks.values()].find(t => !t.deletedAt)?.id);
     await js(() => { window.__win.focused = false; });

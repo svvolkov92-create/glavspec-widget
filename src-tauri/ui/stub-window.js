@@ -27,7 +27,7 @@ module.exports = function stubTauriWindow() {
   WebviewWindow.getByLabel = async () => null;
   window.__TAURI__ = { core: { invoke: (c, a) => window.__rust(c, a || {}) }, event: { listen: async (n, f) => { (listeners[n] ||= []).push(f); }, emit: async (n, x) => window.__bus(n, x) },
     webviewWindow: { WebviewWindow },
-    dpi: { LogicalSize: Size, LogicalPosition: Pos },
+    dpi: { LogicalSize: Size, LogicalPosition: Pos, PhysicalSize: Size, PhysicalPosition: Pos },
     window: { getCurrentWindow: () => win, availableMonitors: async () => [{ position: { x: 0, y: 0 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 }], cursorPosition: async () => ({ x: 0, y: 0 }) },
     webview: { getCurrentWebview: () => ({ setZoom: async () => {} }) } };
 

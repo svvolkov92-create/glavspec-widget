@@ -2,6 +2,7 @@
 // «on the desktop» (the window kept under the others), the data folder, quitting.
 // The menu content and every decision come from the window (tauri-api.js); this file only talks to Windows.
 use serde::Deserialize;
+use std::sync::atomic::{AtomicU8, Ordering};
 use tauri::{
     image::Image,
     menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -22,6 +23,44 @@ pub fn show_main(app: &AppHandle) {
         let _ = w.set_focus();
         let _ = w.emit("probe:shown", ());
     }
+}
+
+/* ---------- 4.10 (item 69): the icon variant picked in «Окно → Значок» ---------- */
+// №1 is built into the installer, the exe and shortcuts; the others change the window and tray icons while running.
+static APP_ICON: AtomicU8 = AtomicU8::new(1);
+fn icon_bytes(n: u8) -> (&'static [u8], &'static [u8]) {
+    match n {
+        3 => (include_bytes!("../icons/variants/app-3.png"), include_bytes!("../icons/variants/tray-3.png")),
+        4 => (include_bytes!("../icons/variants/app-4.png"), include_bytes!("../icons/variants/tray-4.png")),
+        6 => (include_bytes!("../icons/variants/app-6.png"), include_bytes!("../icons/variants/tray-6.png")),
+        8 => (include_bytes!("../icons/variants/app-8.png"), include_bytes!("../icons/variants/tray-8.png")),
+        _ => (include_bytes!("../icons/variants/app-1.png"), include_bytes!("../icons/variants/tray-1.png")),
+    }
+}
+/// variant given: remember it and set it on every window and the tray; none: a new window takes the remembered one.
+#[tauri::command]
+pub fn app_icon(app: AppHandle, window: WebviewWindow, variant: Option<u8>) -> Result<u8, String> {
+    if let Some(v) = variant {
+        if ![1u8, 3, 4, 6, 8].contains(&v) {
+            return Err(format!("Нет значка №{v}"));
+        }
+        APP_ICON.store(v, Ordering::Relaxed);
+    }
+    let n = APP_ICON.load(Ordering::Relaxed);
+    let (app_png, tray_png) = icon_bytes(n);
+    let img = Image::from_bytes(app_png).map_err(|e| e.to_string())?;
+    if variant.is_some() {
+        for (_, w) in app.webview_windows() {
+            let _ = w.set_icon(img.clone());
+        }
+        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            let t = Image::from_bytes(tray_png).map_err(|e| e.to_string())?;
+            let _ = tray.set_icon(Some(t));
+        }
+    } else {
+        let _ = window.set_icon(img);
+    }
+    Ok(n)
 }
 
 pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {

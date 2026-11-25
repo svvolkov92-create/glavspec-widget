@@ -158,6 +158,7 @@
       setTimeout(() => { if (pending.delete(id)) fail('Главное окно Пульта не отвечает.'); }, 10 * 60 * 1000);
     });
     const hello = () => emit('sat:hello', { from: LABEL });
+    T.core.invoke('app_icon', { variant: null }).catch(() => {}); // 4.10: the icon picked in «Окно → Значок»
     hello();
     listen('sat:who', hello);
     window.addEventListener('beforeunload', () => emit('sat:bye', { from: LABEL }));

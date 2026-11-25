@@ -398,7 +398,8 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
   return { server, cfg, store, KINDS, teamKey: () => D().secrets.teamKey };
 }
 
-const ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="20" fill="#F26A1F"/><path d="M22 30h52M22 48h40M22 66h28" stroke="#fff" stroke-width="9" stroke-linecap="round"/></svg>';
+// 4.10 (69): «Т из Ганта», variant №1 — the same icon as the Пульт (tools/make-icons.js).
+const ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#F26A1F"/><rect x="12" y="14" width="40" height="9" rx="2" fill="#FFFFFF"/><rect x="25" y="27" width="12" height="7" rx="2" fill="#FFFFFF"/><rect x="29" y="38" width="12" height="7" rx="2" fill="#FFFFFF" opacity=".85"/><rect x="25" y="49" width="12" height="5" rx="2" fill="#FFFFFF" opacity=".7"/></svg>';
 // Network-first service worker: makes the cabinet installable on a phone; nothing is cached for offline use.
 const SW = "self.addEventListener('install', e => self.skipWaiting()); self.addEventListener('activate', e => self.clients.claim()); self.addEventListener('fetch', () => {});";
 

@@ -96,6 +96,31 @@ fn appbar(_window: &WebviewWindow, _edge: &str, _width: f64) -> Result<bool, Str
     Ok(false)
 }
 
+/* ---------- 4.10: the work area of the window's monitor (without the taskbar), physical pixels ---------- */
+// For the side of the screen with auto-hide: the window is placed and slid by the page itself.
+#[derive(serde::Serialize)]
+pub struct Area { x: i32, y: i32, width: i32, height: i32 }
+
+#[tauri::command]
+pub fn edge_area(window: WebviewWindow) -> Result<Area, String> {
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+        let handle = window.window_handle().map_err(|e| e.to_string())?;
+        let RawWindowHandle::Win32(h) = handle.as_raw() else { return Err("Окно без дескриптора Windows.".into()) };
+        let mon = unsafe { MonitorFromWindow(h.hwnd.get() as _, MONITOR_DEFAULTTONEAREST) };
+        let mut mi: MONITORINFO = unsafe { std::mem::zeroed() };
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if unsafe { GetMonitorInfoW(mon, &mut mi) } != 0 {
+            let r = mi.rcWork;
+            return Ok(Area { x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top });
+        }
+    }
+    let mon = window.current_monitor().map_err(|e| e.to_string())?.ok_or("Монитор окна не найден.")?;
+    Ok(Area { x: mon.position().x, y: mon.position().y, width: mon.size().width as i32, height: mon.size().height as i32 })
+}
+
 // On exit the strip is given back, so the desktop does not keep an empty band.
 pub fn appbar_release() {
     #[cfg(windows)]

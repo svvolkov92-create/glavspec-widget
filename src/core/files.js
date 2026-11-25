@@ -87,6 +87,21 @@
     catch (e) { return writeError(e, 'отчёт'); }
   }
 
+  // 4.10: a project as MS Project XML (MSPDI): stages, sections with their cards, links, people. No money in it.
+  async function msProject(projectId) {
+    const me = currentUser();
+    if (!me || A.isSpecialist(me)) return { ok: false, message: 'Выгрузку в MS Project делают ГИП и главспецы.' };
+    const view = userView(), p = view.projects.find(x => x.id === projectId);
+    if (!p) return { ok: false, message: 'Выберите проект.' };
+    const stamp = L.todayStr();
+    const target = await saveAs({ title: 'Сохранить для MS Project', name: `${safeName([p.code, p.name].filter(Boolean).join(' '))} ${stamp}.xml`, ext: 'xml', filter: { name: 'MS Project (XML)', extensions: ['xml'] } });
+    if (!target) return { ok: false, canceled: true };
+    const xml = R.buildMsProject({ project: { ...store.data.projects[projectId], id: projectId }, tasks: view.tasks.filter(t => t.projectId === projectId),
+      users: store.data.users, contractors: store.data.contractors, phaseLabel: L.phaseLabel, author: me.name || '', now: new Date() });
+    try { await io.writeFile(target, xml); return saved(target); }
+    catch (e) { return writeError(e, 'файл'); }
+  }
+
   // The customer's page of one project: one HTML file (logo and font inside) or the same page as PDF.
   // Built from the full project record (the plan incl. «Договор»), cards as the user sees them; no money, no contractors.
   async function customerPage(projectId, opts = {}) {
@@ -387,6 +402,6 @@
     }
   }
 
-  return { exportReport, customerPage, composition, docDefaults, openTemplates, openLast, openProjectFolder, openTaskFolder, pickFolder, contactOpen, mailOpen,
+  return { exportReport, msProject, customerPage, composition, docDefaults, openTemplates, openLast, openProjectFolder, openTaskFolder, pickFolder, contactOpen, mailOpen,
     backupSave, backupRestore, autoBackup, autoBackupGet, autoBackupSet, importPick, safeName, customerTeam, customerContact, attachAdd, attachBytes, attachOpen, attachmentBytes };
 });

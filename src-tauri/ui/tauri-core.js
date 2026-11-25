@@ -349,7 +349,7 @@
     };
     return ctx;
   }
-  const APP_VERSION = '4.9.3';
+  const APP_VERSION = '4.10.0';
   // Sign in / join / move the base (no ctx yet, or switching from the local file).
   const server = {
     async signIn({ url, login, password, code }) {
@@ -398,7 +398,7 @@
     const m = id => window.NodeModules.load(id);
     const { buildXlsx, buildCompositionXlsx } = m('report/xlsx.js'), { buildDocx } = m('report/docx.js');
     const { fillTemplate, TEMPLATES, TemplateError } = m('report/doc-template.js'), { readTableBytes, ImportError } = m('import/read.js');
-    return { buildReport: m('report/model.js').buildReport, buildXlsx, buildDocx, buildCompositionXlsx, customerHtml: m('report/customer.js').customerHtml,
+    return { buildReport: m('report/model.js').buildReport, buildXlsx, buildDocx, buildCompositionXlsx, customerHtml: m('report/customer.js').customerHtml, buildMsProject: m('report/msproject.js').buildMsProject,
       fillTemplate, TEMPLATES, TemplateError, readTableBytes, ImportError, contactUrl: m('contact.js').contactUrl };
   }
   // `io` of src/core/files.js on top of the Rust commands; bytes travel as base64.
