@@ -9,15 +9,27 @@ const dayMonth = d => (isDate(d) ? fmtDate(d).slice(0, 5) : '');
 // Assignments (kind 'assign') are not work of their own: on a person they read as «ждут заданий» — not yet issued
 // to the person's cards — and «выдать» — not yet issued by the person.
 const ASG_OPEN = t => t.kind === 'assign' && !t.deletedAt && !['review', 'done'].includes(t.status);
-const asgWaitingFor = (uid, list = tasksArr()) => list.filter(t => ASG_OPEN(t) && asgTo(t).some(x => hasOwner(x, uid)));
-const asgToGive = (uid, list = tasksArr()) => list.filter(t => ASG_OPEN(t) && hasOwner(t, uid));
+// Open assignments by the people whose cards wait for them (working set).
+const asgWaitIndex = memoData(() => {
+  const m = new Map();
+  for (const t of liveTasks()) if (ASG_OPEN(t)) for (const uid of new Set(asgTo(t).flatMap(x => A.ownersOf(x)))) { if (!m.has(uid)) m.set(uid, []); m.get(uid).push(t); }
+  return m;
+});
+const asgWaitingFor = uid => asgWaitIndex().get(uid) || [];
+const asgToGive = uid => ownedBy(uid).filter(ASG_OPEN);
+// How many cards on review each person checks.
+const reviewIndex = memoData(() => {
+  const m = new Map(), users = liveUsers();
+  for (const t of liveTasks()) if (t.status === 'review') for (const id of A.reviewersOf(t, users, state.projects)) m.set(id, (m.get(id) || 0) + 1);
+  return m;
+});
 
 // What the person is doing, from the state of their cards (the most urgent wins).
 function personState(u) {
   const away = A.absencesOf(u).find(a => a.from <= state.today && a.to >= state.today);
   if (away) return { state: 'away', awayText: `${A.ABSENCE_KINDS[away.kind] || 'нет'} до ${fmtDate(away.to).slice(0, 5)}`, cards: [] };
-  const cards = tasksArr().filter(t => hasOwner(t, u.id) && t.kind !== 'assign' && t.status !== 'done').sort(sortByDeadline);
-  const toCheck = u.role === 'specialist' ? 0 : tasksArr().filter(t => t.status === 'review' && A.reviewersOf(t, liveUsers(), state.projects).includes(u.id)).length;
+  const cards = ownedBy(u.id).filter(t => t.kind !== 'assign' && t.status !== 'done').sort(sortByDeadline);
+  const toCheck = u.role === 'specialist' ? 0 : reviewIndex().get(u.id) || 0;
   if (cards.some(t => timing(t).overdue)) return { state: 'late', cards };
   if (toCheck) return { state: 'checking', cards };
   if (cards.some(t => t.status === 'review')) return { state: 'carry', cards };

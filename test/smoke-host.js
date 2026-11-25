@@ -163,6 +163,16 @@ async function start() {
       getURL: () => page.url(),
       capturePage: async () => { const b = await page.screenshot(); return { toPNG: () => b }; },
       send() {}, isDestroyed: () => false,
+      // 4.21: a CPU profile of `code` run in the page (test/perf-big.js): the functions by own time.
+      profile: async code => {
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 200 }); await cdp.send('Profiler.start');
+        await page.evaluate(code);
+        const { profile } = await cdp.send('Profiler.stop');
+        const dt = profile.timeDeltas || [], self = new Map(), byId = new Map(profile.nodes.map(n => [n.id, n]));
+        (profile.samples || []).forEach((id, i) => { const f = byId.get(id).callFrame, k = `${f.functionName || '(anon)'} ${String(f.url).split('/').pop()}:${f.lineNumber + 1}`; self.set(k, (self.get(k) || 0) + (dt[i] || 0) / 1000); });
+        return [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, ms]) => `${ms.toFixed(1).padStart(8)} ms  ${k}`);
+      },
     },
     setSize: (w, h) => { page.setViewportSize({ width: w, height: h }).catch(() => {}); },
     getBounds: () => win._bounds || { x: 0, y: 0, width: 1320, height: 860 },

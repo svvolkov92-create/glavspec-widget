@@ -62,10 +62,16 @@ function viewGantt() {
   const active = tasksArr().filter(t => t.status !== 'done' && (state.showAssign.gantt || t.kind !== 'assign') && (!gq.project || t.projectId === gq.project) && (!gq.mark || sectionsOf(t).includes(gq.mark)));
   const byProject = g.group === 'project', byOwner = g.group === 'owner' && !isSpec();
   const crit = !!g.crit;
+  // 4.21: the cards are put into rows in one pass (a filter per row was slow with hundreds of rows and thousands of cards).
+  const by = keysOf => { const m = new Map(); for (const t of active) for (const k of keysOf(t)) { if (!m.has(k)) m.set(k, []); m.get(k).push(t); } return m; };
+  const rowsOf = (m, k) => m.get(k) || [];
   const groups = byProject
-    ? liveProjects().map(p => ({ key: 'p' + p.id, name: p.name, sub: p.code, tasks: active.filter(t => t.projectId === p.id) }))
-    : byOwner ? liveUsers().sort(byName).map(u => ({ key: 'u' + u.id, name: u.name, user: u, sub: A.ROLES[u.role]?.label, tasks: active.filter(t => hasOwner(t, u.id)) }))
-    : [...execStaff().map(u => ({ key: 'x' + u.id, name: u.name, sub: 'штатный', tasks: active.filter(t => executorOf(t)?.u?.id === u.id) })), ...contractorsArr().map(c => ({ key: 'c' + c.id, name: c.name, tasks: active.filter(t => t.contractorId === c.id) }))];
+    ? (m => liveProjects().map(p => ({ key: 'p' + p.id, name: p.name, sub: p.code, tasks: rowsOf(m, p.id) })))(by(t => [t.projectId]))
+    : byOwner ? (m => liveUsers().sort(byName).map(u => ({ key: 'u' + u.id, name: u.name, user: u, sub: A.ROLES[u.role]?.label, tasks: rowsOf(m, u.id) })))(by(t => A.ownersOf(t)))
+    : (m => [...execStaff().map(u => ({ key: 'x' + u.id, name: u.name, sub: 'штатный', tasks: rowsOf(m, 'u:' + u.id) })), ...contractorsArr().map(c => ({ key: 'c' + c.id, name: c.name, tasks: rowsOf(m, 'c:' + c.id) }))])(by(t => {
+      const u = executorOf(t)?.u;
+      return [...(t.contractorId ? ['c:' + t.contractorId] : []), ...(u ? ['u:' + u.id] : [])];
+    }));
   // With a filter on, rows without matching cards only add noise.
   if (gq.project || gq.mark) for (let i = groups.length - 1; i >= 0; i--) if (!groups[i].tasks.length) groups.splice(i, 1);
   if (byOwner) {
@@ -199,7 +205,7 @@ function viewVacations() {
       return `<span class="vac-bar k-${a.kind}" style="left:${l}%;width:${Math.max(0.6, r - l)}%" title="${esc(u.name)}: ${esc(A.ABSENCE_KINDS[a.kind] || 'отсутствует')} ${fmtDate(a.from)}–${fmtDate(a.to)}${a.note ? ' · ' + esc(a.note) : ''}">${esc(A.ABSENCE_KINDS[a.kind] || '')} ${fmtDate(a.from).slice(0, 5)}–${fmtDate(a.to).slice(0, 5)}</span>`;
     }).join('');
     // Deadlines of the person's cards that fall into an absence: the reason this chart exists.
-    const hits = tasksArr().filter(t => hasOwner(t, u.id) && absHits(t).some(h => h.user.id === u.id && h.onFinish) && t.finish >= from && t.finish <= to)
+    const hits = ownedBy(u.id).filter(t => absHits(t).some(h => h.user.id === u.id && h.onFinish) && t.finish >= from && t.finish <= to)
       .map(t => `<span class="vac-hit" style="left:${pos(t.finish) + dayW / 2}%" title="Финиш ${marksText(t)} (${esc(projectOf(t)?.name || '')}) ${fmtDate(t.finish)} — во время отсутствия"></span>`).join('');
     return `<div class="tl-row"><div class="tl-name"><span class="kicons">${userIcons(u)}</span><b title="${esc(u.name)}">${esc(u.name)}</b>${A.canEditAbsences(state.me, u) ? `<button class="btn ghostbtn sm" type="button" data-act="absences" data-id="${esc(u.id)}" title="Отпуска и больничные">＋</button>` : ''}</div>
       <div class="tl-track" style="height:28px">${shade}${grid}${today}${bars}${hits}</div></div>`;
@@ -225,15 +231,17 @@ function drawGanttLinks() {
   root.querySelector('.tl-links')?.remove();
   const box = root.getBoundingClientRect();
   const paths = [];
+  // 4.21: the bars looked up once (a selector per link was slow on thousands of bars).
+  const bars = new Map([...root.querySelectorAll('.tl-bar[data-bar]')].map(b => [b.dataset.bar, b]));
   for (const t of tasksArr()) {
     const deps = L.depsOf(t);
     if (!deps.length) continue;
-    const b = root.querySelector(`.tl-bar[data-bar="${CSS.escape(t.id)}"]`);
+    const b = bars.get(t.id);
     if (!b) continue;
     const rb = b.getBoundingClientRect();
     const issues = new Set(L.dependencyIssues(t, state.tasks, state.today).map(i => i.pred.id));
     for (const pid of deps) {
-      const a = root.querySelector(`.tl-bar[data-bar="${CSS.escape(pid)}"]`);
+      const a = bars.get(pid);
       if (!a) continue;
       const ra = a.getBoundingClientRect();
       const x1 = ra.right - box.left, y1 = ra.top + ra.height / 2 - box.top;

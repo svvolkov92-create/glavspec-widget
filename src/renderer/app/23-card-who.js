@@ -27,7 +27,8 @@ function executorOf(t) {
 }
 // Filters «Все исполнители / Без исполнителя / <who>»: a contractor id (as before 4.1) or 'u:<staff id>'.
 const execMatch = (t, f) => !f || (f === '__none' ? !executorOf(t) : f.startsWith('u:') ? executorOf(t)?.u?.id === f.slice(2) : t.contractorId === f);
-const execStaff = () => liveUsers().filter(u => tasksArr().some(t => executorOf(t)?.u?.id === u.id)).sort(byName);
+const execStaffIds = memoData(() => new Set(liveTasks().map(t => executorOf(t)?.u?.id).filter(Boolean)));
+const execStaff = () => liveUsers().filter(u => execStaffIds().has(u.id)).sort(byName);
 const execFilterOpts = (opt, sel) => `${opt('', 'Все исполнители', sel)}${opt('__none', 'Без исполнителя', sel)}${execStaff().length ? `<optgroup label="Штатные">${execStaff().map(u => opt('u:' + u.id, u.name, sel)).join('')}</optgroup><optgroup label="Внештатные">` : ''}${contractorsArr().map(c => opt(c.id, c.name, sel)).join('')}${execStaff().length ? '</optgroup>' : ''}`;
 const execLine = t => { const e = executorOf(t), co = coExecRefOf(t) ? refName(coExecRefOf(t)) : ''; return e ? `${esc(e.name)}${co ? ` <span class="hint">+ ${esc(co)}</span>` : ''}` : ''; };
 function execCandidates(marks, onlyFit) {

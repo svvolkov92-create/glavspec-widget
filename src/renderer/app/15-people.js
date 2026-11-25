@@ -80,8 +80,8 @@ function taskList(ct, kind = '', holderId = '') {
 // 4.19: a short card — who, what state, the numbers; the click opens the person (profile and their work).
 // Assignments do not count as cards: they show as «ждут заданий» (to this person's cards, not yet issued).
 function staffCard(u, list) {
-  const work = list.filter(t => hasOwner(t, u.id) && t.kind !== 'assign'), x = totals(work);
-  const wait = asgWaitingFor(u.id, list).length, give = asgToGive(u.id, list).length, ab = upcomingAbsences(u)[0];
+  const work = ownedBy(u.id).filter(t => t.kind !== 'assign'), x = totals(work);
+  const wait = asgWaitingFor(u.id).length, give = asgToGive(u.id).length, ab = upcomingAbsences(u)[0];
   const stat = (k, v, cls = '', title = '') => `<div class="stat ${cls}"${title ? ` title="${title}"` : ''}><span class="k">${k}</span><span class="v">${v}</span></div>`;
   return `<article class="card staff pplcard" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" role="button" tabindex="0" title="Открыть: анкета и чем занят">
     <div class="card-h"><div class="row1 pplcard-row">${avatarHtml(u)}<div class="pc-name"><h3><span class="kicons">${userIcons(u)}</span>${esc(userLabel(u))}</h3>
@@ -94,7 +94,7 @@ function staffCard(u, list) {
 }
 // «С первого раза» and thanks, counted over all the person's cards (archived projects too: history matters).
 function gameStats(u, ct = null) {
-  const all = [...state.tasks.values()].filter(t => hasOwner(t, u.id));
+  const all = ownedByAll(u.id);
   const ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
   if (!ft.done && !th) return '';
   return `<div class="game-line">${ft.done ? `<span title="Принято без единого круга замечаний: ${ft.clean} из ${ft.done}">✓ с первого раза <b>${ft.pct}%</b> <span class="hint">(${ft.clean} из ${ft.done})</span></span>` : ''}${th ? `<span title="Сколько раз коллеги сказали «спасибо» в обсуждениях">♥ спасибо <b>${th}</b></span>` : ''}</div>`;
@@ -160,7 +160,7 @@ function contractorsGrouped(people, list) {
 function staffList(staff, list) {
   return `<div class="tablewrap"><table class="staff-t"><thead><tr><th>Сотрудник</th><th>Роль</th><th class="r">В работе</th><th class="r">Сорвано</th><th class="r">На проверке</th><th class="r">Ждут заданий</th>${game ? '<th class="r">С первого раза</th><th class="r">Спасибо</th>' : ''}<th>Отсутствие</th><th></th></tr></thead><tbody>
     ${staff.map(u => {
-      const ct = list.filter(t => hasOwner(t, u.id) && t.kind !== 'assign'), x = totals(ct), wait = asgWaitingFor(u.id, list).length, all = [...state.tasks.values()].filter(t => hasOwner(t, u.id)), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
+      const ct = ownedBy(u.id).filter(t => t.kind !== 'assign'), x = totals(ct), wait = asgWaitingFor(u.id).length, all = ownedByAll(u.id), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
       const ab = upcomingAbsences(u)[0];
       return `<tr class="row" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" title="Открыть: анкета и чем занят"><td>${avatarHtml(u, 'sm')}<span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
         <td class="r num">${x.active || '—'}</td><td class="r num ${x.overdue ? 'neg' : ''}">${x.overdue || '—'}</td><td class="r num">${x.review || '—'}</td><td class="r num">${wait || '—'}</td>

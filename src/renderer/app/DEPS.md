@@ -6,7 +6,7 @@
 
 | Часть | Использует |
 |---|---|
-| 01-core | 02-render (1), 04-server (1), 10-tabs (3), 12-messages (2), 22-card (1), 27-users-team (1), 33-project-forms (1), 34-file-menu (1) |
+| 01-core | 02-render (1), 04-server (1), 10-tabs (3), 12-messages (2), 22-card (2), 27-users-team (1), 33-project-forms (1), 34-file-menu (1) |
 | 02-render | 01-core (20), 05-card-widgets (1), 06-settings (1), 07-my-day (3), 08-overview (2), 10-tabs (3), 12-messages (4), 14-projects (1), 15-counterparties (1), 15-people (2), 17-gantt (2), 18-kanban (2), 19-task-list (2), 21-bulk (2), 22-card (1), 23-card-who (1), 25-card-talk (1), 26-card-panels (2), 27-users-team (2), 29-focus-tour-notify (5), 30-project-customer (1) |
 | 03-dialogs | 01-core (16), 12-messages (1), 22-card (1), 27-users-team (1), 29-focus-tour-notify (1), 30-project-customer (3), 32-cabinet (1) |
 | 04-server | 01-core (13), 03-dialogs (3), 05-card-widgets (1), 15-counterparties (1), 22-card (1), 29-focus-tour-notify (1), 38-events (1) |
@@ -23,16 +23,16 @@
 | 13-project-data | 01-core (21), 02-render (1), 03-dialogs (2), 05-card-widgets (2), 12-messages (1), 22-card (1), 26-card-panels (3), 29-focus-tour-notify (1), 38-events (1) |
 | 14-projects | 01-core (17), 02-render (1), 08-overview (4), 09-project-page (1), 10-tabs (1), 19-task-list (1), 20-filters-usage-help (1), 22-card (1), 38-events (1) |
 | 15-counterparties | 01-core (22), 02-render (3), 03-dialogs (1), 04-server (1), 08-overview (1), 12-messages (1), 22-card (7), 29-focus-tour-notify (1), 30-project-customer (1), 32-cabinet (8), 36-search (1), 38-events (1) |
-| 15-people | 01-core (29), 02-render (1), 03-dialogs (2), 05-card-widgets (3), 08-overview (5), 14-projects (5), 16-org (1), 16-profile (5), 22-card (1), 23-card-who (1), 27-users-team (2), 28-weekly-absences (1), 29-focus-tour-notify (1), 30-project-customer (1) |
+| 15-people | 01-core (30), 02-render (1), 03-dialogs (2), 05-card-widgets (3), 08-overview (5), 14-projects (5), 16-org (1), 16-profile (5), 22-card (1), 23-card-who (1), 27-users-team (2), 28-weekly-absences (1), 29-focus-tour-notify (1), 30-project-customer (1) |
 | 16-org | 01-core (12), 02-render (1), 03-dialogs (2), 08-overview (1), 13-project-data (1), 22-card (1), 27-users-team (1), 29-focus-tour-notify (1) |
-| 16-profile | 01-core (17), 02-render (1), 03-dialogs (3), 05-card-widgets (2), 12-messages (1), 13-assignments (2), 13-project-data (1), 15-people (1), 20-filters-usage-help (1), 22-card (1), 27-users-team (3), 28-weekly-absences (1), 29-focus-tour-notify (1) |
+| 16-profile | 01-core (18), 02-render (1), 03-dialogs (3), 05-card-widgets (2), 12-messages (1), 13-assignments (2), 13-project-data (1), 15-people (1), 20-filters-usage-help (1), 22-card (1), 27-users-team (3), 28-weekly-absences (1), 29-focus-tour-notify (1) |
 | 17-gantt | 01-core (29), 02-render (1), 05-card-widgets (4), 08-overview (3), 14-projects (3), 15-people (1), 20-filters-usage-help (1), 22-card (1), 23-card-who (2), 27-users-team (1), 30-project-customer (1) |
 | 18-kanban | 01-core (26), 02-render (1), 05-card-widgets (4), 08-overview (4), 14-projects (3), 17-gantt (1), 20-filters-usage-help (1), 22-card (3), 23-card-who (4), 25-card-talk (3), 27-users-team (1), 30-project-customer (1) |
 | 19-task-list | 01-core (30), 05-card-widgets (11), 06-settings (2), 08-overview (7), 20-filters-usage-help (1), 21-bulk (1), 22-card (1), 23-card-who (4), 27-users-team (1), 30-project-customer (1) |
 | 20-filters-usage-help | 01-core (11), 02-render (1), 03-dialogs (1), 12-messages (1), 29-focus-tour-notify (1), 34-file-menu (1), 38-events (1) |
 | 21-bulk | 01-core (14), 02-render (1), 03-dialogs (2), 05-card-widgets (2), 12-messages (1), 20-filters-usage-help (1), 22-card (1), 27-users-team (1) |
 | 22-card | 01-core (42), 02-render (2), 05-card-widgets (5), 08-overview (2), 12-messages (1), 13-expertise (1), 23-card-who (9), 24-card-marks (4), 25-card-talk (5), 26-card-panels (9), 29-focus-tour-notify (3), 30-project-customer (1), 34-file-menu (1), 36-search (1), 37-demo-window (1), 38-events (1) |
-| 23-card-who | 01-core (13), 22-card (4), 24-card-marks (1), 27-users-team (1), 29-focus-tour-notify (1) |
+| 23-card-who | 01-core (15), 22-card (4), 24-card-marks (1), 27-users-team (1), 29-focus-tour-notify (1) |
 | 24-card-marks | 01-core (8), 05-card-widgets (3), 09-project-page (1), 22-card (4), 23-card-who (2) |
 | 25-card-talk | 01-core (18), 05-card-widgets (1), 12-messages (1), 22-card (3), 23-card-who (4), 24-card-marks (1), 26-card-panels (1), 29-focus-tour-notify (1), 38-events (1) |
 | 26-card-panels | 01-core (30), 05-card-widgets (2), 22-card (2), 23-card-who (1), 24-card-marks (1), 29-focus-tour-notify (1), 30-project-customer (1), 33-project-forms (1), 38-events (2) |

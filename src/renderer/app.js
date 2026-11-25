@@ -215,7 +215,32 @@ const quietList = list => list.filter(t => ['in_progress', 'revision'].includes(
   && dayNum(state.today) - dayNum(A.lastActivity(t).slice(0, 10)) >= quietDays);
 const coOwnersOf = t => (t.coOwnerIds || []).map(id => state.users?.get(id)).filter(Boolean);
 const userLabel = u => (u ? `${u.name}${u.id === state.me?.id ? ' (вы)' : ''}` : 'не назначен');
-const tasksArr = () => [...state.tasks.values()].filter(t => !isArchived(t));
+// 4.21: values worked out from the data once per data set — setData() puts new maps in state on every load,
+// so a changed map (or a new day) means a new value. For indexes over thousands of cards asked per person or per row.
+function memoData(fn) {
+  let key = null, val;
+  return () => {
+    const k = [state.tasks, state.projects, state.users, state.today];
+    if (!key || k.some((x, i) => x !== key[i])) { key = k; val = fn(); }
+    return val;
+  };
+}
+const liveTasks = memoData(() => [...state.tasks.values()].filter(t => !isArchived(t)));
+const tasksArr = () => liveTasks().slice(); // a copy: callers may sort it
+// Cards by person (responsible and co-owners), working set only.
+const ownerIndex = memoData(() => {
+  const m = new Map();
+  for (const t of liveTasks()) for (const id of A.ownersOf(t)) { if (!m.has(id)) m.set(id, []); m.get(id).push(t); }
+  return m;
+});
+const ownedBy = uid => ownerIndex().get(uid) || [];
+// The same over all cards, archived projects too (history: «с первого раза», thanks).
+const ownerIndexAll = memoData(() => {
+  const m = new Map();
+  for (const t of state.tasks.values()) for (const id of A.ownersOf(t)) { if (!m.has(id)) m.set(id, []); m.get(id).push(t); }
+  return m;
+});
+const ownedByAll = uid => ownerIndexAll().get(uid) || [];
 const liveProjects = () => [...state.projects.values()].filter(p => !p.archived).sort(byName);
 const archivedProjects = () => [...state.projects.values()].filter(p => p.archived).sort(byName);
 const contractorsArr = () => [...state.contractors.values()].sort(byName);
@@ -4048,8 +4073,8 @@ function taskList(ct, kind = '', holderId = '') {
 // 4.19: a short card — who, what state, the numbers; the click opens the person (profile and their work).
 // Assignments do not count as cards: they show as «ждут заданий» (to this person's cards, not yet issued).
 function staffCard(u, list) {
-  const work = list.filter(t => hasOwner(t, u.id) && t.kind !== 'assign'), x = totals(work);
-  const wait = asgWaitingFor(u.id, list).length, give = asgToGive(u.id, list).length, ab = upcomingAbsences(u)[0];
+  const work = ownedBy(u.id).filter(t => t.kind !== 'assign'), x = totals(work);
+  const wait = asgWaitingFor(u.id).length, give = asgToGive(u.id).length, ab = upcomingAbsences(u)[0];
   const stat = (k, v, cls = '', title = '') => `<div class="stat ${cls}"${title ? ` title="${title}"` : ''}><span class="k">${k}</span><span class="v">${v}</span></div>`;
   return `<article class="card staff pplcard" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" role="button" tabindex="0" title="Открыть: анкета и чем занят">
     <div class="card-h"><div class="row1 pplcard-row">${avatarHtml(u)}<div class="pc-name"><h3><span class="kicons">${userIcons(u)}</span>${esc(userLabel(u))}</h3>
@@ -4062,7 +4087,7 @@ function staffCard(u, list) {
 }
 // «С первого раза» and thanks, counted over all the person's cards (archived projects too: history matters).
 function gameStats(u, ct = null) {
-  const all = [...state.tasks.values()].filter(t => hasOwner(t, u.id));
+  const all = ownedByAll(u.id);
   const ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
   if (!ft.done && !th) return '';
   return `<div class="game-line">${ft.done ? `<span title="Принято без единого круга замечаний: ${ft.clean} из ${ft.done}">✓ с первого раза <b>${ft.pct}%</b> <span class="hint">(${ft.clean} из ${ft.done})</span></span>` : ''}${th ? `<span title="Сколько раз коллеги сказали «спасибо» в обсуждениях">♥ спасибо <b>${th}</b></span>` : ''}</div>`;
@@ -4128,7 +4153,7 @@ function contractorsGrouped(people, list) {
 function staffList(staff, list) {
   return `<div class="tablewrap"><table class="staff-t"><thead><tr><th>Сотрудник</th><th>Роль</th><th class="r">В работе</th><th class="r">Сорвано</th><th class="r">На проверке</th><th class="r">Ждут заданий</th>${game ? '<th class="r">С первого раза</th><th class="r">Спасибо</th>' : ''}<th>Отсутствие</th><th></th></tr></thead><tbody>
     ${staff.map(u => {
-      const ct = list.filter(t => hasOwner(t, u.id) && t.kind !== 'assign'), x = totals(ct), wait = asgWaitingFor(u.id, list).length, all = [...state.tasks.values()].filter(t => hasOwner(t, u.id)), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
+      const ct = ownedBy(u.id).filter(t => t.kind !== 'assign'), x = totals(ct), wait = asgWaitingFor(u.id).length, all = ownedByAll(u.id), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
       const ab = upcomingAbsences(u)[0];
       return `<tr class="row" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" title="Открыть: анкета и чем занят"><td>${avatarHtml(u, 'sm')}<span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
         <td class="r num">${x.active || '—'}</td><td class="r num ${x.overdue ? 'neg' : ''}">${x.overdue || '—'}</td><td class="r num">${x.review || '—'}</td><td class="r num">${wait || '—'}</td>
@@ -4330,15 +4355,27 @@ const dayMonth = d => (isDate(d) ? fmtDate(d).slice(0, 5) : '');
 // Assignments (kind 'assign') are not work of their own: on a person they read as «ждут заданий» — not yet issued
 // to the person's cards — and «выдать» — not yet issued by the person.
 const ASG_OPEN = t => t.kind === 'assign' && !t.deletedAt && !['review', 'done'].includes(t.status);
-const asgWaitingFor = (uid, list = tasksArr()) => list.filter(t => ASG_OPEN(t) && asgTo(t).some(x => hasOwner(x, uid)));
-const asgToGive = (uid, list = tasksArr()) => list.filter(t => ASG_OPEN(t) && hasOwner(t, uid));
+// Open assignments by the people whose cards wait for them (working set).
+const asgWaitIndex = memoData(() => {
+  const m = new Map();
+  for (const t of liveTasks()) if (ASG_OPEN(t)) for (const uid of new Set(asgTo(t).flatMap(x => A.ownersOf(x)))) { if (!m.has(uid)) m.set(uid, []); m.get(uid).push(t); }
+  return m;
+});
+const asgWaitingFor = uid => asgWaitIndex().get(uid) || [];
+const asgToGive = uid => ownedBy(uid).filter(ASG_OPEN);
+// How many cards on review each person checks.
+const reviewIndex = memoData(() => {
+  const m = new Map(), users = liveUsers();
+  for (const t of liveTasks()) if (t.status === 'review') for (const id of A.reviewersOf(t, users, state.projects)) m.set(id, (m.get(id) || 0) + 1);
+  return m;
+});
 
 // What the person is doing, from the state of their cards (the most urgent wins).
 function personState(u) {
   const away = A.absencesOf(u).find(a => a.from <= state.today && a.to >= state.today);
   if (away) return { state: 'away', awayText: `${A.ABSENCE_KINDS[away.kind] || 'нет'} до ${fmtDate(away.to).slice(0, 5)}`, cards: [] };
-  const cards = tasksArr().filter(t => hasOwner(t, u.id) && t.kind !== 'assign' && t.status !== 'done').sort(sortByDeadline);
-  const toCheck = u.role === 'specialist' ? 0 : tasksArr().filter(t => t.status === 'review' && A.reviewersOf(t, liveUsers(), state.projects).includes(u.id)).length;
+  const cards = ownedBy(u.id).filter(t => t.kind !== 'assign' && t.status !== 'done').sort(sortByDeadline);
+  const toCheck = u.role === 'specialist' ? 0 : reviewIndex().get(u.id) || 0;
   if (cards.some(t => timing(t).overdue)) return { state: 'late', cards };
   if (toCheck) return { state: 'checking', cards };
   if (cards.some(t => t.status === 'review')) return { state: 'carry', cards };
@@ -4533,10 +4570,16 @@ function viewGantt() {
   const active = tasksArr().filter(t => t.status !== 'done' && (state.showAssign.gantt || t.kind !== 'assign') && (!gq.project || t.projectId === gq.project) && (!gq.mark || sectionsOf(t).includes(gq.mark)));
   const byProject = g.group === 'project', byOwner = g.group === 'owner' && !isSpec();
   const crit = !!g.crit;
+  // 4.21: the cards are put into rows in one pass (a filter per row was slow with hundreds of rows and thousands of cards).
+  const by = keysOf => { const m = new Map(); for (const t of active) for (const k of keysOf(t)) { if (!m.has(k)) m.set(k, []); m.get(k).push(t); } return m; };
+  const rowsOf = (m, k) => m.get(k) || [];
   const groups = byProject
-    ? liveProjects().map(p => ({ key: 'p' + p.id, name: p.name, sub: p.code, tasks: active.filter(t => t.projectId === p.id) }))
-    : byOwner ? liveUsers().sort(byName).map(u => ({ key: 'u' + u.id, name: u.name, user: u, sub: A.ROLES[u.role]?.label, tasks: active.filter(t => hasOwner(t, u.id)) }))
-    : [...execStaff().map(u => ({ key: 'x' + u.id, name: u.name, sub: 'штатный', tasks: active.filter(t => executorOf(t)?.u?.id === u.id) })), ...contractorsArr().map(c => ({ key: 'c' + c.id, name: c.name, tasks: active.filter(t => t.contractorId === c.id) }))];
+    ? (m => liveProjects().map(p => ({ key: 'p' + p.id, name: p.name, sub: p.code, tasks: rowsOf(m, p.id) })))(by(t => [t.projectId]))
+    : byOwner ? (m => liveUsers().sort(byName).map(u => ({ key: 'u' + u.id, name: u.name, user: u, sub: A.ROLES[u.role]?.label, tasks: rowsOf(m, u.id) })))(by(t => A.ownersOf(t)))
+    : (m => [...execStaff().map(u => ({ key: 'x' + u.id, name: u.name, sub: 'штатный', tasks: rowsOf(m, 'u:' + u.id) })), ...contractorsArr().map(c => ({ key: 'c' + c.id, name: c.name, tasks: rowsOf(m, 'c:' + c.id) }))])(by(t => {
+      const u = executorOf(t)?.u;
+      return [...(t.contractorId ? ['c:' + t.contractorId] : []), ...(u ? ['u:' + u.id] : [])];
+    }));
   // With a filter on, rows without matching cards only add noise.
   if (gq.project || gq.mark) for (let i = groups.length - 1; i >= 0; i--) if (!groups[i].tasks.length) groups.splice(i, 1);
   if (byOwner) {
@@ -4670,7 +4713,7 @@ function viewVacations() {
       return `<span class="vac-bar k-${a.kind}" style="left:${l}%;width:${Math.max(0.6, r - l)}%" title="${esc(u.name)}: ${esc(A.ABSENCE_KINDS[a.kind] || 'отсутствует')} ${fmtDate(a.from)}–${fmtDate(a.to)}${a.note ? ' · ' + esc(a.note) : ''}">${esc(A.ABSENCE_KINDS[a.kind] || '')} ${fmtDate(a.from).slice(0, 5)}–${fmtDate(a.to).slice(0, 5)}</span>`;
     }).join('');
     // Deadlines of the person's cards that fall into an absence: the reason this chart exists.
-    const hits = tasksArr().filter(t => hasOwner(t, u.id) && absHits(t).some(h => h.user.id === u.id && h.onFinish) && t.finish >= from && t.finish <= to)
+    const hits = ownedBy(u.id).filter(t => absHits(t).some(h => h.user.id === u.id && h.onFinish) && t.finish >= from && t.finish <= to)
       .map(t => `<span class="vac-hit" style="left:${pos(t.finish) + dayW / 2}%" title="Финиш ${marksText(t)} (${esc(projectOf(t)?.name || '')}) ${fmtDate(t.finish)} — во время отсутствия"></span>`).join('');
     return `<div class="tl-row"><div class="tl-name"><span class="kicons">${userIcons(u)}</span><b title="${esc(u.name)}">${esc(u.name)}</b>${A.canEditAbsences(state.me, u) ? `<button class="btn ghostbtn sm" type="button" data-act="absences" data-id="${esc(u.id)}" title="Отпуска и больничные">＋</button>` : ''}</div>
       <div class="tl-track" style="height:28px">${shade}${grid}${today}${bars}${hits}</div></div>`;
@@ -4696,15 +4739,17 @@ function drawGanttLinks() {
   root.querySelector('.tl-links')?.remove();
   const box = root.getBoundingClientRect();
   const paths = [];
+  // 4.21: the bars looked up once (a selector per link was slow on thousands of bars).
+  const bars = new Map([...root.querySelectorAll('.tl-bar[data-bar]')].map(b => [b.dataset.bar, b]));
   for (const t of tasksArr()) {
     const deps = L.depsOf(t);
     if (!deps.length) continue;
-    const b = root.querySelector(`.tl-bar[data-bar="${CSS.escape(t.id)}"]`);
+    const b = bars.get(t.id);
     if (!b) continue;
     const rb = b.getBoundingClientRect();
     const issues = new Set(L.dependencyIssues(t, state.tasks, state.today).map(i => i.pred.id));
     for (const pid of deps) {
-      const a = root.querySelector(`.tl-bar[data-bar="${CSS.escape(pid)}"]`);
+      const a = bars.get(pid);
       if (!a) continue;
       const ra = a.getBoundingClientRect();
       const x1 = ra.right - box.left, y1 = ra.top + ra.height / 2 - box.top;
@@ -5893,7 +5938,8 @@ function executorOf(t) {
 }
 // Filters «Все исполнители / Без исполнителя / <who>»: a contractor id (as before 4.1) or 'u:<staff id>'.
 const execMatch = (t, f) => !f || (f === '__none' ? !executorOf(t) : f.startsWith('u:') ? executorOf(t)?.u?.id === f.slice(2) : t.contractorId === f);
-const execStaff = () => liveUsers().filter(u => tasksArr().some(t => executorOf(t)?.u?.id === u.id)).sort(byName);
+const execStaffIds = memoData(() => new Set(liveTasks().map(t => executorOf(t)?.u?.id).filter(Boolean)));
+const execStaff = () => liveUsers().filter(u => execStaffIds().has(u.id)).sort(byName);
 const execFilterOpts = (opt, sel) => `${opt('', 'Все исполнители', sel)}${opt('__none', 'Без исполнителя', sel)}${execStaff().length ? `<optgroup label="Штатные">${execStaff().map(u => opt('u:' + u.id, u.name, sel)).join('')}</optgroup><optgroup label="Внештатные">` : ''}${contractorsArr().map(c => opt(c.id, c.name, sel)).join('')}${execStaff().length ? '</optgroup>' : ''}`;
 const execLine = t => { const e = executorOf(t), co = coExecRefOf(t) ? refName(coExecRefOf(t)) : ''; return e ? `${esc(e.name)}${co ? ` <span class="hint">+ ${esc(co)}</span>` : ''}` : ''; };
 function execCandidates(marks, onlyFit) {

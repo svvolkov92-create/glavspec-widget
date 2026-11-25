@@ -212,7 +212,32 @@ const quietList = list => list.filter(t => ['in_progress', 'revision'].includes(
   && dayNum(state.today) - dayNum(A.lastActivity(t).slice(0, 10)) >= quietDays);
 const coOwnersOf = t => (t.coOwnerIds || []).map(id => state.users?.get(id)).filter(Boolean);
 const userLabel = u => (u ? `${u.name}${u.id === state.me?.id ? ' (вы)' : ''}` : 'не назначен');
-const tasksArr = () => [...state.tasks.values()].filter(t => !isArchived(t));
+// 4.21: values worked out from the data once per data set — setData() puts new maps in state on every load,
+// so a changed map (or a new day) means a new value. For indexes over thousands of cards asked per person or per row.
+function memoData(fn) {
+  let key = null, val;
+  return () => {
+    const k = [state.tasks, state.projects, state.users, state.today];
+    if (!key || k.some((x, i) => x !== key[i])) { key = k; val = fn(); }
+    return val;
+  };
+}
+const liveTasks = memoData(() => [...state.tasks.values()].filter(t => !isArchived(t)));
+const tasksArr = () => liveTasks().slice(); // a copy: callers may sort it
+// Cards by person (responsible and co-owners), working set only.
+const ownerIndex = memoData(() => {
+  const m = new Map();
+  for (const t of liveTasks()) for (const id of A.ownersOf(t)) { if (!m.has(id)) m.set(id, []); m.get(id).push(t); }
+  return m;
+});
+const ownedBy = uid => ownerIndex().get(uid) || [];
+// The same over all cards, archived projects too (history: «с первого раза», thanks).
+const ownerIndexAll = memoData(() => {
+  const m = new Map();
+  for (const t of state.tasks.values()) for (const id of A.ownersOf(t)) { if (!m.has(id)) m.set(id, []); m.get(id).push(t); }
+  return m;
+});
+const ownedByAll = uid => ownerIndexAll().get(uid) || [];
 const liveProjects = () => [...state.projects.values()].filter(p => !p.archived).sort(byName);
 const archivedProjects = () => [...state.projects.values()].filter(p => p.archived).sort(byName);
 const contractorsArr = () => [...state.contractors.values()].sort(byName);
