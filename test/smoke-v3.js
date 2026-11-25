@@ -1,7 +1,7 @@
 'use strict';
 // 3.0 walkthrough: `electron test/smoke-v3.js <outDir>` with XDG_CONFIG_HOME pointing at a temp dir.
 // Checks the new header, card stamp, status actions, templates, folders, revisions, customer PDF,
-// direction icons, people lists, vacation chart, encouragement, the office and the «Графит» theme.
+// direction icons, people lists, vacation chart, encouragement and the «Графит» theme.
 const electron = require('electron');
 const { app } = electron;
 const fs = require('node:fs');
@@ -63,7 +63,7 @@ app.on('browser-window-created', (_e, win) => {
         check('reports menu grouped', /Отчёты[\s\S]*Данные[\s\S]*Сервис/.test(await text('#file-menu')) && /Отчёты и данные/.test(await text('#btn-file')));
         await shot('v3-04-reports-menu');
         await click('#btn-file'); await wait(100);
-        check('tab «Люди» and «Офис»', /Люди/.test(await text('#tabs')) && /Офис/.test(await text('#tabs')));
+        check('tab «Люди», no «Офис» (removed in 4.18)', /Люди/.test(await text('#tabs')) && !/Офис/.test(await text('#tabs')));
       });
 
       await step('overview', async () => {
@@ -226,36 +226,6 @@ app.on('browser-window-created', (_e, win) => {
         await click('[data-act="g-mode"][data-v="work"]'); await wait(200);
       });
 
-      await step('office', async () => {
-        await click('[data-act="tab"][data-id="office"]'); await wait(500);
-        check('office people', await js(`document.querySelectorAll('#office .o-person').length`) >= 3);
-        check('office buildings and floors', await js(`document.querySelectorAll('#office .o-building').length`) >= 2 && await js(`document.querySelectorAll('#office .o-floor').length`) >= 6);
-        check('no contractors in office', !(await js(`[...document.querySelectorAll('#office .o-person title')].some(t => /Петров|Сидорова|Кузнецов/.test(t.textContent))`)));
-        await shot('v3-15-office');
-        await js(`document.querySelector('#office .o-person').dispatchEvent(new MouseEvent('click', { bubbles: true }))`); await wait(300);
-        check('person card list', await js(`!!document.querySelector('.modal .op-list, .modal .none')`));
-        await shot('v3-16-office-person');
-        await js(`document.querySelector('.modal [data-m="close"]').click()`); await wait(150);
-        await js(`document.querySelector('#office .o-floor').dispatchEvent(new MouseEvent('click', { bubbles: true }))`); await wait(400);
-        check('floor opens the card', await js(`!!document.querySelector('#dform .stamp')`));
-        await js(`document.querySelector('[data-act="request-close"]').click()`); await wait(200);
-        // drag a person onto a colleague → choose card → confirm
-        const ids = await js(`[...document.querySelectorAll('#office .o-person')].map(g => g.dataset.person)`);
-        await js(`(() => { const a = document.querySelector('#office .o-person[data-person="demo-u1"]'), b = document.querySelector('#office .o-person[data-person="u-chief"]');
-          a.scrollIntoView({ block: 'center' });
-          const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
-          a.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: ra.x + ra.width / 2, clientY: ra.y + ra.height / 2 }));
-          document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: ra.x + 40, clientY: ra.y + 40 }));
-          document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: rb.x + rb.width / 2, clientY: rb.y + rb.height / 2 }));
-          document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: rb.x + rb.width / 2, clientY: rb.y + rb.height / 2 })); })()`);
-        await wait(300);
-        check('drag person → hand over dialog', await js(`!!document.querySelector('.modal')`), ids.join());
-        await shot('v3-17-office-drag');
-        await js(`document.querySelectorAll('.modal-back').forEach(m => m.remove())`);
-        await click('[data-act="office-labels"]'); await wait(200);
-        await click('[data-act="office-labels"]'); await wait(200);
-      });
-
       await step('compact widget', async () => {
         await click('[data-act="toggle-compact"]'); await wait(900);
         check('compact widget head', /Ждут вас|Всё по плану/.test(await text('.cw-head')));
@@ -271,8 +241,6 @@ app.on('browser-window-created', (_e, win) => {
         await js(`document.querySelector('#app [data-act="open-task"]').click()`); await wait(400);
         await shot('v3-20-graphite-card');
         await js(`document.querySelector('[data-act="request-close"]').click()`); await wait(200);
-        await click('[data-act="tab"][data-id="office"]'); await wait(400);
-        await shot('v3-21-graphite-office');
         await js(`window.api.setTheme('system')`); await wait(300);
       });
 
@@ -286,9 +254,6 @@ app.on('browser-window-created', (_e, win) => {
       await step('specialist', async () => {
         await js(`window.api.switchUser('demo-u1')`); await wait(600);
         check('specialist has no create menu', await js(`document.querySelector('.create-wrap').hidden`));
-        await click('[data-act="tab"][data-id="office"]'); await wait(400);
-        check('specialist office: only self', (await js(`document.querySelectorAll('#office .o-person').length`)) === 1);
-        await shot('v3-22-specialist-office');
         await js(`window.api.switchUser('u-gip')`); await wait(400);
       });
     } catch (e) {

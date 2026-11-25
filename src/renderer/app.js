@@ -22,7 +22,6 @@ const ICON = {
   kanban: '<rect x="1.8" y="2" width="3.6" height="11.5" rx=".9"/><rect x="6.2" y="2" width="3.6" height="7.5" rx=".9"/><rect x="10.6" y="2" width="3.6" height="9.5" rx=".9"/>',
   tasks: '<path d="M6 4h8M6 8h8M6 12h8" stroke-linecap="round"/><path d="M2 4h1.4M2 8h1.4M2 12h1.4" stroke-width="1.8" stroke-linecap="round"/>',
   orgs: '<path d="M2.4 14V2.6h7.2V14M9.6 6.2h4V14M1.4 14h13.2" stroke-linejoin="round" stroke-linecap="round"/><path d="M4.6 5h.8M7 5h.8M4.6 7.6h.8M7 7.6h.8M4.6 10.2h.8M7 10.2h.8M11.4 8.8h.4M11.4 11.2h.4" stroke-linecap="round"/>',
-  office: '<path d="M2 14V6.5L8 2l6 4.5V14z" stroke-linejoin="round"/><path d="M6 14v-3.5h4V14M5 7.5h1.5M9.5 7.5H11" stroke-linecap="round"/>',
   detach: '<rect x="1.8" y="4.8" width="9.4" height="9.4" rx="1.2"/><path d="M8.5 2h5.5v5.5M14 2L7.5 8.5" stroke-linecap="round" stroke-linejoin="round"/>',
   dock: '<rect x="1.8" y="1.8" width="12.4" height="12.4" rx="1.4"/><path d="M11 5L6 10M6 6v4h4" stroke-linecap="round" stroke-linejoin="round"/>',
 };
@@ -49,7 +48,6 @@ const TABS = [
   { id: 'projects', label: 'Проекты' },
   { id: 'people', label: 'Люди' },
   { id: 'orgs', label: 'Контрагенты' }, // 4.9 — only for those who work with customers or the budget
-  { id: 'office', label: 'Офис' },
   { id: 'gantt', label: 'Диаграмма Ганта' },
   { id: 'kanban', label: 'Канбан' },
   { id: 'tasks', label: 'Все карточки' },
@@ -438,7 +436,7 @@ function renderNow() {
   if (!SOLO && state.me && !tour) maybeStartTour();
   if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
   if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
-  const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, orgs: viewOrgs, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
+  const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, orgs: viewOrgs, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
   app.innerHTML = docTabsHtml() + view() + footer();
   renderMsg(); msgNotify(); renderFocus();
   if (active === 'f-q') { const el = $('#f-q'); el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* not a text input any more */ } }
@@ -1166,7 +1164,7 @@ function openSettings(sec = '') {
   if (!root) {
     root = document.createElement('div');
     root.className = 'modal-back settings-modal';
-    root.innerHTML = `<div class="modal wide-modal settings" role="dialog" aria-modal="true" aria-labelledby="stitle"><h2 id="stitle">Настройки</h2><div id="set-body"></div>
+    root.innerHTML = `<div class="modal wide-modal settings" role="dialog" aria-modal="true" aria-labelledby="stitle"><h2 id="stitle">Настройки</h2><div class="set-wrap"><nav class="set-nav" id="set-nav" aria-label="Разделы настроек"></nav><div id="set-body"></div></div>
       <div class="modal-f"><button class="btn primary" type="button" data-m="close">Готово</button><button class="btn ghostbtn" type="button" data-act="about">О программе</button><span class="hint">Настройки вида хранятся на этом компьютере.</span></div></div>`;
     document.body.append(root);
     root.addEventListener('click', e => {
@@ -1176,26 +1174,43 @@ function openSettings(sec = '') {
     root.addEventListener('change', () => setTimeout(renderSettings, 30));
     root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); root.remove(); } });
   }
+  if (sec) setCat = sec;
+  api.appInfo?.().then(i => { setAbout = i || {}; renderSettings(); }).catch(() => {});
   renderSettings();
-  if (sec) root.querySelector(`[data-sec-id="${sec}"]`)?.scrollIntoView({ block: 'start' });
+}
+// 4.18: «Настройки» by categories — the list on the left, the chosen one on the right (remembered on this computer).
+let setCat = loadLocal('setCat', 'view'), setAbout = {};
+function aboutHtml() {
+  const i = setAbout, srv = state.remote?.server;
+  const row = (k, v) => (v ? `<div class="about-row"><span class="hint">${k}</span><b>${esc(v)}</b></div>` : '');
+  return `<div class="about-head">${appIconSvg(state.win?.appIcon || 1)}<div><b>Пульт главспеца</b><p class="hint">ПМ «Тандем» · управление проектами мастерской</p></div></div>
+    ${row('Версия', i.web ? `веб-версия${srv?.version ? ` сервера ${srv.version}` : ''}` : i.version ? `${i.version}${i.platform ? ` (${i.platform})` : ''}` : '—')}
+    ${srv ? row('Сервер Пульта', `${srv.name ? srv.name + ' · ' : ''}версия ${srv.version || '—'}`) : row('Данные', 'на этом компьютере')}
+    ${state.remote?.url ? row('Адрес', state.remote.url) : ''}${row('Пользователь', state.me ? `${state.me.name} — ${A.ROLES[state.me.role]?.label || ''}` : '')}`;
 }
 function renderSettings() {
   const body = $('#set-body');
   if (!body) return;
   const top = body.scrollTop;
   const tabs = orderedTabs().filter(t => t.act ? !SOLO : visibleTabs().includes(t));
-  body.innerHTML = `<section class="set-sec" data-sec-id="view"><h3>Вид и окно</h3>${viewSectionsHtml(true)}<p class="hint">Прозрачность, «поверх окон» и сквозные клики — в меню «Окно» в заголовке.</p></section>
-    <section class="set-sec" data-sec-id="tabs"><h3>Меню</h3><p class="hint">Снимите галку — пункт уйдёт из меню (раздел останется доступен по ссылкам). Порядок — стрелками или перетаскиванием прямо в меню.</p>${tabs.map((x, i) => `<div class="cols-row"><label class="chk"><input type="checkbox" data-act="tab-hide" data-id="${x.id}"${hiddenTabs.includes(x.id) ? '' : ' checked'}> ${icon(x.act ? 'chat' : x.id)} ${esc(x.label)}${x.act ? ' <span class="hint">— мессенджер на всё окно</span>' : ''}</label><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'}>↑</button><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="1"${i < tabs.length - 1 ? '' : ' disabled'}>↓</button></div>`).join('')}
+  body.innerHTML = `<section class="set-sec" data-sec-id="view" data-sec-label="Вид и окно"><h3>Вид и окно</h3>${viewSectionsHtml(true)}<p class="hint">Прозрачность, «поверх окон» и сквозные клики — в меню «Окно» в заголовке.</p></section>
+    <section class="set-sec" data-sec-id="tabs" data-sec-label="Меню"><h3>Меню</h3><div class="vm-sec"><span class="vm-h">Где меню</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div></div><p class="hint">Снимите галку — пункт уйдёт из меню (раздел останется доступен по ссылкам). Порядок — стрелками или перетаскиванием прямо в меню.</p>${tabs.map((x, i) => `<div class="cols-row"><label class="chk"><input type="checkbox" data-act="tab-hide" data-id="${x.id}"${hiddenTabs.includes(x.id) ? '' : ' checked'}> ${icon(x.act ? 'chat' : x.id)} ${esc(x.label)}${x.act ? ' <span class="hint">— мессенджер на всё окно</span>' : ''}</label><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'}>↑</button><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="1"${i < tabs.length - 1 ? '' : ' disabled'}>↓</button></div>`).join('')}
       <button class="btn ghostbtn sm" type="button" data-act="tabs-reset">Как было</button></section>
-    <section class="set-sec" data-sec-id="game"><h3>Поощрения</h3><p class="hint">«Принято с первого раза», общая цель проекта и «Спасибо» в обсуждении. Считаются качество и общий результат, а не количество карточек.</p>
+    <section class="set-sec" data-sec-id="game" data-sec-label="Поощрения"><h3>Поощрения</h3><p class="hint">«Принято с первого раза», общая цель проекта и «Спасибо» в обсуждении. Считаются качество и общий результат, а не количество карточек.</p>
       <div class="seg"><button class="btn sm ${game ? 'on' : ''}" type="button" data-act="set-game" data-v="1">Показывать</button><button class="btn sm ${game ? '' : 'on'}" type="button" data-act="set-game" data-v="0">Выключить</button></div></section>
-    <section class="set-sec" data-sec-id="ov"><h3>Панели сводки</h3>${ovRowsHtml()}</section>
-    ${cab?.allowed ? `<section class="set-sec" data-sec-id="cab"><h3>Кабинет заказчика</h3><p class="hint">${cab.local ? '' : cab.configured ? `Подключён: ${esc(cab.url)}${cab.lastSync ? ` · связь ${cabTime(cab.lastSync)}` : ''}${cab.lastError ? ` · <span class="neg">${esc(cab.lastError)}</span>` : ''}` : cab.keyLost ? `<span class="neg">Адрес сервера ${esc(cab.url)} сохранён, а ключ команды из прошлой версии не переносится — откройте настройку кабинета и введите ключ заново.</span>` : 'Не подключён. Заказчик сможет смотреть свой проект в браузере или на телефоне.'}</p>
+    <section class="set-sec" data-sec-id="ov" data-sec-label="Сводка"><h3>Панели сводки</h3>${ovRowsHtml()}</section>
+    ${cab?.allowed ? `<section class="set-sec" data-sec-id="cab" data-sec-label="Кабинет заказчика"><h3>Кабинет заказчика</h3><p class="hint">${cab.local ? '' : cab.configured ? `Подключён: ${esc(cab.url)}${cab.lastSync ? ` · связь ${cabTime(cab.lastSync)}` : ''}${cab.lastError ? ` · <span class="neg">${esc(cab.lastError)}</span>` : ''}` : cab.keyLost ? `<span class="neg">Адрес сервера ${esc(cab.url)} сохранён, а ключ команды из прошлой версии не переносится — откройте настройку кабинета и введите ключ заново.</span>` : 'Не подключён. Заказчик сможет смотреть свой проект в браузере или на телефоне.'}</p>
       ${cab.local ? `<p class="hint">Работает на этом компьютере · для заказчиков в офисе: ${esc(cab.publicUrl)}</p><button class="btn sm" type="button" data-act="cab-local-stop">Остановить</button><button class="btn ghostbtn sm" type="button" data-act="cab-settings">Подключить к отдельному серверу…</button>`
         : cab.configured ? '<button class="btn sm" type="button" data-act="cab-settings">Изменить подключение…</button>'
         : '<button class="btn primary sm" type="button" data-act="cab-local-start">Запустить на этом компьютере</button><button class="btn ghostbtn sm" type="button" data-act="cab-settings">Подключить к отдельному серверу…</button>'}</section>` : ''}
-    ${isSpec() ? '' : `<section class="set-sec" data-sec-id="cols"><h3>Столбцы в таблицах карточек</h3>${colRowsHtml()}</section>`}
-    ${tipsClosed.size ? `<section class="set-sec"><h3>Подсказки</h3><p class="hint">Скрыто подсказок: ${tipsClosed.size}.</p><button class="btn ghostbtn sm" type="button" data-act="tips-reset">Показать снова</button></section>` : ''}`;
+    ${isSpec() ? '' : `<section class="set-sec" data-sec-id="cols" data-sec-label="Столбцы таблиц"><h3>Столбцы в таблицах карточек</h3>${colRowsHtml()}</section>`}
+    ${tipsClosed.size ? `<section class="set-sec" data-sec-id="tips" data-sec-label="Подсказки"><h3>Подсказки</h3><p class="hint">Скрыто подсказок: ${tipsClosed.size}.</p><button class="btn ghostbtn sm" type="button" data-act="tips-reset">Показать снова</button></section>` : ''}`;
+  body.insertAdjacentHTML('beforeend', `<section class="set-sec" data-sec-id="about" data-sec-label="О программе"><h3>О программе</h3>${aboutHtml()}</section>`);
+  const secs = [...body.querySelectorAll('.set-sec[data-sec-id]')];
+  if (!secs.some(x => x.dataset.secId === setCat)) setCat = 'view';
+  secs.forEach(x => { x.hidden = x.dataset.secId !== setCat; });
+  const navEl = $('#set-nav');
+  if (navEl) navEl.innerHTML = secs.map(x => `<button class="set-cat${x.dataset.secId === setCat ? ' on' : ''}" type="button" data-act="set-cat" data-v="${x.dataset.secId}" aria-current="${x.dataset.secId === setCat}">${esc(x.dataset.secLabel)}</button>`).join('');
   body.scrollTop = top;
 }
 // «⚙ Столбцы» opens right next to the table; headers can also be dragged to a new place.
@@ -1292,12 +1307,12 @@ const attention = () => {
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
-  'about': () => { openAbout(); },
+  'about': () => { if (document.querySelector('.settings-modal')) { setCat = 'about'; renderSettings(); } else openAbout(); },
+  'set-cat': ({ el }) => { setCat = el.dataset.v; saveLocal('setCat', setCat); const b = $('#set-body'); if (b) b.scrollTop = 0; renderSettings(); },
   'tips-reset': () => { tipsClosed.clear(); saveLocal('tipsClosed', []); renderNow(); },
   'cols-pop': ({ el }) => { colsOpen = !colsOpen; el.closest('.cols-wrap').querySelector('.cols-menu').hidden = !colsOpen; },
   'settings': ({ el }) => { closeCardMenu(); openSettings(el.dataset.sec); },
   'set-backdrop': ({ el }) => { api.setBackdrop?.(el.dataset.v).then(ok => { if (ok === false) toast('Этот фон Windows здесь недоступен — осталась своя прозрачность.', true); }); },
-  'set-dock': ({ el }) => { api.setDock?.(el.dataset.v); },
   'nav-pos': ({ el }) => { setNav({ pos: el.dataset.v }); },
   'nav-mini': () => { setNav({ mini: !nav.mini }); },
   'nav-mini-chk': ({ el }) => { setNav({ mini: el.checked }); },
@@ -2163,6 +2178,7 @@ document.addEventListener('contextmenu', e => {
   m.className = 'menu card-menu'; m.id = 'card-menu'; m.setAttribute('role', 'menu');
   m.innerHTML = `<div class="cm-h"><b>Меню</b><span class="hint">перетащите пункт мышью, чтобы поменять порядок</span></div>
     <button role="menuitem" type="button" data-act="tab-hide-one" data-id="${esc(tab.dataset.id)}">Убрать «${esc(label)}» из меню</button>
+    <div class="cm-pos"><span class="hint">Меню:</span>${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos-menu" data-v="${k}">${l}</button>`).join('')}</div>
     <button role="menuitem" type="button" data-act="settings" data-sec="tabs">Настроить меню…</button>
     ${hiddenTabs.length || tabOrder.length ? '<button role="menuitem" type="button" data-act="tabs-reset">Вернуть меню как было</button>' : ''}`;
   document.body.append(m);
@@ -2191,6 +2207,7 @@ onAct({
   'tab-move': ({ el, id }) => { moveTab(id, Number(el.dataset.dir)); },
   'tabs-reset': () => { closeCardMenu(); hiddenTabs = []; saveLocal('hiddenTabs', []); setTabOrder([]); },
   'tab-hide': ({ el, id }) => { setTabHidden(id, !el.checked); },
+  'nav-pos-menu': ({ el }) => { closeCardMenu(); setNav({ pos: el.dataset.v }); },
   'tab-hide-one': ({ id }) => { closeCardMenu(); setTabHidden(id, true); toast('Пункт убран из меню. Вернуть — правый щелчок по меню или «Настройки → Меню».'); },
   'tab': ({ e, id }) => { if (e.ctrlKey) { wsAddSection(id); return; } wsRemember(); wsActive = ''; saveWs(); if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); },
   'dtab-close': ({ id }) => { docTabClose(id); },
@@ -4381,12 +4398,9 @@ async function orgFromGroups() {
   await write(ops, `Создано отделов: ${chiefs.length + 1}`);
 }
 
-/* ---------- «Офис»: the team as people at desks, projects as buildings ---------- */
-let officePrefs = { zoom: 1, labels: true, ...loadLocal('office', {}) };
-function setOffice(patch) { officePrefs = { ...officePrefs, ...patch }; saveLocal('office', officePrefs); renderNow(); }
-const shortName = n => { const [f, ...rest] = String(n || '').replace(/^Пример:\s*/, '').split(/\s+/); return rest.length ? `${f} ${rest.map(x => x[0]).filter(Boolean).join('.')}.`.replace(/\.\.$/, '.') : f; };
+/* ---------- a person's work: what they are doing now (the «Офис» view itself was removed in 4.18) ---------- */
 // What the person is doing, from the state of their cards (the most urgent wins).
-function officeState(u) {
+function personState(u) {
   const away = A.absencesOf(u).find(a => a.from <= state.today && a.to >= state.today);
   if (away) return { state: 'away', awayText: `${A.ABSENCE_KINDS[away.kind] || 'нет'} до ${fmtDate(away.to).slice(0, 5)}`, cards: [] };
   const cards = tasksArr().filter(t => hasOwner(t, u.id) && t.status !== 'done').sort(sortByDeadline);
@@ -4399,83 +4413,16 @@ function officeState(u) {
   if (cards.length) return { state: 'idle', cards };
   return { state: 'free', cards };
 }
-const OFFICE_STATE_TEXT = { late: 'срок сорван', checking: 'проверяет работы', carry: 'сдал на проверку', revision: 'на доработке', work: 'в работе', idle: 'работы не начаты', free: 'свободен — можно дать работу', away: 'отсутствует' };
-// Birthday today (month and day of the stored date).
-const isBirthday = u => isDate(u?.birthday) && u.birthday.slice(5) === state.today.slice(5);
-// Crown: who had the most cards accepted in the last 30 days (ties share it). Counted from the status history.
-function officeLeaders(staff) {
-  const from = addDays(state.today, -30), n = new Map();
-  for (const t of tasksArr()) {
-    if (t.status !== 'done') continue;
-    const acc = [...(t.history || [])].reverse().find(h => h.type === 'status' && h.to === 'done');
-    if (!acc || (acc.date || '') < from) continue;
-    for (const id of [t.ownerId, ...(t.coOwnerIds || [])]) if (id) n.set(id, (n.get(id) || 0) + 1);
-  }
-  const best = Math.max(0, ...staff.map(u => n.get(u.id) || 0));
-  return { best, ids: new Set(best ? staff.filter(u => (n.get(u.id) || 0) === best).map(u => u.id) : []) };
-}
-function officeModel() {
-  const staff = staffArr();
-  const lead = officeLeaders(staff);
-  const pers = u => {
-    const st = officeState(u);
-    const lines = st.cards.slice(0, 6).map(t => `• ${marksText(t)} — ${projectOf(t)?.name || ''}: ${timing(t).overdue ? 'срок сорван' : STATUSES[t.status]?.label || ''}`);
-    const bday = isBirthday(u), crown = lead.ids.has(u.id);
-    return { id: u.id, name: u.name, short: shortName(u.name), kind: userKinds(u)[0] || '', me: u.id === state.me?.id, ...st, birthday: bday, crown,
-      tip: `${bday ? '🎉 Сегодня день рождения!\n' : ''}${crown ? `👑 Больше всех принятых работ за 30 дней: ${lead.best}\n` : ''}${u.name} · ${A.ROLES[u.role]?.label || ''}${A.directionLabels(u).length ? ' · ' + A.directionLabels(u).join(', ') : ''}\n${st.awayText || OFFICE_STATE_TEXT[st.state]}${lines.length ? '\n' + lines.join('\n') + (st.cards.length > 6 ? `\n…и ещё ${st.cards.length - 6}` : '') : ''}\nЩелчок — карточки; перетащите на коллегу — передать работу` };
-  };
-  let rooms;
-  if (A.isGip(state.me)) {
-    const chiefs = staff.filter(u => u.role === 'chief');
-    rooms = chiefs.map(c => ({ title: `Группа: ${shortName(c.name)}`, people: [c, ...staff.filter(u => u.role === 'specialist' && u.chiefId === c.id)].map(pers) }));
-    const loose = staff.filter(u => u.role === 'specialist' && !chiefs.some(c => c.id === u.chiefId));
-    if (loose.length) rooms.push({ title: 'Без главспеца', people: loose.map(pers) });
-  } else rooms = staff.length ? [{ title: isSpec() ? 'Ваш стол' : 'Ваша группа', people: staff.map(pers) }] : [];
-  const rank = { done: 0, review: 1, revision: 2, late: 3, work: 4, todo: 5 };
-  const buildings = liveProjects().map(p => {
-    const pt = tasksArr().filter(t => t.projectId === p.id);
-    if (!pt.length) return null;
-    const floors = pt.map(t => {
-      const s = timing(t).overdue ? 'late' : t.status === 'done' ? 'done' : t.status === 'review' ? 'review' : t.status === 'revision' ? 'revision' : t.status === 'in_progress' ? 'work' : 'todo';
-      return { taskId: t.id, state: s, label: marksText(t), tip: `${marksText(t)}${t.title ? ' · ' + t.title : ''}\n${timing(t).overdue ? 'Срок сорван' : STATUSES[t.status]?.label}${isDate(t.finish) ? ` · до ${fmtDate(t.finish)}` : ''}\n${ownerOf(t)?.name || 'ответственный не назначен'}${contractorOf(t) ? ' · ' + contractorOf(t).name : ''}` };
-    }).sort((a, b) => rank[a.state] - rank[b.state]);
-    const goal = L.projectGoal(pt), late = floors.filter(f => f.state === 'late').length;
-    return { id: p.id, name: p.name.replace(/^Пример:\s*/, ''), floors, crane: floors.some(f => ['work', 'revision', 'late'].includes(f.state)), late: late > 0, complete: goal.complete, more: Math.max(0, floors.length - 14),
-      sub: `${goal.done}/${goal.total} разделов${late ? ` · сорвано ${late}` : ''}`, subTone: late ? 'bad' : goal.complete ? 'ok' : '',
-      tip: `${p.name}${p.code ? ' · ' + p.code : ''}\n${L.PROJECT_STATUSES[p.status]?.label || 'стадия не задана'} · принято разделов ${goal.done} из ${goal.total}\nЩелчок по зданию — проект, по этажу — карточка` };
-  }).filter(Boolean);
-  return { rooms, buildings };
-}
-function viewOffice() {
-  if (isEmpty()) return emptyState();
-  const m = officeModel();
-  const wide = ($('#app')?.clientWidth || 1000) > 1300;
-  const svg = window.Office.render(m, { labels: officePrefs.labels, zoom: officePrefs.zoom, cols: m.rooms.some(r => r.people.length > 8) ? 5 : 4, siteCols: wide ? 4 : 3 });
-  const free = m.rooms.flatMap(r => r.people).filter(p => p.state === 'free').length, late = m.rooms.flatMap(r => r.people).filter(p => p.state === 'late').length;
-  const away = m.rooms.flatMap(r => r.people).filter(p => p.state === 'away').length;
-  const bdays = staffArr().filter(isBirthday);
-  return `<section class="panel office-panel"><div class="panel-h"><h3>Офис</h3>
-      <span class="meta">${m.rooms.reduce((s, r) => s + r.people.length, 0)} чел.${late ? ` · <span class="neg">со сорванным сроком ${late}</span>` : ''}${free ? ` · свободны ${free}` : ''}${away ? ` · отсутствуют ${away}` : ''} · объектов ${m.buildings.length}</span><span class="spacer"></span>
-      <button class="btn ghostbtn sm ${officePrefs.anim !== false ? 'on' : ''}" type="button" data-act="office-anim" aria-pressed="${officePrefs.anim !== false}" title="Человечки печатают, кран поворачивается">Анимация</button>
-      <button class="btn ghostbtn sm ${officePrefs.labels ? 'on' : ''}" type="button" data-act="office-labels" aria-pressed="${officePrefs.labels}">Подписи</button>
-      <span class="seg"><button class="btn sm" type="button" data-act="office-zoom" data-dir="out" title="Мельче">−</button><button class="btn sm" type="button" data-act="office-fit" title="Обычный масштаб">${Math.round((officePrefs.zoom || 1) * 100)}%</button><button class="btn sm" type="button" data-act="office-zoom" data-dir="in" title="Крупнее">+</button></span></div>
-    ${tip('office', 'Каждый штатный — человечек за своим столом: чем он занят, показывает состояние его карточек. Проекты — здания: этаж — карточка, цвет — статус, флаг — все разделы приняты, конус — сорван срок. Подрядчики здесь не показываются. Щелчок по человечку — его карточки, перетаскивание на коллегу — передать работу.')}
-    ${bdays.length ? `<div class="note-box office-bday">🎉 Сегодня день рождения: <b>${bdays.map(u => esc(u.name.replace(/^Пример:\s*/, ''))).join(', ')}</b></div>` : ''}
-    <div class="office-wrap${officePrefs.anim !== false ? ' anim' : ''}" id="office">${svg}</div>
-    <div class="tl-legend hint office-legend"><span class="ol ol-late"></span>срок сорван <span class="ol ol-check"></span>проверяет <span class="ol ol-carry"></span>сдал на проверку <span class="ol ol-rev"></span>доработка <span class="ol ol-free"></span>свободен (у кулера) <span class="ol ol-away"></span>отпуск — пустой стол · 👑 больше всех принято за 30 дней · колпак — день рождения
-      · этажи: <span class="fl fl-done"></span>принят <span class="fl fl-review"></span>проверка <span class="fl fl-work"></span>в работе <span class="fl fl-late"></span>сорван <span class="fl fl-todo"></span>не начат
-      · цвет человечка — направление: ${Object.entries(KIND).map(([k, x]) => `${kindIcon(k)}${x.label.split(' ')[0].toLowerCase()}`).join(' ')}</div>
-  </section>`;
-}
+const PERSON_STATE_TEXT = { late: 'срок сорван', checking: 'проверяет работы', carry: 'сдал на проверку', revision: 'на доработке', work: 'в работе', idle: 'работы не начаты', free: 'свободен — можно дать работу', away: 'отсутствует' };
 // Click on a person: their open cards, with «передать» and a link to all their cards.
-function officePerson(uid) {
+function personPopup(uid) {
   const u = state.users.get(uid);
   if (!u) return;
-  const st = officeState(u);
+  const st = personState(u);
   const root = document.createElement('div');
   root.className = 'modal-back';
   root.innerHTML = `<div class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="optitle"><h2 id="optitle"><span class="kicons">${userIcons(u)}</span>${esc(u.name)}</h2>
-    <p class="hint">${esc(A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''} · ${esc(st.awayText || OFFICE_STATE_TEXT[st.state])}</p>
+    <p class="hint">${esc(A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''} · ${esc(st.awayText || PERSON_STATE_TEXT[st.state])}</p>
     ${st.cards.length ? `<div class="op-list">${st.cards.map(t => `<div class="op-row"><button class="linkbtn" type="button" data-op-open="${esc(t.id)}">${marksHtml(t)} <span>${esc(projectOf(t)?.name || '')}</span></button>${statusChip(t)}<span class="due ${timing(t).cls}">${esc(timing(t).text)}</span>
       ${canEditFields() ? `<button class="btn ghostbtn sm" type="button" data-op-move="${esc(t.id)}" title="Передать другому сотруднику">⇄ Передать</button>` : ''}</div>`).join('')}</div>`
       : `<div class="none">${st.state === 'away' ? 'Сотрудник отсутствует.' : 'Открытых карточек нет — можно дать работу.'}</div>`}
@@ -4494,71 +4441,9 @@ function officePerson(uid) {
   root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('[data-m="close"]').focus();
 }
-// Drag a person onto a colleague: choose which card to hand over, then the usual confirmation (specialization check).
-function pickCardToHand(from, to) {
-  const cards = officeState(from).cards;
-  if (!cards.length) return toast(`У ${from.name} нет открытых карточек.`, true);
-  if (cards.length === 1) return reassign(cards[0].id, 'staff', from.id, to.id);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="pctitle"><h2 id="pctitle">Что передать: ${esc(shortName(from.name))} → ${esc(shortName(to.name))}</h2>
-    <div class="op-list">${cards.map(t => `<button class="op-row op-pick" type="button" data-pick="${esc(t.id)}">${marksHtml(t)}<span>${esc(projectOf(t)?.name || '')}</span><span class="spacer"></span>${statusChip(t)}</button>`).join('')}</div>
-    <div class="modal-f"><button class="btn" type="button" data-m="close">Отмена</button></div></div>`;
-  document.body.append(root);
-  root.addEventListener('click', e => {
-    const b = e.target.closest('button');
-    if (e.target === root || b?.dataset.m === 'close') return root.remove();
-    if (b?.dataset.pick) { root.remove(); reassign(b.dataset.pick, 'staff', from.id, to.id); }
-  });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); root.remove(); } });
-}
-let officeDrag = null;
-document.addEventListener('pointerdown', e => {
-  const g = e.target.closest?.('#office .o-person');
-  if (!g || e.button !== 0 || !canEditFields()) return;
-  officeDrag = { id: g.dataset.person, x: e.clientX, y: e.clientY, moved: false, ghost: null };
-});
-document.addEventListener('pointermove', e => {
-  const d = officeDrag;
-  if (!d) return;
-  if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) {
-    d.moved = true;
-    d.ghost = document.createElement('div');
-    d.ghost.className = 'office-ghost';
-    d.ghost.textContent = '📁 передать…';
-    document.body.append(d.ghost);
-    document.body.classList.add('col-resizing');
-  }
-  if (d.ghost) {
-    d.ghost.style.left = e.clientX + 12 + 'px'; d.ghost.style.top = e.clientY + 8 + 'px';
-    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('#office .o-person');
-    $$('#office .o-person.drop-ok').forEach(x => { if (x !== over) x.classList.remove('drop-ok'); });
-    if (over && over.dataset.person !== d.id) over.classList.add('drop-ok');
-  }
-});
-document.addEventListener('pointerup', e => {
-  const d = officeDrag;
-  officeDrag = null;
-  if (!d) return;
-  d.ghost?.remove();
-  document.body.classList.remove('col-resizing');
-  $$('#office .o-person.drop-ok').forEach(x => x.classList.remove('drop-ok'));
-  if (!d.moved) return;
-  suppressClick = true; // the drag ends with a click on the person under the mouse
-  setTimeout(() => { suppressClick = false; }, 0);
-  const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('#office .o-person');
-  if (!over || over.dataset.person === d.id) return;
-  const from = state.users.get(d.id), to = state.users.get(over.dataset.person);
-  if (from && to) { track('drop:office'); pickCardToHand(from, to); }
-});
-
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
-  'office-person': ({ id }) => { officePerson(id); },
-  'office-zoom': ({ el }) => { setOffice({ zoom: Math.min(2, Math.max(0.5, (officePrefs.zoom || 1) * (el.dataset.dir === 'in' ? 1.2 : 1 / 1.2))) }); },
-  'office-fit': () => { setOffice({ zoom: 1 }); },
-  'office-anim': () => { setOffice({ anim: officePrefs.anim === false }); },
-  'office-labels': () => { setOffice({ labels: !officePrefs.labels }); },
+  'person-open': ({ id }) => { personPopup(id); },
   'org-fold': ({ el }) => { const id = el.dataset.id; if (el.dataset.open === 'true') { orgOpen.delete(id); orgOpen.add('x:' + id); } else { orgOpen.add(id); orgOpen.delete('x:' + id); } saveLocal('orgOpen', [...orgOpen]); renderNow(); },
   'org-people': ({ el }) => { orgToggle('p:' + el.dataset.id); },
   'org-add': ({ el }) => { askDept(null, el.dataset.parent || ''); },
@@ -6726,7 +6611,7 @@ function setUserMenu(open) {
 }
 // «Свой вид» (3.6): each person on this computer keeps their own tab, columns, sorting, folded blocks, Gantt and
 // office settings. Switching the user stores the current set under the old user and brings back the new one's.
-const VIEW_KEYS = ['tab', 'cols', 'sort', 'folded', 'gantt', 'kbLanes', 'office', 'overview', 'peopleMode', 'presets', 'dense', 'teamCollapsed', 'progWeight', 'quietDays', 'tabOrder', 'hiddenTabs', 'nav', 'scroll'];
+const VIEW_KEYS = ['tab', 'cols', 'sort', 'folded', 'gantt', 'kbLanes', 'overview', 'peopleMode', 'presets', 'dense', 'teamCollapsed', 'progWeight', 'quietDays', 'tabOrder', 'hiddenTabs', 'nav', 'scroll'];
 function swapView(fromId, toId) {
   try {
     if (fromId) localStorage.setItem('glavspec.view:' + fromId, JSON.stringify(Object.fromEntries(VIEW_KEYS.map(k => [k, localStorage.getItem('glavspec.' + k)]))));
@@ -8392,15 +8277,12 @@ function viewSectionsHtml(full) {
   const BACKDROP_L = { none: 'Своя прозрачность', mica: 'Mica', acrylic: 'Акрил' };
   const backHtml = (w.backdrops || []).length > 1 ? `<div class="vm-sec"><span class="vm-h">Фон окна</span><div class="seg">${w.backdrops.map(k => `<button class="btn sm ${w.backdrop === k ? 'on' : ''}" type="button" data-act="set-backdrop" data-v="${k}">${BACKDROP_L[k]}</button>`).join('')}</div>
     <span class="hint">${w.backdrop && w.backdrop !== 'none' ? 'Фон Windows под окном: размытые обои, цвет темы Windows. Ползунок прозрачности в этом режиме не нужен.' : (w.win11 ? 'Mica — фон Windows 11, как у Проводника и Параметров; акрил — сильнее размытие.' : 'Акрил — размытый фон Windows под окном.')}</span></div>` : '';
-  const dockHtml = w.dock ? `<div class="vm-sec"><span class="vm-h">Край экрана</span><div class="seg">${[['off', 'Нет'], ['left', 'Слева'], ['right', 'Справа']].map(([k, l]) => `<button class="btn sm ${w.dock === k ? 'on' : ''}" type="button" data-act="set-dock" data-v="${k}">${l}</button>`).join('')}</div>
-    <label class="chk vm-mini"><input type="checkbox" data-act="set-dock-auto"${w.dockAuto ? ' checked' : ''}> Прятать за край, когда мышь уходит</label>
-    <span class="hint">${w.dockAuto ? 'Окно уезжает за край, остаётся тонкая рыжая полоска — коснитесь её мышью, и Пульт выедет. Пока вы печатаете в нём, он не прячется. Место на экране не занимает.' : 'Пульт стоит у края во всю высоту, как панель задач: развёрнутые окна других программ не заходят под него. Ширина — нынешняя ширина окна.'}</span></div>` : '';
   // 4.10 (69): the icon of the window, the taskbar button and the tray. The installer and shortcuts keep №1.
   const iconHtml = w.appIcon ? `<div class="vm-sec"><span class="vm-h">Значок</span><div class="app-icons">${APP_ICON_VARIANTS.map(n => `<button class="app-ic ${w.appIcon === n ? 'on' : ''}" type="button" data-act="set-app-icon" data-v="${n}" title="Значок №${n}${n === 1 ? ' — основной' : ''}" aria-pressed="${w.appIcon === n}">${appIconSvg(n)}</button>`).join('')}</div>
     <span class="hint">Меняет значок окна, кнопки на панели задач и у часов. Ярлык и установщик остаются с основным (первым).</span></div>` : '';
   if (!full) return theme + backHtml + zoomHtml + densHtml;
-  return theme + backHtml + zoomHtml + densHtml + dockHtml + iconHtml + `
-    <div class="vm-sec"><span class="vm-h">Панель вкладок</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div>
+  return theme + backHtml + zoomHtml + densHtml + iconHtml + `
+    <div class="vm-sec"><span class="vm-h">Меню</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div>
       ${nav.pos === 'left' ? `<label class="chk vm-mini"><input type="checkbox" data-act="nav-mini-chk"${nav.mini ? ' checked' : ''}> Только значки</label>` : ''}</div>
     <div class="vm-sec"><span class="vm-h">Положение окна</span>
       ${LEVELS.map(([k, l, d]) => `<label class="vm-level ${k === 'desktop' && w.desktopSupported === false ? 'off' : ''}"><input type="radio" name="vm-level" value="${k}" ${w.level === k ? 'checked' : ''} ${k === 'desktop' && w.desktopSupported === false ? 'disabled' : ''}>
@@ -8463,7 +8345,6 @@ onAct({
   'set-font': ({ el }) => { brandFont = el.dataset.v === 'montserrat' ? 'montserrat' : 'golos'; saveLocal('brandFont', brandFont); applyBrandFont(); renderViewMenu(); if (document.querySelector('.settings-modal')) renderSettings(); },
   'export': ({ el }) => { exportReport(el.dataset.format); },
   'ms-project': () => { msProjectExport(); },
-  'set-dock-auto': ({ el }) => { api.setDockAuto?.(el.checked); },
   'set-app-icon': ({ el }) => { api.setAppIcon?.(Number(el.dataset.v)).then(ok => { if (ok === false) toast('Не удалось сменить значок.', true); }); },
   'import': () => { startImport(); },
   'backup-save': () => { backupSave(); },

@@ -119,8 +119,6 @@ async function rust(cmd, a) {
     case 'autostart_get': return false;
     case 'autostart_set': return a.on;
     case 'tray_set': case 'window_to_bottom': case 'app_quit': case 'snap_layouts': case 'update_run': sysCalls.push(cmd); return null;
-    case 'appbar_set': return a.edge !== 'off';
-    case 'edge_area': return { x: 0, y: 0, width: 1920, height: 1040 };
     case 'app_icon': return a.variant ?? 1;
     default: throw new Error('unknown command ' + cmd);
   }

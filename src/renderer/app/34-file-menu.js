@@ -194,15 +194,12 @@ function viewSectionsHtml(full) {
   const BACKDROP_L = { none: 'Своя прозрачность', mica: 'Mica', acrylic: 'Акрил' };
   const backHtml = (w.backdrops || []).length > 1 ? `<div class="vm-sec"><span class="vm-h">Фон окна</span><div class="seg">${w.backdrops.map(k => `<button class="btn sm ${w.backdrop === k ? 'on' : ''}" type="button" data-act="set-backdrop" data-v="${k}">${BACKDROP_L[k]}</button>`).join('')}</div>
     <span class="hint">${w.backdrop && w.backdrop !== 'none' ? 'Фон Windows под окном: размытые обои, цвет темы Windows. Ползунок прозрачности в этом режиме не нужен.' : (w.win11 ? 'Mica — фон Windows 11, как у Проводника и Параметров; акрил — сильнее размытие.' : 'Акрил — размытый фон Windows под окном.')}</span></div>` : '';
-  const dockHtml = w.dock ? `<div class="vm-sec"><span class="vm-h">Край экрана</span><div class="seg">${[['off', 'Нет'], ['left', 'Слева'], ['right', 'Справа']].map(([k, l]) => `<button class="btn sm ${w.dock === k ? 'on' : ''}" type="button" data-act="set-dock" data-v="${k}">${l}</button>`).join('')}</div>
-    <label class="chk vm-mini"><input type="checkbox" data-act="set-dock-auto"${w.dockAuto ? ' checked' : ''}> Прятать за край, когда мышь уходит</label>
-    <span class="hint">${w.dockAuto ? 'Окно уезжает за край, остаётся тонкая рыжая полоска — коснитесь её мышью, и Пульт выедет. Пока вы печатаете в нём, он не прячется. Место на экране не занимает.' : 'Пульт стоит у края во всю высоту, как панель задач: развёрнутые окна других программ не заходят под него. Ширина — нынешняя ширина окна.'}</span></div>` : '';
   // 4.10 (69): the icon of the window, the taskbar button and the tray. The installer and shortcuts keep №1.
   const iconHtml = w.appIcon ? `<div class="vm-sec"><span class="vm-h">Значок</span><div class="app-icons">${APP_ICON_VARIANTS.map(n => `<button class="app-ic ${w.appIcon === n ? 'on' : ''}" type="button" data-act="set-app-icon" data-v="${n}" title="Значок №${n}${n === 1 ? ' — основной' : ''}" aria-pressed="${w.appIcon === n}">${appIconSvg(n)}</button>`).join('')}</div>
     <span class="hint">Меняет значок окна, кнопки на панели задач и у часов. Ярлык и установщик остаются с основным (первым).</span></div>` : '';
   if (!full) return theme + backHtml + zoomHtml + densHtml;
-  return theme + backHtml + zoomHtml + densHtml + dockHtml + iconHtml + `
-    <div class="vm-sec"><span class="vm-h">Панель вкладок</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div>
+  return theme + backHtml + zoomHtml + densHtml + iconHtml + `
+    <div class="vm-sec"><span class="vm-h">Меню</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div>
       ${nav.pos === 'left' ? `<label class="chk vm-mini"><input type="checkbox" data-act="nav-mini-chk"${nav.mini ? ' checked' : ''}> Только значки</label>` : ''}</div>
     <div class="vm-sec"><span class="vm-h">Положение окна</span>
       ${LEVELS.map(([k, l, d]) => `<label class="vm-level ${k === 'desktop' && w.desktopSupported === false ? 'off' : ''}"><input type="radio" name="vm-level" value="${k}" ${w.level === k ? 'checked' : ''} ${k === 'desktop' && w.desktopSupported === false ? 'disabled' : ''}>
@@ -265,7 +262,6 @@ onAct({
   'set-font': ({ el }) => { brandFont = el.dataset.v === 'montserrat' ? 'montserrat' : 'golos'; saveLocal('brandFont', brandFont); applyBrandFont(); renderViewMenu(); if (document.querySelector('.settings-modal')) renderSettings(); },
   'export': ({ el }) => { exportReport(el.dataset.format); },
   'ms-project': () => { msProjectExport(); },
-  'set-dock-auto': ({ el }) => { api.setDockAuto?.(el.checked); },
   'set-app-icon': ({ el }) => { api.setAppIcon?.(Number(el.dataset.v)).then(ok => { if (ok === false) toast('Не удалось сменить значок.', true); }); },
   'import': () => { startImport(); },
   'backup-save': () => { backupSave(); },

@@ -67,8 +67,6 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       }
       case 'cabinet_local_stop': return null;
       case 'snap_layouts': sysCalls.push('snap'); return true;
-      case 'appbar_set': sysCalls.push(`appbar:${args.edge}:${Math.round(args.width)}`); return args.edge !== 'off';
-      case 'edge_area': return { x: 0, y: 0, width: 1920, height: 1040 };
       case 'app_icon': sysCalls.push(`icon:${args.variant ?? 'self'}`); return args.variant ?? 1;
       case 'notify_actions': sysCalls.push(`toast:${args.open}:${args.buttons.map(b => b.label).join('/')}:${args.body}`); return true;
       default: throw 'unknown command ' + cmd;
@@ -443,25 +441,8 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await p.hover('#btn-max'); await wait(900);
     check('4.4: hovering «развернуть» asks Windows for the Snap Layouts', sysCalls.includes('snap'));
     await p.mouse.move(400, 400);
-    // 37
-    await js(() => window.api.setDock('right')); await wait(300);
-    check('4.4: «Справа» keeps the right side of the screen', sysCalls.some(c => /^appbar:right:\d+$/.test(c)) && disk.settings.dock === 'right', sysCalls.filter(c => c.startsWith('appbar')).join());
-    await js(() => window.api.setDock('off')); await wait(300);
-    check('4.4: «Нет» gives the strip back', sysCalls.at(-1) === 'appbar:off:0' && disk.settings.dock === 'off', sysCalls.at(-1));
-    // 4.10: auto-hide at the edge — no reserved band, on top, slides out leaving 4 px, comes back on the mouse
-    await js(() => window.api.setDockAuto(true)); await js(() => window.api.setDock('left')); await wait(500);
-    const a1 = await js(() => ({ x: window.__win.x, w: window.__win.width, h: window.__win.height, top: window.__win.top }));
-    check('4.10: auto-hide: the window stands at the left edge, full height, on top, no band taken', a1.x === 0 && a1.h === 1040 && a1.top === true && sysCalls.at(-1) === 'appbar:off:0' && disk.settings.dockAuto === true, JSON.stringify(a1));
-    await p.mouse.move(400, 400); await p.mouse.move(-5, -5); await js(() => document.documentElement.dispatchEvent(new MouseEvent('mouseleave'))); await wait(1300);
-    const a2 = await js(() => ({ x: window.__win.x, w: window.__win.width, hidden: document.documentElement.hasAttribute('data-dock-hidden') }));
-    check('4.10: the mouse leaves — the window slides out, a 4-pixel strip stays', a2.hidden && a2.x === -(a2.w - 4), JSON.stringify(a2));
-    await js(() => document.documentElement.dispatchEvent(new MouseEvent('mouseenter'))); await wait(500);
-    check('4.10: touching the strip brings it back', await js(() => window.__win.x === 0 && !document.documentElement.hasAttribute('data-dock-hidden')));
-    await js(() => document.querySelector('#f-q')?.focus()); await js(() => document.documentElement.dispatchEvent(new MouseEvent('mouseleave'))); await wait(1300);
-    check('4.10: not while typing in it', await js(() => window.__win.x === 0));
-    await js(() => document.activeElement?.blur());
-    await js(() => window.api.setDock('off')); await js(() => window.api.setDockAuto(false)); await wait(300);
-    check('4.10: «Нет» — back to normal, the level as set', await js(() => !document.documentElement.dataset.dockEdge));
+    // 4.18: no side of the screen any more; a setting left from before is cleared at the start.
+    check('4.18: no «Край экрана» in the window menu, no setDock', !(await js(() => !!document.querySelector('[data-act="set-dock"], [data-act="set-dock-auto"]'))) && !(await js(() => window.api.setDock !== window.api.noSuchCall42)));
     // 4.10 (69): the icon picker
     await js(() => window.api.setAppIcon(6)); await wait(200);
     check('4.10: icon №6 — the window and tray get it, the choice is kept', sysCalls.includes('icon:6') && disk.settings.appIcon === 6, sysCalls.filter(c => c.startsWith('icon')).join());
@@ -470,10 +451,15 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     // 4.12: the menu — items can be hidden; «Сообщения» in the menu opens the messenger over the whole window; «О программе».
     await js(() => { document.querySelector('.modal-back')?.remove(); const b = document.createElement('button'); b.dataset.act = 'settings'; b.dataset.sec = 'tabs'; document.body.append(b); b.click(); b.remove(); }); await wait(400);
     check('4.12: «Меню» in the settings lists «Сообщения», ticked', await js(() => { const i = document.querySelector('.settings-modal [data-act="tab-hide"][data-id="msgs"]'); return !!i && i.checked; }));
-    await js(() => document.querySelector('.settings-modal [data-act="tab-hide"][data-id="office"]').click()); await wait(300);
-    check('4.12: «Сообщения» is in the menu, «Офис» is not, the floating button stays', await js(() => !!document.querySelector('#tabs [data-act="msg-full"]') && !document.querySelector('#tabs [data-id="office"]') && !!document.querySelector('.msg-fab')));
+    check('4.18: «Настройки» by categories — «Меню» chosen, other sections hidden', await js(() => !!document.querySelector('#set-nav .set-cat.on[data-v="tabs"]') && document.querySelector('.set-sec[data-sec-id="view"]').hidden && !document.querySelector('.set-sec[data-sec-id="tabs"]').hidden));
+    check('4.18: no «Офис» anywhere', !(await js(() => !!document.querySelector('[data-act="tab-hide"][data-id="office"], #tabs [data-id="office"]'))));
+    await js(() => document.querySelector('.settings-modal [data-act="tab-hide"][data-id="kanban"]').click()); await wait(300);
+    check('4.12: «Сообщения» is in the menu, «Канбан» is not, the floating button stays', await js(() => !!document.querySelector('#tabs [data-act="msg-full"]') && !document.querySelector('#tabs [data-id="kanban"]') && !!document.querySelector('.msg-fab')));
+    await js(() => document.querySelector('.settings-modal [data-act="nav-pos"][data-v="left"]').click()); await wait(300);
+    check('4.18: «Где меню» in «Настройки → Меню» moves it', await js(() => document.getElementById('shell').classList.contains('nav-left')));
+    await js(() => document.querySelector('.settings-modal [data-act="nav-pos"][data-v="top"]').click()); await wait(300);
     await js(() => document.querySelector('.settings-modal [data-act="about"]').click()); await wait(400);
-    check('4.12: «О программе» shows the version', await js(() => /4\.\d+\.\d+/.test(document.querySelector('.about-modal')?.textContent || '')), await js(() => (document.querySelector('.about-modal')?.textContent || '').replace(/\s+/g, ' ').slice(0, 160)));
+    check('4.12: «О программе» shows the version (a category of the settings)', await js(() => /4\.\d+\.\d+/.test(document.querySelector('.set-sec[data-sec-id="about"]:not([hidden])')?.textContent || '')), await js(() => (document.querySelector('.set-sec[data-sec-id="about"]')?.textContent || '').replace(/\s+/g, ' ').slice(0, 160)));
     await js(() => { document.querySelector('.about-modal')?.remove(); document.querySelector('.settings-modal')?.remove(); });
     await js(() => document.querySelector('#tabs [data-act="msg-full"]').click()); await wait(500);
     const mr = await js(() => { const r = document.querySelector('.msg-panel.full.max')?.getBoundingClientRect(); return r && { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left) }; });
@@ -486,6 +472,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await js(() => document.querySelector('.msg-panel [data-act="msg-close"]').click()); await wait(400);
     // Right click on the menu; moving an item with the mouse.
     await js(() => document.querySelector('#tabs [data-id="gantt"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 60 }))); await wait(200);
+    check('4.18: right click on the menu offers where the menu stands', await js(() => document.querySelectorAll('#card-menu [data-act="nav-pos-menu"]').length === 3));
     check('4.12.1: right click on the menu offers «Убрать» and «Настроить меню…»', await js(() => !!document.querySelector('#card-menu [data-act="tab-hide-one"][data-id="gantt"]') && !!document.querySelector('#card-menu [data-act="settings"][data-sec="tabs"]')));
     await js(() => document.querySelector('#card-menu')?.remove());
     check('4.12.1: «Настроить меню» button on the panel', await js(() => !!document.querySelector('#nav [data-act="settings"][data-sec="tabs"]')));
@@ -503,7 +490,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     // Back as before for the later checks: «Офис» in the menu, the floating button instead of the menu item.
     await js(() => { const b = document.createElement('button'); b.dataset.act = 'settings'; b.dataset.sec = 'tabs'; document.body.append(b); b.click(); b.remove(); }); await wait(400);
     await js(() => document.querySelector('.settings-modal')?.remove()); await wait(200);
-    check('4.12: «Как было» — «Офис» back in the menu', await js(() => !!document.querySelector('#tabs [data-id="office"]')));
+    check('4.12: «Как было» — «Канбан» back in the menu', await js(() => !!document.querySelector('#tabs [data-id="kanban"]')));
     // 36: a notification with buttons when the window is not in front; «Открыть» opens the card
     const tid = await js(() => [...window.AppBridge.state.tasks.values()].find(t => !t.deletedAt)?.id);
     await js(() => { window.__win.focused = false; });

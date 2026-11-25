@@ -220,7 +220,7 @@
       onWindowMain: () => () => {},
       fbList: async () => [],
       snapLayouts: () => (shared?.win11 ? T.core.invoke('snap_layouts').catch(() => false) : false), // acts on this window
-      setDock: () => {}, setBackdrop: kind => call('setBackdrop', [kind]),
+      setBackdrop: kind => call('setBackdrop', [kind]),
     };
     return new Proxy(known, {
       get(target, name) {

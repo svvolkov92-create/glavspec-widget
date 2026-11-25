@@ -183,6 +183,7 @@ document.addEventListener('contextmenu', e => {
   m.className = 'menu card-menu'; m.id = 'card-menu'; m.setAttribute('role', 'menu');
   m.innerHTML = `<div class="cm-h"><b>Меню</b><span class="hint">перетащите пункт мышью, чтобы поменять порядок</span></div>
     <button role="menuitem" type="button" data-act="tab-hide-one" data-id="${esc(tab.dataset.id)}">Убрать «${esc(label)}» из меню</button>
+    <div class="cm-pos"><span class="hint">Меню:</span>${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos-menu" data-v="${k}">${l}</button>`).join('')}</div>
     <button role="menuitem" type="button" data-act="settings" data-sec="tabs">Настроить меню…</button>
     ${hiddenTabs.length || tabOrder.length ? '<button role="menuitem" type="button" data-act="tabs-reset">Вернуть меню как было</button>' : ''}`;
   document.body.append(m);
@@ -211,6 +212,7 @@ onAct({
   'tab-move': ({ el, id }) => { moveTab(id, Number(el.dataset.dir)); },
   'tabs-reset': () => { closeCardMenu(); hiddenTabs = []; saveLocal('hiddenTabs', []); setTabOrder([]); },
   'tab-hide': ({ el, id }) => { setTabHidden(id, !el.checked); },
+  'nav-pos-menu': ({ el }) => { closeCardMenu(); setNav({ pos: el.dataset.v }); },
   'tab-hide-one': ({ id }) => { closeCardMenu(); setTabHidden(id, true); toast('Пункт убран из меню. Вернуть — правый щелчок по меню или «Настройки → Меню».'); },
   'tab': ({ e, id }) => { if (e.ctrlKey) { wsAddSection(id); return; } wsRemember(); wsActive = ''; saveWs(); if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); },
   'dtab-close': ({ id }) => { docTabClose(id); },

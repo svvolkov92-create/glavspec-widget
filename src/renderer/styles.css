@@ -905,7 +905,7 @@ section.panel[id^="p-"], .cards > .card, .kb-lane, #gantt > .tl-row:not(.tl-head
 #file-menu { max-height: calc(100vh - 130px); overflow-y: auto }
 
 
-/* =================== 3.0: new header, stamp, direction marks, people, office =================== */
+/* =================== 3.0: new header, stamp, direction marks, people =================== */
 .drag { -webkit-app-region: drag }
 .drag-fill { flex: 1; align-self: stretch; min-width: 12px }
 .kico { width: 13px; height: 13px; flex: none; vertical-align: -2px }
@@ -981,7 +981,7 @@ th.drop-ok { box-shadow: inset 3px 0 0 var(--accent) }
 .preset-sel { font-weight: 500 }
 .proj-top { display: flex; align-items: center; gap: 8px; justify-content: space-between }
 .proj-top .fold-bar { margin: 0 0 0 auto }
-.stage-bar .btn.on, .g-mode .btn.on, .office-panel .btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); text-shadow: none }
+.stage-bar .btn.on, .g-mode .btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); text-shadow: none }
 
 /* drawer «Дополнительно» */
 details.more { border: 1px solid var(--line); border-radius: 8px; padding: 0 10px }
@@ -1095,21 +1095,7 @@ details.more[open] { padding-bottom: 10px }
 .vac-sum .tl-name b { font-size: 12px }
 .tl-name .kicons { margin-right: 2px }
 
-/* office */
-.office-panel { overflow: hidden }
-.office-wrap { overflow: auto; max-height: calc(100vh - 230px); padding: 6px; background: color-mix(in srgb, var(--bg) 60%, transparent) }
-.office-svg { display: block }
-.o-person, .o-building, .o-floor { cursor: pointer }
-.o-person:hover > :not(title), .o-person:focus-visible > :not(title) { filter: drop-shadow(0 0 4px rgba(29, 78, 158, .55)) }
-.o-person.me .o-name { font-weight: 800 }
-.o-person.drop-ok > :not(title) { filter: drop-shadow(0 0 6px rgba(31, 107, 69, .9)) }
-.o-floor:hover polygon { stroke-width: 2.2 }
-.o-building:hover .o-label rect { stroke: var(--accent) }
-.office-ghost { position: fixed; z-index: 90; pointer-events: none; background: var(--surface); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 8px; font-size: 12px; box-shadow: var(--shadow) }
-.office-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 8px 12px }
 .ol, .fl { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle }
-.ol-late { background: #F7E3E0; border: 1.5px solid #B42318 } .ol-check, .ol-carry { background: #EDE8F7; border: 1.5px solid #5A3FA0 }
-.ol-rev { background: #F5EBD3; border: 1.5px solid #7A5000 } .ol-free { background: #DDEFE3; border: 1.5px solid #1F6B45 } .ol-away { background: #F5EBD3; border: 1.5px dashed #7A5000; border-radius: 2px }
 .fl { border-radius: 2px; width: 14px }
 .fl-done { background: #DDEFE3; border: 1px solid #4E8F68 } .fl-review { background: #EDE8F7; border: 1px solid #7A5FC0 } .fl-work { background: #E1E8F4; border: 1px solid #1D4E9E }
 .fl-late { background: #F7E3E0; border: 1px solid #B42318 } .fl-todo { background: transparent; border: 1px dashed #9AA5AA }
@@ -1148,8 +1134,6 @@ details.more[open] { padding-bottom: 10px }
 :root[data-theme="graphite"] .code { border-color: #c9d1cc; color: #f1f3ef }
 :root[data-theme="graphite"] .stamp { background: color-mix(in srgb, var(--surface) 90%, var(--accent)) }
 :root[data-theme="graphite"] .st-grid { border-color: #c9d1cc }
-:root[data-theme="graphite"] .office-wrap { background: #e9e6dd }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="graphite"]) .office-wrap { background: #cfd3cf } }
 
 /* =================== 3.1: «Тандем», project tabs, composition, customer data =================== */
 .brand-logo { display: none; height: 20px; margin-right: 8px; vertical-align: -4px }
@@ -1174,7 +1158,7 @@ details.more[open] { padding-bottom: 10px }
 :root[data-theme="tandem"] .btn.danger { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)) }
 :root[data-theme="tandem"] .btn.danger.solid { background: var(--bad); border-color: var(--bad); color: #fff }
 :root[data-theme="tandem"] .btn.danger.solid:hover { background: color-mix(in srgb, var(--bad) 88%, #000) }
-:root[data-theme="tandem"] .btn.on, :root[data-theme="tandem"] .office-panel .btn.on, :root[data-theme="tandem"] .stage-bar .btn.on, :root[data-theme="tandem"] .g-mode .btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); box-shadow: inset 0 -2px 0 var(--accent) }
+:root[data-theme="tandem"] .btn.on, :root[data-theme="tandem"] .stage-bar .btn.on, :root[data-theme="tandem"] .g-mode .btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); box-shadow: inset 0 -2px 0 var(--accent) }
 :root[data-theme="tandem"] .btn.burn, :root[data-theme="tandem"] #btn-create.primary { }
 :root[data-theme="tandem"] .seg { display: inline-flex; gap: 0 !important; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent) }
 :root[data-theme="tandem"] .seg > .btn { border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); min-height: 32px }
@@ -1382,26 +1366,6 @@ input.sm-in { width: 64px !important }
 .drop-on { outline: 2px solid var(--accent); outline-offset: -1px }
 .pt-ava.sm { width: 20px; height: 20px; font-size: 10px }
 .ab-ok { margin-right: auto }
-/* 3.6: office animation (off by the button or by the system «reduce motion») */
-.office-wrap.anim .o-figure { transform-box: fill-box; transform-origin: 50% 100% }
-.office-wrap.anim .st-work .o-figure, .office-wrap.anim .st-revision .o-figure { animation: o-type 1.6s ease-in-out infinite }
-.office-wrap.anim .st-free .o-figure { animation: o-sway 3.2s ease-in-out infinite }
-.office-wrap.anim .st-carry .o-figure { animation: o-walk .9s ease-in-out infinite }
-.office-wrap.anim .st-late .o-bubble { animation: o-pulse 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100% }
-.office-wrap.anim .bday .o-cap { animation: o-hop 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100% }
-.office-wrap.anim .o-crown { animation: o-shine 2.4s ease-in-out infinite }
-.office-wrap.anim .o-jib { animation: o-jib 7s ease-in-out infinite alternate }
-.office-wrap.anim .o-person:nth-child(3n) .o-figure { animation-delay: -.5s }
-.office-wrap.anim .o-person:nth-child(3n+1) .o-figure { animation-delay: -1.1s }
-@keyframes o-type { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-1.5px) } }
-@keyframes o-sway { 0%, 100% { transform: rotate(-2deg) } 50% { transform: rotate(2deg) } }
-@keyframes o-walk { 0%, 100% { transform: translateX(0) } 50% { transform: translateX(3px) } }
-@keyframes o-pulse { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.08) } }
-@keyframes o-hop { 0%, 100% { transform: translateY(0) rotate(0) } 50% { transform: translateY(-3px) rotate(-6deg) } }
-@keyframes o-shine { 0%, 100% { filter: brightness(1) } 50% { filter: brightness(1.25) drop-shadow(0 0 3px #F2B705) } }
-@keyframes o-jib { from { transform: rotate(-4deg) } to { transform: rotate(5deg) } }
-@media (prefers-reduced-motion: reduce) { .office-wrap.anim * { animation: none !important } }
-.office-bday { margin: 6px 12px }
 /* 3.6: bulk actions */
 .bulk-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 14px; background: var(--accent-soft); border-bottom: 1px solid var(--line); font-size: 13px }
 .bulk-g { display: inline-flex; gap: 6px; align-items: center }
@@ -1524,7 +1488,6 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .anim .dpanel:not([hidden]) { animation: a-fade-in .14s ease-out }
 .anim .chat-msg.fresh { animation: a-rise .2s ease-out }
 /* Off: nothing moves (the Office has its own switch on top of this one). */
-:root:not(.anim) .office-wrap.anim * { animation: none !important }
 .marks .st-stage { font-size: 10px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 3px; align-self: center }
 /* Files attached to a request to the customer */
 .aq-files, .req-files { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin: 4px 0 }
@@ -1955,8 +1918,6 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 .org-projs { display: flex; flex-wrap: wrap; gap: 4px 14px }
 #org-cab .org-login { width: 160px; min-width: 0 }
 .org-mig > .hint, .org-mig .org-sug { padding-left: 12px; padding-right: 12px }
-.o-party { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel, transparent) }
-.o-party p { margin: 2px 0 }
 .party-diff { display: flex; flex-direction: column; gap: 4px; align-items: flex-start }
 .party-row { display: flex; align-items: center; gap: 8px; width: 100% }
 .party-row .grow { flex: 1; min-width: 0; overflow-wrap: anywhere }
@@ -1972,9 +1933,6 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 .app-ic { padding: 4px; border: 2px solid transparent; border-radius: 12px; background: none; cursor: pointer; line-height: 0 }
 .app-ic:hover { border-color: var(--line) }
 .app-ic.on { border-color: var(--accent, #F26A1F) }
-html[data-dock-hidden] body::after { content: ''; position: fixed; top: 0; bottom: 0; width: 4px; background: #F26A1F; z-index: 99999; pointer-events: none }
-html[data-dock-hidden][data-dock-edge="left"] body::after { right: 0 }
-html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
 /* 4.11: payments under a contract */
 .org-pay { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 8px 4px; border-bottom: 1px dashed var(--line) }
 .org-pay .pay-chip { display: inline-flex; align-items: center; gap: 4px }
@@ -2037,3 +1995,12 @@ html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
 .cm-hd { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted) }
 /* 4.17: passport */
 .pass-grid { margin-bottom: 8px }
+/* 4.18: «Настройки» by categories */
+.settings .set-wrap { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 14px; min-height: 360px }
+.set-nav { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); padding-right: 10px }
+.set-cat { text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 6px; font: inherit; color: var(--ink); cursor: pointer }
+.set-cat:hover { background: color-mix(in srgb, var(--accent) 8%, transparent) }
+.set-cat.on { background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent) }
+.settings #set-body { align-content: start }
+@media (max-width: 640px) { .settings .set-wrap { grid-template-columns: 1fr } .set-nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 6px } }
+.cm-pos { display: flex; gap: 4px; align-items: center; padding: 4px 10px }

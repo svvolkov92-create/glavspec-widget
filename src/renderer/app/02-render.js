@@ -70,7 +70,7 @@ function renderNow() {
   if (!SOLO && state.me && !tour) maybeStartTour();
   if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
   if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
-  const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, orgs: viewOrgs, office: viewOffice, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
+  const view = { day: viewDay, overview: viewOverview, projects: viewProjects, people: viewPeople, orgs: viewOrgs, gantt: viewGantt, kanban: viewKanban, tasks: viewTasks }[state.tab] || viewOverview;
   app.innerHTML = docTabsHtml() + view() + footer();
   renderMsg(); msgNotify(); renderFocus();
   if (active === 'f-q') { const el = $('#f-q'); el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* not a text input any more */ } }

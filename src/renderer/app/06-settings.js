@@ -27,7 +27,7 @@ function openSettings(sec = '') {
   if (!root) {
     root = document.createElement('div');
     root.className = 'modal-back settings-modal';
-    root.innerHTML = `<div class="modal wide-modal settings" role="dialog" aria-modal="true" aria-labelledby="stitle"><h2 id="stitle">Настройки</h2><div id="set-body"></div>
+    root.innerHTML = `<div class="modal wide-modal settings" role="dialog" aria-modal="true" aria-labelledby="stitle"><h2 id="stitle">Настройки</h2><div class="set-wrap"><nav class="set-nav" id="set-nav" aria-label="Разделы настроек"></nav><div id="set-body"></div></div>
       <div class="modal-f"><button class="btn primary" type="button" data-m="close">Готово</button><button class="btn ghostbtn" type="button" data-act="about">О программе</button><span class="hint">Настройки вида хранятся на этом компьютере.</span></div></div>`;
     document.body.append(root);
     root.addEventListener('click', e => {
@@ -37,26 +37,43 @@ function openSettings(sec = '') {
     root.addEventListener('change', () => setTimeout(renderSettings, 30));
     root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); root.remove(); } });
   }
+  if (sec) setCat = sec;
+  api.appInfo?.().then(i => { setAbout = i || {}; renderSettings(); }).catch(() => {});
   renderSettings();
-  if (sec) root.querySelector(`[data-sec-id="${sec}"]`)?.scrollIntoView({ block: 'start' });
+}
+// 4.18: «Настройки» by categories — the list on the left, the chosen one on the right (remembered on this computer).
+let setCat = loadLocal('setCat', 'view'), setAbout = {};
+function aboutHtml() {
+  const i = setAbout, srv = state.remote?.server;
+  const row = (k, v) => (v ? `<div class="about-row"><span class="hint">${k}</span><b>${esc(v)}</b></div>` : '');
+  return `<div class="about-head">${appIconSvg(state.win?.appIcon || 1)}<div><b>Пульт главспеца</b><p class="hint">ПМ «Тандем» · управление проектами мастерской</p></div></div>
+    ${row('Версия', i.web ? `веб-версия${srv?.version ? ` сервера ${srv.version}` : ''}` : i.version ? `${i.version}${i.platform ? ` (${i.platform})` : ''}` : '—')}
+    ${srv ? row('Сервер Пульта', `${srv.name ? srv.name + ' · ' : ''}версия ${srv.version || '—'}`) : row('Данные', 'на этом компьютере')}
+    ${state.remote?.url ? row('Адрес', state.remote.url) : ''}${row('Пользователь', state.me ? `${state.me.name} — ${A.ROLES[state.me.role]?.label || ''}` : '')}`;
 }
 function renderSettings() {
   const body = $('#set-body');
   if (!body) return;
   const top = body.scrollTop;
   const tabs = orderedTabs().filter(t => t.act ? !SOLO : visibleTabs().includes(t));
-  body.innerHTML = `<section class="set-sec" data-sec-id="view"><h3>Вид и окно</h3>${viewSectionsHtml(true)}<p class="hint">Прозрачность, «поверх окон» и сквозные клики — в меню «Окно» в заголовке.</p></section>
-    <section class="set-sec" data-sec-id="tabs"><h3>Меню</h3><p class="hint">Снимите галку — пункт уйдёт из меню (раздел останется доступен по ссылкам). Порядок — стрелками или перетаскиванием прямо в меню.</p>${tabs.map((x, i) => `<div class="cols-row"><label class="chk"><input type="checkbox" data-act="tab-hide" data-id="${x.id}"${hiddenTabs.includes(x.id) ? '' : ' checked'}> ${icon(x.act ? 'chat' : x.id)} ${esc(x.label)}${x.act ? ' <span class="hint">— мессенджер на всё окно</span>' : ''}</label><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'}>↑</button><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="1"${i < tabs.length - 1 ? '' : ' disabled'}>↓</button></div>`).join('')}
+  body.innerHTML = `<section class="set-sec" data-sec-id="view" data-sec-label="Вид и окно"><h3>Вид и окно</h3>${viewSectionsHtml(true)}<p class="hint">Прозрачность, «поверх окон» и сквозные клики — в меню «Окно» в заголовке.</p></section>
+    <section class="set-sec" data-sec-id="tabs" data-sec-label="Меню"><h3>Меню</h3><div class="vm-sec"><span class="vm-h">Где меню</span><div class="seg">${NAV_POS.map(([k, l]) => `<button class="btn sm ${nav.pos === k ? 'on' : ''}" type="button" data-act="nav-pos" data-v="${k}">${l}</button>`).join('')}</div></div><p class="hint">Снимите галку — пункт уйдёт из меню (раздел останется доступен по ссылкам). Порядок — стрелками или перетаскиванием прямо в меню.</p>${tabs.map((x, i) => `<div class="cols-row"><label class="chk"><input type="checkbox" data-act="tab-hide" data-id="${x.id}"${hiddenTabs.includes(x.id) ? '' : ' checked'}> ${icon(x.act ? 'chat' : x.id)} ${esc(x.label)}${x.act ? ' <span class="hint">— мессенджер на всё окно</span>' : ''}</label><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'}>↑</button><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="1"${i < tabs.length - 1 ? '' : ' disabled'}>↓</button></div>`).join('')}
       <button class="btn ghostbtn sm" type="button" data-act="tabs-reset">Как было</button></section>
-    <section class="set-sec" data-sec-id="game"><h3>Поощрения</h3><p class="hint">«Принято с первого раза», общая цель проекта и «Спасибо» в обсуждении. Считаются качество и общий результат, а не количество карточек.</p>
+    <section class="set-sec" data-sec-id="game" data-sec-label="Поощрения"><h3>Поощрения</h3><p class="hint">«Принято с первого раза», общая цель проекта и «Спасибо» в обсуждении. Считаются качество и общий результат, а не количество карточек.</p>
       <div class="seg"><button class="btn sm ${game ? 'on' : ''}" type="button" data-act="set-game" data-v="1">Показывать</button><button class="btn sm ${game ? '' : 'on'}" type="button" data-act="set-game" data-v="0">Выключить</button></div></section>
-    <section class="set-sec" data-sec-id="ov"><h3>Панели сводки</h3>${ovRowsHtml()}</section>
-    ${cab?.allowed ? `<section class="set-sec" data-sec-id="cab"><h3>Кабинет заказчика</h3><p class="hint">${cab.local ? '' : cab.configured ? `Подключён: ${esc(cab.url)}${cab.lastSync ? ` · связь ${cabTime(cab.lastSync)}` : ''}${cab.lastError ? ` · <span class="neg">${esc(cab.lastError)}</span>` : ''}` : cab.keyLost ? `<span class="neg">Адрес сервера ${esc(cab.url)} сохранён, а ключ команды из прошлой версии не переносится — откройте настройку кабинета и введите ключ заново.</span>` : 'Не подключён. Заказчик сможет смотреть свой проект в браузере или на телефоне.'}</p>
+    <section class="set-sec" data-sec-id="ov" data-sec-label="Сводка"><h3>Панели сводки</h3>${ovRowsHtml()}</section>
+    ${cab?.allowed ? `<section class="set-sec" data-sec-id="cab" data-sec-label="Кабинет заказчика"><h3>Кабинет заказчика</h3><p class="hint">${cab.local ? '' : cab.configured ? `Подключён: ${esc(cab.url)}${cab.lastSync ? ` · связь ${cabTime(cab.lastSync)}` : ''}${cab.lastError ? ` · <span class="neg">${esc(cab.lastError)}</span>` : ''}` : cab.keyLost ? `<span class="neg">Адрес сервера ${esc(cab.url)} сохранён, а ключ команды из прошлой версии не переносится — откройте настройку кабинета и введите ключ заново.</span>` : 'Не подключён. Заказчик сможет смотреть свой проект в браузере или на телефоне.'}</p>
       ${cab.local ? `<p class="hint">Работает на этом компьютере · для заказчиков в офисе: ${esc(cab.publicUrl)}</p><button class="btn sm" type="button" data-act="cab-local-stop">Остановить</button><button class="btn ghostbtn sm" type="button" data-act="cab-settings">Подключить к отдельному серверу…</button>`
         : cab.configured ? '<button class="btn sm" type="button" data-act="cab-settings">Изменить подключение…</button>'
         : '<button class="btn primary sm" type="button" data-act="cab-local-start">Запустить на этом компьютере</button><button class="btn ghostbtn sm" type="button" data-act="cab-settings">Подключить к отдельному серверу…</button>'}</section>` : ''}
-    ${isSpec() ? '' : `<section class="set-sec" data-sec-id="cols"><h3>Столбцы в таблицах карточек</h3>${colRowsHtml()}</section>`}
-    ${tipsClosed.size ? `<section class="set-sec"><h3>Подсказки</h3><p class="hint">Скрыто подсказок: ${tipsClosed.size}.</p><button class="btn ghostbtn sm" type="button" data-act="tips-reset">Показать снова</button></section>` : ''}`;
+    ${isSpec() ? '' : `<section class="set-sec" data-sec-id="cols" data-sec-label="Столбцы таблиц"><h3>Столбцы в таблицах карточек</h3>${colRowsHtml()}</section>`}
+    ${tipsClosed.size ? `<section class="set-sec" data-sec-id="tips" data-sec-label="Подсказки"><h3>Подсказки</h3><p class="hint">Скрыто подсказок: ${tipsClosed.size}.</p><button class="btn ghostbtn sm" type="button" data-act="tips-reset">Показать снова</button></section>` : ''}`;
+  body.insertAdjacentHTML('beforeend', `<section class="set-sec" data-sec-id="about" data-sec-label="О программе"><h3>О программе</h3>${aboutHtml()}</section>`);
+  const secs = [...body.querySelectorAll('.set-sec[data-sec-id]')];
+  if (!secs.some(x => x.dataset.secId === setCat)) setCat = 'view';
+  secs.forEach(x => { x.hidden = x.dataset.secId !== setCat; });
+  const navEl = $('#set-nav');
+  if (navEl) navEl.innerHTML = secs.map(x => `<button class="set-cat${x.dataset.secId === setCat ? ' on' : ''}" type="button" data-act="set-cat" data-v="${x.dataset.secId}" aria-current="${x.dataset.secId === setCat}">${esc(x.dataset.secLabel)}</button>`).join('');
   body.scrollTop = top;
 }
 // «⚙ Столбцы» opens right next to the table; headers can also be dragged to a new place.
@@ -153,12 +170,12 @@ const attention = () => {
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
-  'about': () => { openAbout(); },
+  'about': () => { if (document.querySelector('.settings-modal')) { setCat = 'about'; renderSettings(); } else openAbout(); },
+  'set-cat': ({ el }) => { setCat = el.dataset.v; saveLocal('setCat', setCat); const b = $('#set-body'); if (b) b.scrollTop = 0; renderSettings(); },
   'tips-reset': () => { tipsClosed.clear(); saveLocal('tipsClosed', []); renderNow(); },
   'cols-pop': ({ el }) => { colsOpen = !colsOpen; el.closest('.cols-wrap').querySelector('.cols-menu').hidden = !colsOpen; },
   'settings': ({ el }) => { closeCardMenu(); openSettings(el.dataset.sec); },
   'set-backdrop': ({ el }) => { api.setBackdrop?.(el.dataset.v).then(ok => { if (ok === false) toast('Этот фон Windows здесь недоступен — осталась своя прозрачность.', true); }); },
-  'set-dock': ({ el }) => { api.setDock?.(el.dataset.v); },
   'nav-pos': ({ el }) => { setNav({ pos: el.dataset.v }); },
   'nav-mini': () => { setNav({ mini: !nav.mini }); },
   'nav-mini-chk': ({ el }) => { setNav({ mini: el.checked }); },

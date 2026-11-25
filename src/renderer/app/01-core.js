@@ -19,7 +19,6 @@ const ICON = {
   kanban: '<rect x="1.8" y="2" width="3.6" height="11.5" rx=".9"/><rect x="6.2" y="2" width="3.6" height="7.5" rx=".9"/><rect x="10.6" y="2" width="3.6" height="9.5" rx=".9"/>',
   tasks: '<path d="M6 4h8M6 8h8M6 12h8" stroke-linecap="round"/><path d="M2 4h1.4M2 8h1.4M2 12h1.4" stroke-width="1.8" stroke-linecap="round"/>',
   orgs: '<path d="M2.4 14V2.6h7.2V14M9.6 6.2h4V14M1.4 14h13.2" stroke-linejoin="round" stroke-linecap="round"/><path d="M4.6 5h.8M7 5h.8M4.6 7.6h.8M7 7.6h.8M4.6 10.2h.8M7 10.2h.8M11.4 8.8h.4M11.4 11.2h.4" stroke-linecap="round"/>',
-  office: '<path d="M2 14V6.5L8 2l6 4.5V14z" stroke-linejoin="round"/><path d="M6 14v-3.5h4V14M5 7.5h1.5M9.5 7.5H11" stroke-linecap="round"/>',
   detach: '<rect x="1.8" y="4.8" width="9.4" height="9.4" rx="1.2"/><path d="M8.5 2h5.5v5.5M14 2L7.5 8.5" stroke-linecap="round" stroke-linejoin="round"/>',
   dock: '<rect x="1.8" y="1.8" width="12.4" height="12.4" rx="1.4"/><path d="M11 5L6 10M6 6v4h4" stroke-linecap="round" stroke-linejoin="round"/>',
 };
@@ -46,7 +45,6 @@ const TABS = [
   { id: 'projects', label: 'Проекты' },
   { id: 'people', label: 'Люди' },
   { id: 'orgs', label: 'Контрагенты' }, // 4.9 — only for those who work with customers or the budget
-  { id: 'office', label: 'Офис' },
   { id: 'gantt', label: 'Диаграмма Ганта' },
   { id: 'kanban', label: 'Канбан' },
   { id: 'tasks', label: 'Все карточки' },

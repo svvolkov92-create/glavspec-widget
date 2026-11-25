@@ -1,10 +1,10 @@
 // 4.4: what only Windows itself can do for the window — Snap Layouts on the own maximize button (33),
-// keeping a side of the screen like the taskbar does (37), notifications with buttons (36).
+// notifications with buttons (36). (The side of the screen, 37 and 4.10, was taken out in 4.18 at the user's request.)
 // Everything is decided in the window (tauri-api.js); these commands only talk to Windows.
 use serde::Deserialize;
 use tauri::{AppHandle, WebviewWindow};
 #[cfg(windows)]
-use tauri::{Emitter, PhysicalPosition, PhysicalSize};
+use tauri::Emitter;
 
 /* ---------- 33: Snap Layouts ---------- */
 // The title bar is the page's own, so Windows does not know where «maximize» is. Hovering it asks Windows for the
@@ -30,111 +30,6 @@ fn send_win_z() -> bool {
 #[cfg(not(windows))]
 fn send_win_z() -> bool {
     false
-}
-
-/* ---------- 37: a side of the screen (application desktop toolbar) ---------- */
-// «left» / «right»: Windows reserves a strip of the given width on the window's monitor, maximized windows of other
-// programs no longer go under Пульт, and the window is put into that strip. «off» gives the strip back.
-#[cfg(windows)]
-static APPBAR: std::sync::Mutex<Option<isize>> = std::sync::Mutex::new(None);
-
-#[cfg(windows)]
-const APPBAR_CALLBACK: u32 = 0x0400 + 0x77; // WM_USER + 0x77: Windows' notices are not needed, the window re-applies itself
-
-#[tauri::command]
-pub fn appbar_set(window: WebviewWindow, edge: String, width: f64) -> Result<bool, String> {
-    appbar(&window, &edge, width)
-}
-
-#[cfg(windows)]
-fn appbar(window: &WebviewWindow, edge: &str, width: f64) -> Result<bool, String> {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::UI::Shell::{SHAppBarMessage, ABE_LEFT, ABE_RIGHT, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS, APPBARDATA};
-
-    let handle = window.window_handle().map_err(|e| e.to_string())?;
-    let RawWindowHandle::Win32(h) = handle.as_raw() else { return Err("Окно без дескриптора Windows.".into()) };
-    let hwnd = h.hwnd.get();
-    let mut abd: APPBARDATA = unsafe { std::mem::zeroed() };
-    abd.cbSize = std::mem::size_of::<APPBARDATA>() as u32;
-    abd.hWnd = hwnd as _;
-    abd.uCallbackMessage = APPBAR_CALLBACK;
-    let mut reg = APPBAR.lock().map_err(|e| e.to_string())?;
-
-    if edge != "left" && edge != "right" {
-        if reg.take().is_some() {
-            unsafe { SHAppBarMessage(ABM_REMOVE, &mut abd) };
-        }
-        return Ok(false);
-    }
-    let right = edge == "right";
-    let mon = window.current_monitor().map_err(|e| e.to_string())?.ok_or("Монитор окна не найден.")?;
-    let (mx, my) = (mon.position().x, mon.position().y);
-    let (mw, mh) = (mon.size().width as i32, mon.size().height as i32);
-    let w = ((width.max(280.0) * mon.scale_factor()).round() as i32).min(mw / 2);
-
-    if reg.is_none() {
-        if unsafe { SHAppBarMessage(ABM_NEW, &mut abd) } == 0 {
-            return Err("Windows не дал закрепить окно у края.".into());
-        }
-        *reg = Some(hwnd);
-    }
-    abd.uEdge = if right { ABE_RIGHT } else { ABE_LEFT };
-    abd.rc = RECT { left: if right { mx + mw - w } else { mx }, right: if right { mx + mw } else { mx + w }, top: my, bottom: my + mh };
-    unsafe { SHAppBarMessage(ABM_QUERYPOS, &mut abd) };
-    // Windows may move the strip off the taskbar or another bar: keep the width from the side it gave.
-    if right { abd.rc.left = abd.rc.right - w } else { abd.rc.right = abd.rc.left + w }
-    unsafe { SHAppBarMessage(ABM_SETPOS, &mut abd) };
-    let _ = window.unmaximize();
-    window.set_position(PhysicalPosition::new(abd.rc.left, abd.rc.top)).map_err(|e| e.to_string())?;
-    window.set_size(PhysicalSize::new((abd.rc.right - abd.rc.left) as u32, (abd.rc.bottom - abd.rc.top) as u32)).map_err(|e| e.to_string())?;
-    Ok(true)
-}
-
-#[cfg(not(windows))]
-fn appbar(_window: &WebviewWindow, _edge: &str, _width: f64) -> Result<bool, String> {
-    Ok(false)
-}
-
-/* ---------- 4.10: the work area of the window's monitor (without the taskbar), physical pixels ---------- */
-// For the side of the screen with auto-hide: the window is placed and slid by the page itself.
-#[derive(serde::Serialize)]
-pub struct Area { x: i32, y: i32, width: i32, height: i32 }
-
-#[tauri::command]
-pub fn edge_area(window: WebviewWindow) -> Result<Area, String> {
-    #[cfg(windows)]
-    {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
-        let handle = window.window_handle().map_err(|e| e.to_string())?;
-        let RawWindowHandle::Win32(h) = handle.as_raw() else { return Err("Окно без дескриптора Windows.".into()) };
-        let mon = unsafe { MonitorFromWindow(h.hwnd.get() as _, MONITOR_DEFAULTTONEAREST) };
-        let mut mi: MONITORINFO = unsafe { std::mem::zeroed() };
-        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        if unsafe { GetMonitorInfoW(mon, &mut mi) } != 0 {
-            let r = mi.rcWork;
-            return Ok(Area { x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top });
-        }
-    }
-    let mon = window.current_monitor().map_err(|e| e.to_string())?.ok_or("Монитор окна не найден.")?;
-    Ok(Area { x: mon.position().x, y: mon.position().y, width: mon.size().width as i32, height: mon.size().height as i32 })
-}
-
-// On exit the strip is given back, so the desktop does not keep an empty band.
-pub fn appbar_release() {
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::UI::Shell::{SHAppBarMessage, ABM_REMOVE, APPBARDATA};
-        if let Ok(mut reg) = APPBAR.lock() {
-            if let Some(hwnd) = reg.take() {
-                let mut abd: APPBARDATA = unsafe { std::mem::zeroed() };
-                abd.cbSize = std::mem::size_of::<APPBARDATA>() as u32;
-                abd.hWnd = hwnd as _;
-                unsafe { SHAppBarMessage(ABM_REMOVE, &mut abd) };
-            }
-        }
-    }
 }
 
 /* ---------- 36: a notification with buttons ---------- */

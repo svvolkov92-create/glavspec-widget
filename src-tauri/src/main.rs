@@ -132,14 +132,13 @@ fn main() {
             io::fs_list, io::fs_remove, io::open_path, io::open_url, io::known_dirs, io::print_html,
             cabinet::http_request, cabinet::secret_protect, cabinet::secret_unprotect,
             cabinet::cabinet_local_start, cabinet::cabinet_local_stop, cabinet::cabinet_local_running,
-            native::snap_layouts, native::appbar_set, native::edge_area, native::notify_actions
+            native::snap_layouts, native::notify_actions
         ])
         .build(tauri::generate_context!())
         .expect("Пульт главспеца не запустился")
         // The built-in cabinet server is a child process: it stops with the app.
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                native::appbar_release();
                 cabinet::stop(&app.state::<cabinet::LocalServer>());
             }
         });

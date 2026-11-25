@@ -1,5 +1,5 @@
 'use strict';
-// 3.6: assignment board (drag and drop), project chat demo (incoming / outgoing per user), office animation,
+// 3.6: assignment board (drag and drop), project chat demo (incoming / outgoing per user), 
 // birthday cap and crown, bulk actions, quick entry, completion forecast, own view per user, automatic copy.
 const electron = require('electron');
 const { app } = electron;
@@ -55,19 +55,6 @@ app.on('browser-window-created', (_e, win) => {
         const n = await js(`document.querySelectorAll('.ab-task.changed').length`);
         check('drop on a group heading gives the whole group', n >= 2, String(n));
         await click('.ab-modal [data-m="close"]'); await wait(200);
-      });
-
-      await step('office: crown, birthday cap, animation', async () => {
-        const today = await js(`window.AppBridge.state.today`);
-        await js(`window.api.write({ type: 'update', col: 'users', id: 'demo-u3', data: { birthday: '1990-' + ${JSON.stringify(today)}.slice(5) } })`); await wait(500);
-        await click('[data-act="tab"][data-id="office"]'); await wait(600);
-        check('birthday cap and greeting', await js(`!!document.querySelector('.o-person.bday .o-cap')`) && /день рождения/.test(await text('.office-bday')));
-        check('crown for the most accepted', await js(`!!document.querySelector('.o-crown')`));
-        check('animation on by default', await js(`document.querySelector('#office').classList.contains('anim')`));
-        await shot('36-04-office');
-        await click('[data-act="office-anim"]'); await wait(300);
-        check('animation can be switched off', !(await js(`document.querySelector('#office').classList.contains('anim')`)));
-        await click('[data-act="office-anim"]'); await wait(200);
       });
 
       await step('bulk actions', async () => {
