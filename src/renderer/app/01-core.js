@@ -51,8 +51,12 @@ const TABS = [
   { id: 'kanban', label: 'Канбан' },
   { id: 'tasks', label: 'Все карточки' },
 ];
+// 4.12: menu items that are not sections — «Сообщения» opens the messenger over the whole window.
+const MENU_EXTRA = [{ id: 'msgs', label: 'Сообщения', act: 'msg-full' }];
 // The user's own tab order (dragged on the panel or set in «Настройки»); new tabs join at their default place.
 let tabOrder = loadLocal('tabOrder', []);
+// 4.12: menu items the user took off the menu («Настройки → Меню»). The sections stay reachable from links.
+let hiddenTabs = loadLocal('hiddenTabs', []);
 // Dragging a tab onto another one puts it in that place.
 let tabDrag = null;
 document.addEventListener('dragstart', e => {
@@ -127,7 +131,10 @@ function setNav(patch) {
 }
 const TRASH_DAYS = 30;
 // Tabs depend on the role: a specialist has no outside contractors or team management.
-const visibleTabs = () => orderedTabs().filter(t => t.id !== 'orgs' || A.canSeeOrgs(state.me)); // 4.1: «Люди» for everyone — a specialist sees staff and the org structure
+const visibleTabs = () => orderedTabs().filter(t => !t.act && (t.id !== 'orgs' || A.canSeeOrgs(state.me))); // 4.1: «Люди» for everyone — a specialist sees staff and the org structure
+// What the menu shows: the user's sections and extra items in the user's order, without what the user hid.
+const menuItems = () => orderedTabs().filter(t => (t.act || visibleTabs().includes(t)) && !hiddenTabs.includes(t.id));
+const msgInMenu = () => !SOLO && menuItems().some(t => t.id === 'msgs');
 
 const state = {
   // Non-deleted records (archived projects included). Deleted ones live in state.trash.

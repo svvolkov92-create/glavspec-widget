@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 // The version of the exchange with Пульты (src/core/remote-client.js: PROTOCOL). MIN_CLIENT — the oldest one this
 // server still accepts: raise it when old Пульты would write something the server no longer understands.
 const PROTOCOL = 1, MIN_CLIENT = 1;
@@ -323,8 +323,8 @@ function createServer(cfgIn = {}) {
       if (o?.type !== 'set' || !o.data) continue;
       const cur = store.data[o.col]?.[o.id];
       if (!cur) continue;
-      if (o.col === 'tasks' && !A.canSeeMoney(me)) for (const f of ['budget', 'payments', 'plan', 'invoiceReceived', 'invoiceDate', 'actSigned', 'actDate', 'contractNo', 'contractDate']) if (f in cur && !(f in o.data)) o.data[f] = cur[f];
-      if (o.col === 'projects' && !A.isGip(me)) for (const f of ['contract', 'payments', 'bills']) if (f in cur && !(f in o.data)) o.data[f] = cur[f];
+      if (o.col === 'tasks' && !A.canSeeTaskMoney(me, cur, store.data.projects)) for (const f of ['budget', 'payments', 'plan', 'invoiceReceived', 'invoiceDate', 'actSigned', 'actDate', 'contractNo', 'contractDate']) if (f in cur && !(f in o.data)) o.data[f] = cur[f];
+      if (o.col === 'projects' && !A.seesProjectMoney(me, cur)) for (const f of ['contract', 'payments', 'bills']) if (f in cur && !(f in o.data)) o.data[f] = cur[f];
       if (o.col === 'contractors') for (const f of ['requisites']) if (f in cur && !(f in o.data)) o.data[f] = cur[f];
       if (o.col === 'orgs' && !A.isGip(me)) for (const f of Object.keys(cur)) if (!(f in o.data)) o.data[f] = cur[f]; // a non-GIP sees a part of a counterparty
     }
@@ -496,7 +496,7 @@ function createServer(cfgIn = {}) {
         let parsed;
         try { parsed = SC.fromBackup(b.data || {}); } catch (e) { return json(res, 400, { ok: false, message: e.message }); }
         const gip = parsed.data.users[b.userId];
-        if (!gip || gip.deletedAt || gip.role !== 'gip') return json(res, 400, { ok: false, message: 'Переносить базу должен ГИП: выберите себя пользователем в Пульте.' });
+        if (!gip || gip.deletedAt || !A.isGip(gip)) return json(res, 400, { ok: false, message: 'Переносить базу должен ГИП: выберите себя пользователем в Пульте.' });
         store.replaceAll(parsed.data);
         if (typeof b.journal === 'string' && b.journal.length < 32 * 1024 * 1024) fs.writeFileSync(base.journalFile, b.journal.endsWith('\n') || !b.journal ? b.journal : b.journal + '\n');
         acc.byUser[b.userId] = { login: b.login, pw: hashPassword(b.password), createdAt: new Date().toISOString() };
@@ -671,7 +671,7 @@ function createServer(cfgIn = {}) {
       const has = fs.existsSync(path.join(cfg.dataDir, 'backups', `data-${d}.json`));
       if (d !== lastBackup && !has && new Date().getHours() >= 3) { backupNow(base, cfg.backupDays); lastBackup = d; }
       else if (has) lastBackup = d;
-      const gip = Object.keys(acc.byUser).find(id => store.data.users[id]?.role === 'gip' && !store.data.users[id]?.deletedAt);
+      const gip = Object.keys(acc.byUser).find(id => A.isGip(store.data.users[id]) && !store.data.users[id]?.deletedAt);
       if (gip) asUser(gip, () => core.purgeTrash()).catch(e => console.error('Корзина:', e.message));
     } catch (e) { console.error('Копия базы:', e); }
   };

@@ -75,6 +75,8 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     }
   });
   await ctx.addInitScript(require('./stub-window.js'));
+  // The older checks use the floating «Сообщения» button; 4.12 checks put the item back into the menu.
+  await ctx.addInitScript(() => { try { if (localStorage.getItem('glavspec.hiddenTabs') === null) localStorage.setItem('glavspec.hiddenTabs', '["msgs"]'); } catch { /* none */ } });
   const p = await ctx.newPage();
   const errs = []; p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
   const js = (f, a) => p.evaluate(f, a);
@@ -427,6 +429,15 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await js(() => document.querySelector('#view-menu [data-act="set-backdrop"][data-v="mica"]').click()); await wait(400);
     const m1 = await js(() => ({ attr: document.documentElement.dataset.backdrop, slider: document.querySelector('#alpha').disabled, calls: window.__win.calls.filter(c => c.startsWith('fx:')) }));
     check('4.4: Mica is applied, the translucency slider steps aside', m1.attr === 'mica' && m1.slider && m1.calls.at(-1) === 'fx:mica' && disk.settings.backdrop === 'mica', JSON.stringify(m1));
+    // 4.12: Kanban under Mica — a card without an executor has only a black-and-yellow frame, its inside is a plain card.
+    const tabWas = await js(() => window.AppBridge.state.tab);
+    await js(() => { document.querySelector('#view-menu')?.setAttribute('hidden', ''); const b = document.createElement('button'); b.dataset.act = 'tab'; b.dataset.id = 'kanban'; document.body.append(b); b.click(); b.remove(); }); await wait(600);
+    const ne = await js(() => { const c = document.querySelector('.kb-card.noexec'); if (!c) return null; const st = getComputedStyle(c), be = getComputedStyle(c, '::before'); return { bg: st.backgroundImage, ring: be.backgroundImage.includes('repeating-linear-gradient'), mask: (be.maskComposite || be.webkitMaskComposite || '') }; });
+    check('4.12: Kanban under Mica — no stripes inside a card without an executor, only the frame', !!ne && ne.bg === 'none' && ne.ring, JSON.stringify(ne));
+    await js(() => document.querySelector('.kb-card.noexec')?.scrollIntoView({ block: 'center' })); await wait(200);
+    await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-kanban-mica.png' }).catch(() => {});
+    await js(id => { const b = document.createElement('button'); b.dataset.act = 'tab'; b.dataset.id = id; document.body.append(b); b.click(); b.remove(); }, tabWas); await wait(500);
+    await js(() => { const b = document.createElement('button'); b.dataset.act = 'view-menu'; document.body.append(b); b.click(); b.remove(); }); await wait(300);
     await js(() => document.querySelector('#view-menu [data-act="set-backdrop"][data-v="none"]').click()); await wait(400);
     check('4.4: back to the own translucency', await js(() => document.documentElement.dataset.backdrop === 'none' && window.__win.calls.at(-1) === 'fx:none' && !document.querySelector('#alpha').disabled));
     await js(() => document.querySelector('[data-act="view-menu"]').click()); await wait(100);
@@ -458,6 +469,27 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     check('4.10: icon №6 — the window and tray get it, the choice is kept', sysCalls.includes('icon:6') && disk.settings.appIcon === 6, sysCalls.filter(c => c.startsWith('icon')).join());
     check('4.10: an unknown icon is refused', (await js(() => window.api.setAppIcon(2))) === false);
     await js(() => window.api.setAppIcon(1)); await wait(200);
+    // 4.12: the menu — items can be hidden; «Сообщения» in the menu opens the messenger over the whole window; «О программе».
+    await js(() => { document.querySelector('.modal-back')?.remove(); const b = document.createElement('button'); b.dataset.act = 'settings'; b.dataset.sec = 'tabs'; document.body.append(b); b.click(); b.remove(); }); await wait(400);
+    check('4.12: «Меню» in the settings lists «Сообщения», unticked by default here', await js(() => { const i = document.querySelector('.settings-modal [data-act="tab-hide"][data-id="msgs"]'); return !!i && !i.checked; }));
+    await js(() => document.querySelector('.settings-modal [data-act="tab-hide"][data-id="msgs"]').click()); await wait(300);
+    await js(() => document.querySelector('.settings-modal [data-act="tab-hide"][data-id="office"]').click()); await wait(300);
+    check('4.12: «Сообщения» is in the menu, «Офис» is not, the floating button is gone', await js(() => !!document.querySelector('#tabs [data-act="msg-full"]') && !document.querySelector('#tabs [data-id="office"]') && !document.querySelector('.msg-fab')));
+    await js(() => document.querySelector('.settings-modal [data-act="about"]').click()); await wait(400);
+    check('4.12: «О программе» shows the version', await js(() => /4\.\d+\.\d+/.test(document.querySelector('.about-modal')?.textContent || '')), await js(() => (document.querySelector('.about-modal')?.textContent || '').replace(/\s+/g, ' ').slice(0, 160)));
+    await js(() => { document.querySelector('.about-modal')?.remove(); document.querySelector('.settings-modal')?.remove(); });
+    await js(() => document.querySelector('#tabs [data-act="msg-full"]').click()); await wait(500);
+    const mr = await js(() => { const r = document.querySelector('.msg-panel.full.max')?.getBoundingClientRect(); return r && { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left) }; });
+    check('4.12: the messenger takes the whole window', !!mr && mr.x === 0 && mr.w >= 1390 && mr.h > 700, JSON.stringify(mr));
+    await p.screenshot({ path: require('os').tmpdir() + '/tauri-ui-msg-full.png' }).catch(() => {});
+    await js(() => document.querySelector('.msg-panel [data-act="msg-close"]').click()); await wait(400);
+    check('4.12: closed — the menu item stays, no floating button', await js(() => !document.querySelector('.msg-panel') && !document.querySelector('.msg-fab')));
+    // Back as before for the later checks: «Офис» in the menu, the floating button instead of the menu item.
+    await js(() => { const b = document.createElement('button'); b.dataset.act = 'settings'; b.dataset.sec = 'tabs'; document.body.append(b); b.click(); b.remove(); }); await wait(400);
+    await js(() => { document.querySelector('.settings-modal [data-act="tab-hide"][data-id="office"]').click(); }); await wait(300);
+    await js(() => { document.querySelector('.settings-modal [data-act="tab-hide"][data-id="msgs"]').click(); }); await wait(300);
+    await js(() => document.querySelector('.settings-modal')?.remove()); await wait(200);
+    check('4.12: back — «Офис» in the menu, the floating button', await js(() => !!document.querySelector('#tabs [data-id="office"]') && !!document.querySelector('.msg-fab')));
     // 36: a notification with buttons when the window is not in front; «Открыть» opens the card
     const tid = await js(() => [...window.AppBridge.state.tasks.values()].find(t => !t.deletedAt)?.id);
     await js(() => { window.__win.focused = false; });

@@ -12,7 +12,7 @@ function renderComposition() {
   const comp = d.composition;
   const rows = Composition.rowsFor(comp, code);
   const vols = new Set(Composition.volumes(comp, code).map(v => v.id));
-  const owners = A.assignableOwners(state.me, liveUsers()).filter(u => u.role !== 'gip' || A.isGip(state.me)).sort(byName);
+  const owners = A.assignableOwners(state.me, liveUsers()).filter(u => !A.isGip(u) || A.isGip(state.me)).sort(byName);
   const ownerSel = (attr, cur) => `<select ${attr} data-k="ownerId"><option value="">— вы —</option>${owners.map(u => `<option value="${esc(u.id)}"${u.id === cur ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`;
   const contrSel = (attr, cur) => `<select ${attr} data-k="contractorId"><option value="">—</option>${contractorsArr().map(c => `<option value="${esc(c.id)}"${c.id === cur ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`;
   const cardCell = (taskId, isVol) => { const t = taskId ? state.tasks.get(taskId) : null; return t ? `<button class="linkbtn" type="button" data-act="open-task" data-id="${esc(t.id)}">${statusChip(t)}</button>` : isVol ? '<span class="hint">нет</span>' : ''; };

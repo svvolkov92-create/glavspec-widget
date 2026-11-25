@@ -54,8 +54,12 @@ const TABS = [
   { id: 'kanban', label: 'Канбан' },
   { id: 'tasks', label: 'Все карточки' },
 ];
+// 4.12: menu items that are not sections — «Сообщения» opens the messenger over the whole window.
+const MENU_EXTRA = [{ id: 'msgs', label: 'Сообщения', act: 'msg-full' }];
 // The user's own tab order (dragged on the panel or set in «Настройки»); new tabs join at their default place.
 let tabOrder = loadLocal('tabOrder', []);
+// 4.12: menu items the user took off the menu («Настройки → Меню»). The sections stay reachable from links.
+let hiddenTabs = loadLocal('hiddenTabs', []);
 // Dragging a tab onto another one puts it in that place.
 let tabDrag = null;
 document.addEventListener('dragstart', e => {
@@ -130,7 +134,10 @@ function setNav(patch) {
 }
 const TRASH_DAYS = 30;
 // Tabs depend on the role: a specialist has no outside contractors or team management.
-const visibleTabs = () => orderedTabs().filter(t => t.id !== 'orgs' || A.canSeeOrgs(state.me)); // 4.1: «Люди» for everyone — a specialist sees staff and the org structure
+const visibleTabs = () => orderedTabs().filter(t => !t.act && (t.id !== 'orgs' || A.canSeeOrgs(state.me))); // 4.1: «Люди» for everyone — a specialist sees staff and the org structure
+// What the menu shows: the user's sections and extra items in the user's order, without what the user hid.
+const menuItems = () => orderedTabs().filter(t => (t.act || visibleTabs().includes(t)) && !hiddenTabs.includes(t.id));
+const msgInMenu = () => !SOLO && menuItems().some(t => t.id === 'msgs');
 
 const state = {
   // Non-deleted records (archived projects included). Deleted ones live in state.trash.
@@ -390,7 +397,8 @@ function renderNow() {
   document.title = title;
   $('#user-name').textContent = state.me ? `${state.me.name}${A.directionLabels(state.me).length ? ' · ' + A.directionLabels(state.me).join(', ') : ''}` : '—';
   document.querySelectorAll('[data-role-hide]').forEach(el => { el.hidden = !roleAllows(el.dataset.roleHide); });
-  $('#tabs').innerHTML = visibleTabs().map(t => `<button class="tab" role="tab" type="button" draggable="true" data-act="tab" data-id="${t.id}" aria-selected="${state.tab === t.id}" title="${t.label} — перетащите, чтобы поменять порядок вкладок">${icon(t.id)}<span class="lbl">${t.label}</span>${
+  const mt = msgInMenu() ? msgTotals() : null;
+  $('#tabs').innerHTML = menuItems().map(t => t.act ? `<button class="tab tab-act" type="button" draggable="true" data-act="${t.act}" data-id="${t.id}" title="${t.label} — чаты на всё окно">${icon('chat')}<span class="lbl">${t.label}</span>${mt?.n ? `<span class="cnt">${mt.n}</span>` : ''}${mt?.at ? `<span class="cnt bad" title="Вас упомянули">@${mt.at}</span>` : ''}</button>` : `<button class="tab" role="tab" type="button" draggable="true" data-act="tab" data-id="${t.id}" aria-selected="${state.tab === t.id}" title="${t.label} — перетащите, чтобы поменять порядок вкладок">${icon(t.id)}<span class="lbl">${t.label}</span>${
     t.id === 'tasks' ? `<span class="cnt">${tasksArr().length}</span>` : t.id === 'overview' && overdueCount ? `<span class="cnt bad">${overdueCount}</span>` : ''}</button>`).join('');
 
   const app = $('#app');
@@ -1099,6 +1107,28 @@ onAct({
   'cm-window': ({ el, act }) => { const t = state.tasks.get(el.dataset.id); if (t) cardMenuAct(act, t, el); },
 });
 /* ---------- «Настройки»: one window for everything about the look ---------- */
+// 4.12: «О программе» — which version this is (and the server's, when working through «Сервер Пульта»).
+async function openAbout() {
+  document.querySelector('.about-modal')?.remove();
+  const info = (await api.appInfo?.().catch(() => null)) || {};
+  const srv = state.remote?.server;
+  const row = (k, v) => (v ? `<div class="about-row"><span class="hint">${k}</span><b>${esc(v)}</b></div>` : '');
+  const root = document.createElement('div');
+  root.className = 'modal-back about-modal';
+  root.innerHTML = `<div class="modal about" role="dialog" aria-modal="true" aria-labelledby="about-t"><div class="about-head">${appIconSvg(state.win?.appIcon || 1)}<div><h2 id="about-t">Пульт главспеца</h2><p class="hint">ПМ «Тандем» · управление проектами мастерской</p></div></div>
+    ${row('Версия', info.web ? `веб-версия${srv?.version ? ` сервера ${srv.version}` : ''}` : info.version ? `${info.version}${info.platform ? ` (${info.platform})` : ''}` : '—')}
+    ${srv ? row('Сервер Пульта', `${srv.name ? srv.name + ' · ' : ''}версия ${srv.version || '—'}`) : row('Данные', 'на этом компьютере')}
+    ${state.remote?.url ? row('Адрес', state.remote.url) : ''}
+    ${row('Пользователь', state.me ? `${state.me.name} — ${A.ROLES[state.me.role]?.label || ''}` : '')}
+    <div class="modal-f"><button class="btn primary" type="button" data-m="close">Закрыть</button>${info.version || srv?.version ? '<button class="btn ghostbtn" type="button" data-m="copy">Скопировать</button>' : ''}</div></div>`;
+  document.body.append(root);
+  root.addEventListener('click', e => {
+    if (e.target === root || e.target.dataset.m === 'close') root.remove();
+    if (e.target.dataset.m === 'copy') navigator.clipboard?.writeText([...root.querySelectorAll('.about-row')].map(r => r.innerText.replace(/\s*\n\s*/, ': ')).join('\n')).then(() => toast('Скопировано'), () => {});
+  });
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); root.remove(); } });
+  root.querySelector('[data-m="close"]').focus();
+}
 function openSettings(sec = '') {
   setViewMenu(false);
   let root = document.querySelector('.settings-modal');
@@ -1106,7 +1136,7 @@ function openSettings(sec = '') {
     root = document.createElement('div');
     root.className = 'modal-back settings-modal';
     root.innerHTML = `<div class="modal wide-modal settings" role="dialog" aria-modal="true" aria-labelledby="stitle"><h2 id="stitle">Настройки</h2><div id="set-body"></div>
-      <div class="modal-f"><button class="btn primary" type="button" data-m="close">Готово</button><span class="hint">Настройки вида хранятся на этом компьютере.</span></div></div>`;
+      <div class="modal-f"><button class="btn primary" type="button" data-m="close">Готово</button><button class="btn ghostbtn" type="button" data-act="about">О программе</button><span class="hint">Настройки вида хранятся на этом компьютере.</span></div></div>`;
     document.body.append(root);
     root.addEventListener('click', e => {
       if (e.target === root || e.target.dataset.m === 'close') { root.remove(); return; }
@@ -1122,9 +1152,9 @@ function renderSettings() {
   const body = $('#set-body');
   if (!body) return;
   const top = body.scrollTop;
-  const tabs = visibleTabs();
+  const tabs = orderedTabs().filter(t => t.act ? !SOLO : visibleTabs().includes(t));
   body.innerHTML = `<section class="set-sec" data-sec-id="view"><h3>Вид и окно</h3>${viewSectionsHtml(true)}<p class="hint">Прозрачность, «поверх окон» и сквозные клики — в меню «Окно» в заголовке.</p></section>
-    <section class="set-sec" data-sec-id="tabs"><h3>Порядок вкладок</h3><p class="hint">Вкладки можно и просто перетащить мышью на панели.</p>${tabs.map((x, i) => `<div class="cols-row"><span>${icon(x.id)} ${esc(x.label)}</span><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'}>↑</button><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="1"${i < tabs.length - 1 ? '' : ' disabled'}>↓</button></div>`).join('')}
+    <section class="set-sec" data-sec-id="tabs"><h3>Меню</h3><p class="hint">Снимите галку — пункт уйдёт из меню (раздел останется доступен по ссылкам). Порядок — стрелками или перетаскиванием прямо в меню.</p>${tabs.map((x, i) => `<div class="cols-row"><label class="chk"><input type="checkbox" data-act="tab-hide" data-id="${x.id}"${hiddenTabs.includes(x.id) ? '' : ' checked'}> ${icon(x.act ? 'chat' : x.id)} ${esc(x.label)}${x.act ? ' <span class="hint">— мессенджер на всё окно</span>' : ''}</label><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'}>↑</button><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="1"${i < tabs.length - 1 ? '' : ' disabled'}>↓</button></div>`).join('')}
       <button class="btn ghostbtn sm" type="button" data-act="tabs-reset">Как было</button></section>
     <section class="set-sec" data-sec-id="game"><h3>Поощрения</h3><p class="hint">«Принято с первого раза», общая цель проекта и «Спасибо» в обсуждении. Считаются качество и общий результат, а не количество карточек.</p>
       <div class="seg"><button class="btn sm ${game ? 'on' : ''}" type="button" data-act="set-game" data-v="1">Показывать</button><button class="btn sm ${game ? '' : 'on'}" type="button" data-act="set-game" data-v="0">Выключить</button></div></section>
@@ -1231,6 +1261,7 @@ const attention = () => {
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
+  'about': () => { openAbout(); },
   'tips-reset': () => { tipsClosed.clear(); saveLocal('tipsClosed', []); renderNow(); },
   'cols-pop': ({ el }) => { colsOpen = !colsOpen; el.closest('.cols-wrap').querySelector('.cols-menu').hidden = !colsOpen; },
   'settings': ({ el }) => { openSettings(el.dataset.sec); },
@@ -1256,7 +1287,7 @@ function dayDocs() {
 function idlePeople() {
   if (isSpec()) return [];
   const busy = new Set(tasksArr().filter(t => ACTIVE.has(t.status)).flatMap(t => [t.ownerId, ...(t.coOwnerIds || []), executorOf(t)?.u?.id]).filter(Boolean));
-  const scope = A.isGip(state.me) ? liveUsers().filter(u => u.role !== 'gip') : liveUsers().filter(u => u.chiefId === state.me?.id);
+  const scope = A.isGip(state.me) ? liveUsers().filter(u => !A.isGip(u)) : liveUsers().filter(u => u.chiefId === state.me?.id);
   return scope.filter(u => !busy.has(u.id) && !A.absencesOf(u).some(x => x.from <= state.today && x.to >= state.today)).sort(byName);
 }
 function viewDay() {
@@ -2073,14 +2104,22 @@ document.addEventListener('auxclick', e => {
   const t = e.target.closest?.('.dtab[data-doc]');
   if (t) { e.preventDefault(); docTabClose(t.dataset.docId); return; }
   // 13: middle click on a section opens it as a tab.
-  const s = e.target.closest?.('#tabs .tab[data-id]');
+  const s = e.target.closest?.('#tabs .tab[data-id]:not(.tab-act)');
   if (s) { e.preventDefault(); wsAddSection(s.dataset.id); }
 });
 document.addEventListener('mousedown', e => { if (e.button === 1 && e.target.closest?.('#tabs .tab[data-id], .dtab[data-doc]')) e.preventDefault(); }); // no autoscroll
 function orderedTabs() {
-  const known = TABS.map(x => x.id), order = tabOrder.filter(id => known.includes(id));
-  TABS.forEach((x, i) => { if (!order.includes(x.id)) order.splice(Math.min(i, order.length), 0, x.id); });
-  return order.map(id => TABS.find(x => x.id === id));
+  const all = [...TABS, ...MENU_EXTRA];
+  const known = all.map(x => x.id), order = tabOrder.filter(id => known.includes(id));
+  all.forEach((x, i) => { if (!order.includes(x.id)) order.splice(Math.min(i, order.length), 0, x.id); });
+  return order.map(id => all.find(x => x.id === id));
+}
+// 4.12: hide or show a menu item; at least one section stays in the menu.
+function setTabHidden(id, hide) {
+  const next = hide ? [...new Set([...hiddenTabs, id])] : hiddenTabs.filter(x => x !== id);
+  if (hide && !visibleTabs().some(t => !next.includes(t.id))) return toast('Хотя бы один раздел должен остаться в меню.', true);
+  hiddenTabs = next; saveLocal('hiddenTabs', next);
+  renderNow(); if (document.querySelector('.settings-modal')) renderSettings();
 }
 function setTabOrder(order) { tabOrder = order; saveLocal('tabOrder', order); renderNow(); if (document.querySelector('.settings-modal')) renderSettings(); }
 function moveTab(id, dir) {
@@ -2093,7 +2132,8 @@ function moveTab(id, dir) {
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
   'tab-move': ({ el, id }) => { moveTab(id, Number(el.dataset.dir)); },
-  'tabs-reset': () => { setTabOrder([]); },
+  'tabs-reset': () => { hiddenTabs = []; saveLocal('hiddenTabs', []); setTabOrder([]); },
+  'tab-hide': ({ el, id }) => { setTabHidden(id, !el.checked); },
   'tab': ({ e, id }) => { if (e.ctrlKey) { wsAddSection(id); return; } wsRemember(); wsActive = ''; saveWs(); if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); },
   'dtab-close': ({ id }) => { docTabClose(id); },
   'ws-open': ({ el }) => { wsOpen(el.dataset.key); },
@@ -2216,7 +2256,7 @@ function chatTitle(c) {
   return c.title || 'Чат';
 }
 function chatPeople(c) {
-  if (c.kind === 'project') { const p = state.projects.get(c.projectId) || {}; return liveUsers().filter(u => u.role === 'gip' || (p.members || []).includes(u.id)); }
+  if (c.kind === 'project') { const p = state.projects.get(c.projectId) || {}; return liveUsers().filter(u => A.canChat(u, { ...p, id: c.projectId })); }
   return liveUsers().filter(u => (c.members || []).includes(u.id));
 }
 const msgUnread = c => { const me = state.me?.id, seen = c.seen?.[me] || ''; return (c.messages || []).filter(m => m.userId !== me && m.ts > seen); };
@@ -2439,7 +2479,7 @@ function renderMsg() {
   const t = msgTotals(), th = msgThread(msg.chatId), c = th?.type === 'chat' ? th.c : null;
   if (msg.chatId && msg.chatId !== 'new' && !th && msg.mode !== 'solo') msg.chatId = ''; // a chat window keeps waiting for its chat
   const pill = `<button class="msg-fab${t.n ? ' has' : ''}" type="button" data-act="msg-open" title="Сообщения: чаты проектов, личные и групповые">${icon('chat')}<span>Сообщения</span>${t.n ? `<i class="mc-n">${t.n}</i>` : ''}${t.at ? `<i class="mc-at" title="Вас упомянули">@${t.at}</i>` : ''}</button>`;
-  if (msg.mode === 'pill') { root.innerHTML = pill; return; }
+  if (msg.mode === 'pill') { root.innerHTML = msgInMenu() ? '' : pill; return; } // 4.12: with «Сообщения» in the menu no floating button
   const head = `<div class="mp-head"><b>Сообщения</b><span class="spacer"></span><button class="btn sm" type="button" data-act="msg-new">+ Новый чат</button>
     <button class="btn ghostbtn sm msg-stick${msg.stick ? ' on' : ''}" type="button" data-act="msg-stick" aria-pressed="${!!msg.stick}" title="${msg.stick ? 'Окно закреплено: остаётся, пока не закроете. В чат можно перетащить карточку. Нажмите, чтобы открепить' : 'Закрепить окно: не будет сворачиваться при щелчке мимо, в чат можно перетащить карточку'}">${icon('pin')}</button>
     <button class="btn ghostbtn sm" type="button" data-act="msg-size" title="${msg.mode === 'full' ? 'Свернуть в боковую панель' : 'Открыть окно со всеми чатами'}">${msg.mode === 'full' ? '⇲' : '⤢'}</button><button class="btn ghostbtn sm" type="button" data-act="msg-close" aria-label="Свернуть">✕</button></div>`;
@@ -2448,7 +2488,7 @@ function renderMsg() {
   const enter = msg.enter ? ' enter' : ''; msg.enter = false; // slide in only when the panel opens, not on every refresh
   if (msg.mode === 'solo') document.documentElement.style.setProperty('--bar-h', `${document.getElementById('bar')?.offsetHeight || 48}px`);
   if (msg.mode === 'solo') root.innerHTML = `<section class="msg-panel solo" aria-label="${esc(threadTitle(msg.chatId))}">${right}</section>`;
-  else root.innerHTML = `${msg.mode === 'full' ? `<div class="mp-back${enter}" data-act="msg-close"></div>` : ''}<section class="msg-panel ${msg.mode}${enter}" role="dialog" aria-label="Сообщения">${head}${body}</section>`;
+  else root.innerHTML = `${msg.mode === 'full' ? `<div class="mp-back${enter}" data-act="msg-close"></div>` : ''}<section class="msg-panel ${msg.mode}${msg.mode === 'full' && msg.max ? ' max' : ''}${enter}" role="dialog" aria-label="Сообщения">${head}${body}</section>`;
   const box = document.getElementById('mc-msgs');
   if (box) box.scrollTop = box.scrollHeight;
   if (focus) { const ta = document.getElementById('msg-text'); if (ta) { ta.focus(); try { ta.setSelectionRange(caret, caret); } catch { /* fine */ } } }
@@ -2567,7 +2607,15 @@ function mcEditCancel() { msg.edit = null; renderMsg(); }
 function msgClose() {
   if (msg.mode === 'pill' || msg.mode === 'solo') return; // a chat window closes with its own ✕
   leaveAnimated(document.querySelector('#msg-root .mp-back'), document.querySelector('#msg-root .msg-panel'));
-  msg.mode = 'pill';
+  msg.mode = 'pill'; msg.max = false;
+  renderMsg();
+}
+// 4.12: «Сообщения» in the menu — the messenger over the whole window, list of chats on the left.
+function msgFull() {
+  if (SOLO) return;
+  document.documentElement.style.setProperty('--bar-h', `${document.getElementById('bar')?.offsetHeight || 48}px`);
+  if (msg.mode === 'full' && msg.max) return msgClose();
+  msg.mode = 'full'; msg.max = true; msg.enter = true;
   renderMsg();
 }
 // «@» autocomplete: the chat's people by surname; Enter/Tab or a click inserts «@Фамилия ».
@@ -2618,7 +2666,8 @@ onAct({
   'msg-open-any': () => { msgOpen(); },
   'msg-open': () => { msgOpen(); },
   'msg-close': () => { msgClose(); },
-  'msg-size': () => { msg.mode = msg.mode === 'full' ? 'side' : 'full'; renderMsg(); },
+  'msg-size': () => { msg.mode = msg.mode === 'full' ? 'side' : 'full'; msg.max = false; renderMsg(); },
+  'msg-full': () => { msgFull(); },
   'msg-stick': () => { msg.stick = !msg.stick; saveLocal('msgStick', msg.stick); renderMsg(); toast(msg.stick ? 'Окно сообщений закреплено — перетащите карточку в чат, чтобы отправить её' : 'Окно сообщений свернётся при щелчке мимо'); },
   'msg-chat': ({ id }) => { msgOpen(id); },
   'msg-back': () => { msg.chatId = ''; renderMsg(); },
@@ -3541,7 +3590,7 @@ function misfitText(t, kind, toId) {
 function askReassign(t, kind, fromId, toId = '') {
   return new Promise(resolve => {
     const cands = kind === 'staff'
-      ? A.assignableOwners(state.me, liveUsers()).filter(u => u.role !== 'gip' && u.id !== fromId).sort(byName)
+      ? A.assignableOwners(state.me, liveUsers()).filter(u => !A.isGip(u) && u.id !== fromId).sort(byName)
       : contractorsArr().filter(c => c.id !== fromId);
     const nameOf = id => (kind === 'staff' ? state.users.get(id)?.name : state.contractors.get(id)?.name) || 'не назначен';
     const root = document.createElement('div');
@@ -3718,7 +3767,7 @@ function staffList(staff, list) {
 // «Люди» (4.1, backlog item 17): the GIP sees all staff and all outside people; a chief — all staff and own outside
 // people (added by him or working on his team's cards); a specialist — staff only.
 function peopleStaff() {
-  return liveUsers().filter(u => u.role !== 'gip').sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
+  return liveUsers().filter(u => !A.isGip(u)).sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
 }
 function peopleOutside() {
   if (A.isGip(state.me)) return contractorsArr();
@@ -3747,7 +3796,7 @@ function viewPeople() {
 
 // Staff have their own panel in the program; outside contractors do not and are tracked by the chief.
 function staffArr() {
-  const all = liveUsers().filter(u => u.role !== 'gip');
+  const all = liveUsers().filter(u => !A.isGip(u));
   const mine = A.isGip(state.me) ? all : all.filter(u => u.id === state.me?.id || (u.role === 'specialist' && u.chiefId === state.me?.id));
   return mine.sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
 }
@@ -3772,7 +3821,7 @@ function orgTree() {
   const depts = [...(state.depts?.values() || [])];
   if (!depts.length) {
     // Virtual: the company with the GIP(s) on top, a group per chief with the chief's specialists.
-    const gips = staff.filter(u => u.role === 'gip'), chiefs = staff.filter(u => u.role === 'chief').sort(byName);
+    const gips = staff.filter(A.isGip).sort((a, b) => A.isDirector(b) - A.isDirector(a)), chiefs = staff.filter(u => u.role === 'chief').sort(byName);
     const loose = staff.filter(u => u.role === 'specialist' && !chiefs.some(c => c.id === u.chiefId));
     const groups = chiefs.map(c => ({ id: 'v:' + c.id, name: `Группа: ${A.directionLabels(c).join(', ') || c.name}`, head: c, people: staff.filter(u => u.role === 'specialist' && u.chiefId === c.id).sort(byName), kids: [], virtual: true }));
     return [{ id: 'v:root', name: 'ПМ «Тандем»', head: gips[0] || null, people: [...gips.slice(1), ...loose], kids: groups, virtual: true }];
@@ -3883,7 +3932,7 @@ function askDept(dept = null, parentId = '') {
 }
 // The groups of chiefs become departments under one top department with the GIP as its head.
 async function orgFromGroups() {
-  const gip = liveUsers().find(u => u.role === 'gip'), chiefs = liveUsers().filter(u => u.role === 'chief');
+  const gip = liveUsers().find(A.isDirector) || liveUsers().find(A.isGip), chiefs = liveUsers().filter(u => u.role === 'chief');
   const top = newId(), at = new Date().toISOString();
   const ops = [op.set('depts', top, { name: 'ПМ «Тандем»', headId: gip?.id || '', parentId: '', createdAt: at })];
   if (gip) ops.push(op.update('users', gip.id, { deptId: top }));
@@ -3904,7 +3953,7 @@ function officeState(u) {
   const away = A.absencesOf(u).find(a => a.from <= state.today && a.to >= state.today);
   if (away) return { state: 'away', awayText: `${A.ABSENCE_KINDS[away.kind] || 'нет'} до ${fmtDate(away.to).slice(0, 5)}`, cards: [] };
   const cards = tasksArr().filter(t => hasOwner(t, u.id) && t.status !== 'done').sort(sortByDeadline);
-  const toCheck = u.role === 'specialist' ? 0 : tasksArr().filter(t => t.status === 'review' && A.reviewersOf(t, liveUsers()).includes(u.id)).length;
+  const toCheck = u.role === 'specialist' ? 0 : tasksArr().filter(t => t.status === 'review' && A.reviewersOf(t, liveUsers(), state.projects).includes(u.id)).length;
   if (cards.some(t => timing(t).overdue)) return { state: 'late', cards };
   if (toCheck) return { state: 'checking', bubble: [`проверяет ${toCheck}`, '#EDE8F7', '#5A3FA0'], cards };
   if (cards.some(t => t.status === 'review')) return { state: 'carry', cards };
@@ -5116,7 +5165,7 @@ function ownerOptions(selected, marks = []) {
   };
   // Keep a current owner who is outside the list (e.g. moved to another chief) visible rather than silently dropped.
   const extra = selected && !list.some(u => u.id === selected) ? `<option value="${esc(selected)}" selected>${esc(userLabel(state.users.get(selected)))}</option>` : '';
-  return extra + [['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
+  return extra + [['director', 'Директор'], ['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
     .map(([r, l]) => byRole(r).length ? `<optgroup label="${l}">${byRole(r).map(opt).join('')}</optgroup>` : '').join('');
 }
 
@@ -6215,7 +6264,7 @@ function setUserMenu(open) {
         <button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Связь, пароль${A.isGip(state.me) ? ', кто может входить' : ''}</small></button>`;
       menu.hidden = !open; $('#btn-user').setAttribute('aria-expanded', String(open)); return;
     }
-    menu.innerHTML = [['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
+    menu.innerHTML = [['director', 'Директор'], ['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
       .map(([r, l]) => usersByRole(r).length ? `<div class="menu-h">${l}</div>${usersByRole(r).map(item).join('')}` : '').join('')
       + '<p class="role-hint">Локальная версия: вход без пароля, роли разделяют интерфейс, но не защищают файл данных.</p>'
       + (api.serverInfo ? '<button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Общая база команды: подключиться или перенести</small></button>' : '');
@@ -6226,7 +6275,7 @@ function setUserMenu(open) {
 }
 // «Свой вид» (3.6): each person on this computer keeps their own tab, columns, sorting, folded blocks, Gantt and
 // office settings. Switching the user stores the current set under the old user and brings back the new one's.
-const VIEW_KEYS = ['tab', 'cols', 'sort', 'folded', 'gantt', 'kbLanes', 'office', 'overview', 'peopleMode', 'presets', 'dense', 'teamCollapsed', 'progWeight', 'quietDays', 'tabOrder', 'nav', 'scroll'];
+const VIEW_KEYS = ['tab', 'cols', 'sort', 'folded', 'gantt', 'kbLanes', 'office', 'overview', 'peopleMode', 'presets', 'dense', 'teamCollapsed', 'progWeight', 'quietDays', 'tabOrder', 'hiddenTabs', 'nav', 'scroll'];
 function swapView(fromId, toId) {
   try {
     if (fromId) localStorage.setItem('glavspec.view:' + fromId, JSON.stringify(Object.fromEntries(VIEW_KEYS.map(k => [k, localStorage.getItem('glavspec.' + k)]))));
@@ -6267,7 +6316,7 @@ function viewTeam() {
   const subsOf = id => visible.filter(u => u.role === 'specialist' && u.chiefId === id).sort(byName);
   const budgetCell = u => u.role === 'chief' ? (gip
     ? `<label class="chk"><input type="checkbox" data-act="toggle-budget" data-id="${esc(u.id)}"${u.canSeeBudget ? ' checked' : ''}> видит бюджет</label>`
-    : (u.canSeeBudget ? 'видит бюджет' : 'бюджет скрыт')) : u.role === 'gip' ? 'полный доступ' : 'без бюджета';
+    : (u.canSeeBudget ? 'видит бюджет' : 'бюджет скрыт')) : A.isDirector(u) ? 'полный доступ' : u.role === 'gip' ? 'свои проекты и где участник' : 'без бюджета';
   // depth: 0 GIP, 1 chief, 2 specialist; `kids` — ids under this node, for branch totals and collapsing.
   const row = (u, depth, kids = [], last = false, trunk = false) => {
     const own = ownerStats(u.id);
@@ -6293,7 +6342,7 @@ function viewTeam() {
   if (gip) {
     const chiefs = visible.filter(u => u.role === 'chief').sort(byName);
     const orphans = visible.filter(u => u.role === 'specialist' && !chiefs.some(c => c.id === u.chiefId)).sort(byName);
-    const gips = visible.filter(u => u.role === 'gip').sort(byName);
+    const gips = visible.filter(A.isGip).sort((a, b) => A.isDirector(b) - A.isDirector(a) || byName(a, b));
     const top = gips[0];
     const under = chiefs.map((c, i) => chiefBranch(c, 1, i === chiefs.length - 1 && !orphans.length)).join('')
       + (orphans.length ? `<tr class="tree d1 last orphan-h" style="--d:1"><td colspan="7"><div class="tree-cell" style="--d:1"><span class="tree-tg ph"></span><span class="hint">Без главспеца — ${orphans.length}: назначьте руководителя в карточке сотрудника</span></div></td></tr>`
@@ -6333,6 +6382,8 @@ function openUser(id, role = 'specialist', chiefId = '') {
       <div class="f wide"><label class="req" for="u-name">Имя</label><input id="u-name" name="name" value="${esc(u.name || '')}" maxlength="120" placeholder="Иванов И. И."></div>
       <div class="f"><label for="u-role">Роль</label><select id="u-role" name="role"${id === state.me.id ? ' disabled' : ''}>
         ${Object.entries(A.ROLES).map(([r, x]) => `<option value="${r}"${u.role === r ? ' selected' : ''}>${x.label}</option>`).join('')}</select></div>
+      <p class="hint wide" data-for-role="director">Директор видит все проекты, деньги и людей, назначает других директоров.</p>
+      <p class="hint wide" data-for-role="gip">ГИП видит свои проекты и проекты без ГИПа полностью, чужие — только если его пригласили участником (без договора и денег). Людей, контрагентов и сервер ведёт наравне с директором.</p>
       <div class="f" data-for-role="specialist"><label for="u-chief">Главспец</label><select id="u-chief" name="chiefId">
         <option value="">— не назначен —</option>${chiefs.map(c => `<option value="${esc(c.id)}"${u.chiefId === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="f wide" data-for-role="chief specialist"><span class="lbl">Направления</span><div class="chk-row">
@@ -6370,7 +6421,7 @@ async function submitUser() {
   data.chiefId = role === 'specialist' ? val('chiefId') : '';
   data.canSeeBudget = role === 'chief' && checked('canSeeBudget');
   data.canSeeContacts = role === 'chief' && checked('canSeeContacts');
-  if (role === 'gip') data.directions = [];
+  if (role === 'gip' || role === 'director') data.directions = [];
   if (id && role !== 'chief' && state.users.get(id)?.role === 'chief' && usersByRole('specialist').some(s => s.chiefId === id))
     return formError('У этого главспеца есть специалисты — сначала переведите их к другому главспецу.');
   const left = id ? [...state.tasks.values()].filter(t => hasOwner(t, id) && t.status !== 'done' && A.profileGaps({ ...state.users.get(id), ...data }, t).length).length : 0;
@@ -6499,7 +6550,7 @@ function refreshFocusSlot() { const slot = $('#focus-slot'), t = state.drawer?.k
 function tourSteps() {
   const me = state.me, gip = A.isGip(me), chief = A.isChief(me);
   const search = { sel: '[data-act="open-search"]', title: 'Поиск — Ctrl+K', text: A.canCreateTasks(me) ? 'Ищет проекты, карточки и людей. Начните с «+», чтобы сразу завести карточку: «+ ЭОМ Корпус 3 до 15.12 @Орлов».' : 'Ищет проекты, карточки и людей. Недавно открытое — первым.' };
-  const msgs = { sel: '[data-act="msg-open"]', title: 'Сообщения', text: 'Чаты проектов, личные и групповые. Сразу уведомляем только о том, где нужны вы.' };
+  const msgs = { sel: '[data-act="msg-open"], [data-act="msg-full"]', title: 'Сообщения', text: 'Чаты проектов, личные и групповые. Сразу уведомляем только о том, где нужны вы.' };
   if (gip) return [
     { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'С него удобно начинать: что ждёт вашей проверки, что просрочено, кто остался без работы.' },
     { sel: '[data-act="review-queue"]', tab: 'day', title: 'Очередь проверки', text: 'Карточки «на проверке» подряд: «Принять» или «Вернуть с замечанием», клавиши A и R.' },
@@ -6642,8 +6693,10 @@ const BILL_STATUS = [['to_pay', 'к оплате'], ['to_sign', 'на подпи
 const CONTRACT_STATUS = [['draft', 'готовится'], ['signing', 'на подписании'], ['signed', 'подписан'], ['signed_edo', 'подписан в ЭДО']];
 const tm = v => (/^\d{1,2}:\d{2}$/.test(String(v || '').trim()) ? String(v).trim().padStart(5, '0') : '');
 const money0 = v => { const n = parseMoney(String(v ?? '')); return Number.isNaN(n) ? 0 : n; };
+// 4.12: the customer's contract and money — the project's own GIP and the director (an invited GIP does not see them).
+const projMoney = () => A.seesProjectMoney(state.me, state.drawer?.kind === 'project' ? state.projects.get(state.drawer.id) : null);
 function projectDraft(p) {
-  const phases = (Array.isArray(p.phases) && p.phases.length ? p.phases : L.defaultPhases().filter(ph => A.isGip(state.me) || ph.key !== 'contract'))
+  const phases = (Array.isArray(p.phases) && p.phases.length ? p.phases : L.defaultPhases().filter(ph => projMoney() || ph.key !== 'contract'))
     .map(ph => ({ key: ph.key, start: ph.start || '', finish: ph.finish || '', done: ph.done || '' }));
   return {
     phases, milestones: clone(p.milestones || []), requests: clone(p.requests || []), docs: clone(p.docs || []),
@@ -6673,7 +6726,7 @@ function projectDraftData() {
     ird: keep(d.ird, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), kind: IRD_KINDS.some(k => k[0] === x.kind) ? x.kind : irdKindOf(x.title), who: String(x.who || '').trim(), status: IRD_STATUS.some(s => s[0] === x.status) ? x.status : 'plan', due: x.due || '', note: String(x.note || '').trim() })),
     meetings: d.meetings.filter(x => String(x.title || '').trim() || isDate(x.date)).map(x => ({ id: x.id || newId(), date: x.date || '', from: tm(x.from), to: tm(x.to), title: String(x.title || '').trim(), place: String(x.place || '').trim(), protocolNo: String(x.protocolNo || '').trim() })),
     // The customer's contract and payments: kept only from the GIP (others do not see them, so they never overwrite).
-    ...(A.isGip(state.me) ? {
+    ...(projMoney() ? {
       contract: { no: String(d.contract.no || '').trim(), date: d.contract.date || '', subject: String(d.contract.subject || '').trim(), sum: money0(d.contract.sum), status: CONTRACT_STATUS.some(s => s[0] === d.contract.status) ? d.contract.status : 'signed' },
       payments: keep(d.payments, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), sum: money0(x.sum), cond: String(x.cond || '').trim(), status: PAY_STATUS.some(s => s[0] === x.status) ? x.status : 'upcoming', date: x.date || '' })),
       bills: keep(d.bills, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), date: x.date || '', status: BILL_STATUS.some(s => s[0] === x.status) ? x.status : 'to_pay', due: x.due || '' })),
@@ -6747,7 +6800,7 @@ function custUnread(pid) {
 function custNav() {
   const panel = $('.dpanel[data-panel="cust"]');
   if (!panel) return;
-  const secs = CUST_SECS.filter(([k]) => k !== 'money' || A.isGip(state.me));
+  const secs = CUST_SECS.filter(([k]) => k !== 'money' || projMoney());
   if (!secs.some(([k]) => k === custSec)) custSec = 'plan';
   const unread = custUnread(state.drawer?.id);
   let nav = panel.querySelector('.cust-nav');
@@ -6766,7 +6819,7 @@ function renderCustomer() {
   custNav();
   box.innerHTML = `<div class="cust-top"><span class="hint">${now.planned ? `Сейчас: <b>${esc(now.current?.label || '—')}</b> · ${now.behind ? `<span class="neg">отставание ${now.behind} дн.</span>` : 'по графику'}${now.next ? ` · до «${esc(now.next.title)}» ${now.daysToNext} дн.` : ''}` : 'Задайте даты этапов — по ним строится план и «N дней до…» на странице заказчика.'}</span><span class="spacer"></span>
       <button class="btn" type="button" data-act="cust-page" data-format="pdf">PDF</button><button class="btn primary" type="button" data-act="cust-page" data-format="html">Сохранить и создать страницу</button></div>
-    <div class="sub" data-cs="plan"><h3>Этапы проекта</h3>${A.isGip(state.me) ? '' : '<p class="hint">Этап «Договор» ведёт ГИП.</p>'}
+    <div class="sub" data-cs="plan"><h3>Этапы проекта</h3>${projMoney() ? '' : '<p class="hint">Этап «Договор» ведёт ГИП.</p>'}
       ${phaseTableHtml(d.phases, (i, f) => `data-pd="phases.${i}.${f}"`)}${phaseGanttHtml(d.phases, d.milestones)}</div>
     <div class="sub" data-cs="plan"><h3>Вехи</h3>${list('milestones', (x, i) => `<td class="grow">${pdIn(`milestones.${i}.title`, x.title, 'placeholder="Заключение экспертизы" maxlength="120"')}</td><td>${pdDate(`milestones.${i}.date`, x.date)}</td><td>${pdChk(`milestones.${i}.done`, x.done, ' пройдена')}</td>`, ['Веха', 'Дата', ''], 'Ключевые даты для заказчика: договор, ПД на экспертизу, заключение, выдача РД.')}</div>
     <div class="sub" data-cs="req"><h3>Нужно от заказчика</h3>${list('requests', (x, i) => `<td class="grow">${pdIn(`requests.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}
@@ -6794,7 +6847,7 @@ function renderCustomer() {
           <td>${pdIn(`docs.${i}.no`, x.no, 'class="sm-in" placeholder="№" maxlength="40"')}</td><td>${pdDate(`docs.${i}.issued`, x.issued)}</td>
           <td>${pdDate(`docs.${i}.until`, x.until)}<div class="hint doc-rule">${rule ? (x.until && x.until !== auto && auto ? `вручную · по правилу: ${fmtDate(auto)}` : esc(rule.basis)) : 'по тексту документа'}${left !== null ? ` · ${left < 0 ? `<span class="neg">истёк</span>` : left <= (x.remind ?? 60) ? `<span class="warnv">истекает через ${left} дн.</span>` : `ещё ${left} дн.`}` : ''}</div></td>
           <td>за ${pdIn(`docs.${i}.remind`, x.remind ?? 60, 'class="sm-in" inputmode="numeric"')} дн.</td>`; }, ['Тип', 'Документ', '№', 'Дата выпуска', 'Действует до', 'Напомнить в сводке'], 'ГПЗУ, изыскания, ТУ — когда истекают. Для ГПЗУ и топосъёмки срок считается от даты выпуска сам; ТУ, СТУ и прочее — по тексту документа. Напоминание появится в сводке.')}</div>
-    ${A.isGip(state.me) ? `<div class="sub" data-cs="money"><h3>Договор и финансы <span class="chip tone-idle">только ГИП</span></h3><p class="hint">Договор заказчика с «Тандемом» — не путать с бюджетами подрядчиков. Пока номер договора пуст, вкладки «Договор и финансы» у заказчика нет.</p>
+    ${projMoney() ? `<div class="sub" data-cs="money"><h3>Договор и финансы <span class="chip tone-idle">только ГИП</span></h3><p class="hint">Договор заказчика с «Тандемом» — не путать с бюджетами подрядчиков. Пока номер договора пуст, вкладки «Договор и финансы» у заказчика нет.</p>
       <div class="fgrid"><div class="f"><label>Номер договора</label>${pdIn('contract.no', d.contract.no, 'placeholder="26/07-12" maxlength="40"')}</div><div class="f"><label>Дата</label>${pdDate('contract.date', d.contract.date)}</div>
         <div class="f wide"><label>Предмет</label>${pdIn('contract.subject', d.contract.subject, 'placeholder="Инженерные изыскания и проектная документация, стадия П" maxlength="200"')}</div>
         <div class="f"><label>Стоимость, ₽</label>${pdIn('contract.sum', d.contract.sum, 'inputmode="decimal" placeholder="4 860 000" maxlength="20"')}</div><div class="f"><label>Статус</label>${pdSel('contract.status', CONTRACT_STATUS, d.contract.status)}</div></div>
@@ -6804,7 +6857,7 @@ function renderCustomer() {
       <div class="fgrid"><div class="f wide"><label>Заголовок</label>${pdIn('advice.title', d.advice.title, 'placeholder="Рабочая документация на сети" maxlength="120"')}</div>
         <div class="f wide"><label>Текст</label><textarea data-pd="advice.text" maxlength="600" placeholder="Что посоветовать заказчику на этом этапе">${esc(d.advice.text)}</textarea></div>
         <div class="f"><label>Контакт на странице</label><select data-pd="contactId"><option value="">— не показывать —</option>${staff.map(u => `<option value="${esc(u.id)}"${u.id === d.contactId ? ' selected' : ''}>${esc(u.name)}${u.phone ? '' : ' (нет телефона)'}</option>`).join('')}</select><span class="hint">Телефон и почта — из карточки сотрудника.</span></div></div></div>
-    <div class="sub" data-cs="show"><h3>Что показывать заказчику</h3><div class="pd-show">${pdChk('show.plan', d.show.plan, ' план и вехи')}${pdChk('show.sections', d.show.sections, ' разделы проекта')}${pdChk('show.advice', d.show.advice, ' рекомендация ГИПа')}${pdChk('show.revisions', d.show.revisions, ' номера изменений')}${pdChk('show.ird', d.show.ird, ' исходные данные')}${pdChk('show.meetings', d.show.meetings, ' встречи и протокол')}${pdChk('show.team', d.show.team, ' команда проекта (участники)')}${A.isGip(state.me) ? pdChk('show.finance', d.show.finance, ' договор и финансы') : ''}${pdChk('show.soon', d.show.soon, ' «Навигатор» и «3D-модель» с пометкой «скоро»')}</div>
+    <div class="sub" data-cs="show"><h3>Что показывать заказчику</h3><div class="pd-show">${pdChk('show.plan', d.show.plan, ' план и вехи')}${pdChk('show.sections', d.show.sections, ' разделы проекта')}${pdChk('show.advice', d.show.advice, ' рекомендация ГИПа')}${pdChk('show.revisions', d.show.revisions, ' номера изменений')}${pdChk('show.ird', d.show.ird, ' исходные данные')}${pdChk('show.meetings', d.show.meetings, ' встречи и протокол')}${pdChk('show.team', d.show.team, ' команда проекта (участники)')}${projMoney() ? pdChk('show.finance', d.show.finance, ' договор и финансы') : ''}${pdChk('show.soon', d.show.soon, ' «Навигатор» и «3D-модель» с пометкой «скоро»')}</div>
       <p class="hint">Подрядчики, бюджеты подрядчиков и внутренние замечания на странице не показываются никогда; договор заказчика — только если ГИП его заполнил и включил.</p></div>`;
 }
 // Source data and requests: a row is «asked» when an open request points to it.
@@ -6878,7 +6931,7 @@ function renderComposition() {
   const comp = d.composition;
   const rows = Composition.rowsFor(comp, code);
   const vols = new Set(Composition.volumes(comp, code).map(v => v.id));
-  const owners = A.assignableOwners(state.me, liveUsers()).filter(u => u.role !== 'gip' || A.isGip(state.me)).sort(byName);
+  const owners = A.assignableOwners(state.me, liveUsers()).filter(u => !A.isGip(u) || A.isGip(state.me)).sort(byName);
   const ownerSel = (attr, cur) => `<select ${attr} data-k="ownerId"><option value="">— вы —</option>${owners.map(u => `<option value="${esc(u.id)}"${u.id === cur ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`;
   const contrSel = (attr, cur) => `<select ${attr} data-k="contractorId"><option value="">—</option>${contractorsArr().map(c => `<option value="${esc(c.id)}"${c.id === cur ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`;
   const cardCell = (taskId, isVol) => { const t = taskId ? state.tasks.get(taskId) : null; return t ? `<button class="linkbtn" type="button" data-act="open-task" data-id="${esc(t.id)}">${statusChip(t)}</button>` : isVol ? '<span class="hint">нет</span>' : ''; };
@@ -7355,7 +7408,7 @@ onAct({
 /* ---------- project & contractor ---------- */
 // The project's GIP: any GIP of the team; a project made before 4.1 may name someone else — kept in the list.
 function gipOptions(sel) {
-  const list = liveUsers().filter(u => u.role === 'gip' || u.id === sel).sort(byName);
+  const list = liveUsers().filter(u => A.isGip(u) || u.id === sel).sort(byName);
   return `<option value="">— не назначен —</option>${list.map(u => `<option value="${esc(u.id)}"${u.id === sel ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}`;
 }
 const projectGip = p => (p?.gipId && state.users.get(p.gipId)) || null;
@@ -8442,7 +8495,7 @@ document.addEventListener('drop', e => {
   const hintsOff = () => { clearTimeout(altT); altT = null; document.body.classList.remove('alt-hints'); document.querySelectorAll('[data-alt-key]').forEach(x => x.removeAttribute('data-alt-key')); };
   const hintsOn = () => {
     if (state.win.compact) return;
-    visibleTabs().slice(0, 9).forEach((t, i) => $(`#tabs [data-id="${t.id}"]`)?.setAttribute('data-alt-key', `Alt+${i + 1}`));
+    menuItems().slice(0, 9).forEach((t, i) => $(`#tabs [data-id="${t.id}"]`)?.setAttribute('data-alt-key', `Alt+${i + 1}`));
     $('[data-act="open-search"]')?.setAttribute('data-alt-key', 'Ctrl+K');
     $('#btn-max')?.setAttribute('data-alt-key', 'F11');
     if (state.drawer?.kind === 'task') $('[data-act="save-stay"]')?.setAttribute('data-alt-key', 'Ctrl+S');
@@ -8497,7 +8550,8 @@ document.addEventListener('keydown', e => {
   if (ctrl && !e.altKey && !e.shiftKey && code === 'KeyZ' && !typing && !document.querySelector('.modal-back, .palette-back')) { e.preventDefault(); track('key:undo'); undoLast(); return; }
   if (e.altKey && !ctrl && /^Digit[1-9]$/.test(code) && !state.win.compact) {
     e.preventDefault();
-    const t = visibleTabs()[Number(code.slice(5)) - 1];
+    const t = menuItems()[Number(code.slice(5)) - 1];
+    if (t?.act === 'msg-full') { msgFull(); return; }
     if (t) { state.tab = t.id; saveLocal('tab', t.id); renderNow(); }
     return;
   }

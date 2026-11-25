@@ -17,7 +17,7 @@
     const users = Object.entries(store.data.users).filter(([, u]) => !u.deletedAt);
     if (chat.kind === 'project') {
       const p = store.data.projects[chat.projectId] || {};
-      return users.filter(([id, u]) => u.role === 'gip' || (p.members || []).includes(id)).map(([id, u]) => ({ id, name: u.name }));
+      return users.filter(([id, u]) => A.canChat({ ...u, id }, { ...p, id: chat.projectId })).map(([id, u]) => ({ id, name: u.name }));
     }
     return users.filter(([id]) => (chat.members || []).includes(id)).map(([id, u]) => ({ id, name: u.name }));
   }
@@ -141,7 +141,7 @@
   // Sample chats for the examples (marked demo, removed with them).
   function seedDemo() {
     const me = currentUser(), users = store.data.users;
-    const gip = A.isGip(me) ? me.id : Object.entries(users).find(([, u]) => u.role === 'gip' && !u.deletedAt)?.[0];
+    const gip = A.isGip(me) ? me.id : Object.entries(users).find(([, u]) => A.isGip(u) && !u.deletedAt)?.[0];
     if (!gip || !users['demo-u2'] || !store.data.projects['demo-p2']) return { ok: false };
     const ago = h => new Date(Date.now() - h * 36e5).toISOString();
     const nm = id => users[id]?.name || '';

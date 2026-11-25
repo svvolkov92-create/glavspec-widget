@@ -361,6 +361,7 @@
   const saved = async result => { const f = await ctx.flush(); return f.ok ? result : f; };
 
   const known = {
+    appInfo: async () => ({ version: window.TauriCore?.version || '', platform: 'Windows' }), // 4.12: «О программе»
     getData: async () => { const c = await ready(); return { data: c.core.userView(), warning: c.warning, remote: c.status ? c.status() : null }; },
     // «Сервер Пульта»: where this window takes its data, signing in, moving the base, accounts (GIP), conflicts.
     serverInfo: async () => {

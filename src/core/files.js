@@ -56,7 +56,7 @@
   // электрика», «инженер, слаботочка»). The contact person is shown separately and skipped here.
   function customerTeam(p) {
     const dirs = u => (u.directions || []).map(id => A.DIRECTIONS.find(d => d.id === id)?.label.toLowerCase()).filter(Boolean).join(', ');
-    const role = u => (u.role === 'gip' ? 'ГИП' : `${u.role === 'chief' ? 'главный специалист' : 'инженер'}${dirs(u) ? ', ' + dirs(u) : ''}`);
+    const role = u => (u.role === 'director' ? 'директор' : u.role === 'gip' ? 'ГИП' : `${u.role === 'chief' ? 'главный специалист' : 'инженер'}${dirs(u) ? ', ' + dirs(u) : ''}`);
     return (Array.isArray(p.members) ? p.members : []).filter(id => id !== (p.contactId || p.gipId)).map(id => store.data.users[id]).filter(u => u && !u.deletedAt).map(u => ({ name: u.name, role: role(u) }));
   }
   // The GIP contact shown to the customer: the project's «контакт для заказчика».
@@ -214,7 +214,7 @@
   }
   function openTaskFolder(id) {
     const me = currentUser(), t = typeof id === 'string' ? store.data.tasks[id] : null;
-    if (!t || !A.canSeeTask(me, t, store.snapshot().users)) return { ok: false, message: 'Карточка не найдена.' };
+    if (!t || !A.canSeeTask(me, t, store.snapshot().users, null, store.data.projects)) return { ok: false, message: 'Карточка не найдена.' };
     return openFolder(typeof t.folder === 'string' ? t.folder.trim() : '', 'раздела');
   }
   async function pickFolder(current) {

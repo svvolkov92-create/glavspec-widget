@@ -81,7 +81,7 @@
     for (const o of demoBatch ? [] : valid) {
       const prev = store.data[o.col][o.id] || null;
       const next = o.type === 'delete' ? null : o.type === 'update' ? { ...(prev || {}), ...(o.data || {}) } : o.data;
-      const err = A.checkWrite(me, o.col, prev, next, usersNow, o.id);
+      const err = A.checkWrite(me, o.col, prev, next, usersNow, o.id, store.data.projects);
       if (err) return { ok: false, message: err };
     }
     // Bookkeeping added after the check: activity time, «new» marks for people a card was handed to,
@@ -100,7 +100,7 @@
         const text = last?.type === 'status' && last.to === 'review' ? String(last.note || '').trim() : '';
         const comments = [...(next.comments || []), { id: now.replace(/\D/g, '') + Math.random().toString(36).slice(2, 6), ts: now, userId: me?.id || '', user: me?.name || '', kind: 'submit', text: text || 'Сдано на проверку.' }];
         o.data.comments = comments;
-        for (const id of A.reviewersOf(next, usersNow)) if (id !== me?.id) notify[id] = now;
+        for (const id of A.reviewersOf(next, usersNow, store.data.projects)) if (id !== me?.id) notify[id] = now;
       }
       o.data.notify = notify;
       if (o.type === 'update') o.data.updatedAt = now;
@@ -139,12 +139,12 @@
     const me = currentUser(), t = store.data.tasks[id];
     const body = typeof text === 'string' ? text.trim().slice(0, 2000) : '';
     if (!me || !t) return { ok: false, message: 'Карточка не найдена.' };
-    if (!A.canSeeTask(me, t, store.snapshot().users)) return { ok: false, message: 'Эта карточка вне вашей зоны доступа.' };
+    if (!A.canSeeTask(me, t, store.snapshot().users, null, store.data.projects)) return { ok: false, message: 'Эта карточка вне вашей зоны доступа.' };
     if (!body) return { ok: false, message: 'Напишите текст комментария.' };
     const now = new Date().toISOString();
     const users = store.snapshot().users;
     const notify = { ...(t.notify || {}) };
-    const to = new Set([...A.ownersOf(t), ...A.reviewersOf(t, users), ...(t.comments || []).map(c => c.userId)]);
+    const to = new Set([...A.ownersOf(t), ...A.reviewersOf(t, users, store.data.projects), ...(t.comments || []).map(c => c.userId)]);
     for (const uid of to) if (uid && uid !== me.id) notify[uid] = now;
     const comment = { id: now.replace(/\D/g, '') + Math.random().toString(36).slice(2, 6), ts: now, userId: me.id, user: me.name, text: body };
     store.apply({ type: 'update', col: 'tasks', id, data: { comments: [...(t.comments || []), comment], notify, seen: { ...(t.seen || {}), [me.id]: now }, updatedAt: now } });
@@ -156,7 +156,7 @@
   // Only the author edits their message; the text stays visible to the same people, marked «изменено».
   function taskCommentEdit(id, commentId, text) {
     const me = currentUser(), t = typeof id === 'string' ? store.data.tasks[id] : null;
-    if (!me || !t || !A.canSeeTask(me, t, store.snapshot().users)) return { ok: false, message: 'Карточка не найдена.' };
+    if (!me || !t || !A.canSeeTask(me, t, store.snapshot().users, null, store.data.projects)) return { ok: false, message: 'Карточка не найдена.' };
     const body = typeof text === 'string' ? text.trim().slice(0, 2000) : '';
     if (!body) return { ok: false, message: 'Сообщение не может быть пустым.' };
     const comments = (t.comments || []).map(c => ({ ...c }));
@@ -174,7 +174,7 @@
 
   function taskThank(id, commentId) {
     const me = currentUser(), t = typeof id === 'string' ? store.data.tasks[id] : null;
-    if (!me || !t || !A.canSeeTask(me, t, store.snapshot().users)) return { ok: false, message: 'Карточка не найдена.' };
+    if (!me || !t || !A.canSeeTask(me, t, store.snapshot().users, null, store.data.projects)) return { ok: false, message: 'Карточка не найдена.' };
     const comments = (t.comments || []).map(c => ({ ...c }));
     const c = comments.find(x => x.id === commentId);
     if (!c) return { ok: false, message: 'Комментарий не найден.' };
@@ -208,9 +208,10 @@
   async function journalGet({ since } = {}) {
     const me = currentUser();
     const all = await journal.read({ since: typeof since === 'string' ? since : '' });
-    if (A.isGip(me)) return all;
+    if (A.isDirector(me) || (A.isGip(me) && !Object.values(store.data.projects).some(p => !A.projectRole(me, p)))) return all;
     const users = store.snapshot().users;
     const money = A.canSeeMoney(me);
+    const moneyOf = e => (e.col === 'tasks' ? A.canSeeTaskMoney(me, store.data.tasks[e.id], store.data.projects) : e.col === 'projects' ? A.seesProjectMoney(me, store.data.projects[e.id]) : money);
     const moneyLabels = new Set(['Бюджет', 'Платёж внесён', 'Платёж удалён', 'График платежей', 'Договор', 'Счёт получен', 'Акт подписан']);
     // Projects: only those the user sees. Counterparties: only cards open to the user, contracts only to budget
     // people (4.9.3 — the journal had shown other groups' projects, customers' addresses and contractors' contracts).
@@ -221,13 +222,13 @@
       return !e.changes || A.canSeeOrgContracts(me, o) ? e : { ...e, changes: e.changes.filter(c => c.f !== 'contracts') };
     };
     return all.filter(e => {
-      if (e.col === 'projects') return A.isChief(me) && projects.has(e.id);
+      if (e.col === 'projects') return (A.isChief(me) || A.isGip(me)) && projects.has(e.id);
       if (e.col === 'orgs') return orgOk(e);
-      if (e.col !== 'tasks') return A.isChief(me) && e.col !== 'users';
+      if (e.col !== 'tasks') return A.isGip(me) || (A.isChief(me) && e.col !== 'users');
       const t = store.data.tasks[e.id];
-      return t && A.canSeeTask(me, t, users);
-    }).map(e => (e.col === 'orgs' ? orgChanges(e) : e))
-      .map(e => (money || !e.changes ? e : { ...e, changes: e.changes.filter(c => !moneyLabels.has(c.label)) }))
+      return t && A.canSeeTask(me, t, users, null, store.data.projects);
+    }).map(e => (e.col === 'orgs' && !A.isGip(me) ? orgChanges(e) : e))
+      .map(e => (moneyOf(e) || !e.changes ? e : { ...e, changes: e.changes.filter(c => !moneyLabels.has(c.label)) }))
       .filter(e => !e.changes || e.changes.length || e.kind !== 'update');
   }
 

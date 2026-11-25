@@ -22,7 +22,7 @@ function chatTitle(c) {
   return c.title || 'Чат';
 }
 function chatPeople(c) {
-  if (c.kind === 'project') { const p = state.projects.get(c.projectId) || {}; return liveUsers().filter(u => u.role === 'gip' || (p.members || []).includes(u.id)); }
+  if (c.kind === 'project') { const p = state.projects.get(c.projectId) || {}; return liveUsers().filter(u => A.canChat(u, { ...p, id: c.projectId })); }
   return liveUsers().filter(u => (c.members || []).includes(u.id));
 }
 const msgUnread = c => { const me = state.me?.id, seen = c.seen?.[me] || ''; return (c.messages || []).filter(m => m.userId !== me && m.ts > seen); };
@@ -245,7 +245,7 @@ function renderMsg() {
   const t = msgTotals(), th = msgThread(msg.chatId), c = th?.type === 'chat' ? th.c : null;
   if (msg.chatId && msg.chatId !== 'new' && !th && msg.mode !== 'solo') msg.chatId = ''; // a chat window keeps waiting for its chat
   const pill = `<button class="msg-fab${t.n ? ' has' : ''}" type="button" data-act="msg-open" title="Сообщения: чаты проектов, личные и групповые">${icon('chat')}<span>Сообщения</span>${t.n ? `<i class="mc-n">${t.n}</i>` : ''}${t.at ? `<i class="mc-at" title="Вас упомянули">@${t.at}</i>` : ''}</button>`;
-  if (msg.mode === 'pill') { root.innerHTML = pill; return; }
+  if (msg.mode === 'pill') { root.innerHTML = msgInMenu() ? '' : pill; return; } // 4.12: with «Сообщения» in the menu no floating button
   const head = `<div class="mp-head"><b>Сообщения</b><span class="spacer"></span><button class="btn sm" type="button" data-act="msg-new">+ Новый чат</button>
     <button class="btn ghostbtn sm msg-stick${msg.stick ? ' on' : ''}" type="button" data-act="msg-stick" aria-pressed="${!!msg.stick}" title="${msg.stick ? 'Окно закреплено: остаётся, пока не закроете. В чат можно перетащить карточку. Нажмите, чтобы открепить' : 'Закрепить окно: не будет сворачиваться при щелчке мимо, в чат можно перетащить карточку'}">${icon('pin')}</button>
     <button class="btn ghostbtn sm" type="button" data-act="msg-size" title="${msg.mode === 'full' ? 'Свернуть в боковую панель' : 'Открыть окно со всеми чатами'}">${msg.mode === 'full' ? '⇲' : '⤢'}</button><button class="btn ghostbtn sm" type="button" data-act="msg-close" aria-label="Свернуть">✕</button></div>`;
@@ -254,7 +254,7 @@ function renderMsg() {
   const enter = msg.enter ? ' enter' : ''; msg.enter = false; // slide in only when the panel opens, not on every refresh
   if (msg.mode === 'solo') document.documentElement.style.setProperty('--bar-h', `${document.getElementById('bar')?.offsetHeight || 48}px`);
   if (msg.mode === 'solo') root.innerHTML = `<section class="msg-panel solo" aria-label="${esc(threadTitle(msg.chatId))}">${right}</section>`;
-  else root.innerHTML = `${msg.mode === 'full' ? `<div class="mp-back${enter}" data-act="msg-close"></div>` : ''}<section class="msg-panel ${msg.mode}${enter}" role="dialog" aria-label="Сообщения">${head}${body}</section>`;
+  else root.innerHTML = `${msg.mode === 'full' ? `<div class="mp-back${enter}" data-act="msg-close"></div>` : ''}<section class="msg-panel ${msg.mode}${msg.mode === 'full' && msg.max ? ' max' : ''}${enter}" role="dialog" aria-label="Сообщения">${head}${body}</section>`;
   const box = document.getElementById('mc-msgs');
   if (box) box.scrollTop = box.scrollHeight;
   if (focus) { const ta = document.getElementById('msg-text'); if (ta) { ta.focus(); try { ta.setSelectionRange(caret, caret); } catch { /* fine */ } } }
@@ -373,7 +373,15 @@ function mcEditCancel() { msg.edit = null; renderMsg(); }
 function msgClose() {
   if (msg.mode === 'pill' || msg.mode === 'solo') return; // a chat window closes with its own ✕
   leaveAnimated(document.querySelector('#msg-root .mp-back'), document.querySelector('#msg-root .msg-panel'));
-  msg.mode = 'pill';
+  msg.mode = 'pill'; msg.max = false;
+  renderMsg();
+}
+// 4.12: «Сообщения» in the menu — the messenger over the whole window, list of chats on the left.
+function msgFull() {
+  if (SOLO) return;
+  document.documentElement.style.setProperty('--bar-h', `${document.getElementById('bar')?.offsetHeight || 48}px`);
+  if (msg.mode === 'full' && msg.max) return msgClose();
+  msg.mode = 'full'; msg.max = true; msg.enter = true;
   renderMsg();
 }
 // «@» autocomplete: the chat's people by surname; Enter/Tab or a click inserts «@Фамилия ».
@@ -424,7 +432,8 @@ onAct({
   'msg-open-any': () => { msgOpen(); },
   'msg-open': () => { msgOpen(); },
   'msg-close': () => { msgClose(); },
-  'msg-size': () => { msg.mode = msg.mode === 'full' ? 'side' : 'full'; renderMsg(); },
+  'msg-size': () => { msg.mode = msg.mode === 'full' ? 'side' : 'full'; msg.max = false; renderMsg(); },
+  'msg-full': () => { msgFull(); },
   'msg-stick': () => { msg.stick = !msg.stick; saveLocal('msgStick', msg.stick); renderMsg(); toast(msg.stick ? 'Окно сообщений закреплено — перетащите карточку в чат, чтобы отправить её' : 'Окно сообщений свернётся при щелчке мимо'); },
   'msg-chat': ({ id }) => { msgOpen(id); },
   'msg-back': () => { msg.chatId = ''; renderMsg(); },

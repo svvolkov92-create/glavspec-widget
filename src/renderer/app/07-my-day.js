@@ -13,7 +13,7 @@ function dayDocs() {
 function idlePeople() {
   if (isSpec()) return [];
   const busy = new Set(tasksArr().filter(t => ACTIVE.has(t.status)).flatMap(t => [t.ownerId, ...(t.coOwnerIds || []), executorOf(t)?.u?.id]).filter(Boolean));
-  const scope = A.isGip(state.me) ? liveUsers().filter(u => u.role !== 'gip') : liveUsers().filter(u => u.chiefId === state.me?.id);
+  const scope = A.isGip(state.me) ? liveUsers().filter(u => !A.isGip(u)) : liveUsers().filter(u => u.chiefId === state.me?.id);
   return scope.filter(u => !busy.has(u.id) && !A.absencesOf(u).some(x => x.from <= state.today && x.to >= state.today)).sort(byName);
 }
 function viewDay() {

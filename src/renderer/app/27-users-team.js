@@ -19,7 +19,7 @@ function setUserMenu(open) {
         <button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Связь, пароль${A.isGip(state.me) ? ', кто может входить' : ''}</small></button>`;
       menu.hidden = !open; $('#btn-user').setAttribute('aria-expanded', String(open)); return;
     }
-    menu.innerHTML = [['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
+    menu.innerHTML = [['director', 'Директор'], ['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
       .map(([r, l]) => usersByRole(r).length ? `<div class="menu-h">${l}</div>${usersByRole(r).map(item).join('')}` : '').join('')
       + '<p class="role-hint">Локальная версия: вход без пароля, роли разделяют интерфейс, но не защищают файл данных.</p>'
       + (api.serverInfo ? '<button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Общая база команды: подключиться или перенести</small></button>' : '');
@@ -30,7 +30,7 @@ function setUserMenu(open) {
 }
 // «Свой вид» (3.6): each person on this computer keeps their own tab, columns, sorting, folded blocks, Gantt and
 // office settings. Switching the user stores the current set under the old user and brings back the new one's.
-const VIEW_KEYS = ['tab', 'cols', 'sort', 'folded', 'gantt', 'kbLanes', 'office', 'overview', 'peopleMode', 'presets', 'dense', 'teamCollapsed', 'progWeight', 'quietDays', 'tabOrder', 'nav', 'scroll'];
+const VIEW_KEYS = ['tab', 'cols', 'sort', 'folded', 'gantt', 'kbLanes', 'office', 'overview', 'peopleMode', 'presets', 'dense', 'teamCollapsed', 'progWeight', 'quietDays', 'tabOrder', 'hiddenTabs', 'nav', 'scroll'];
 function swapView(fromId, toId) {
   try {
     if (fromId) localStorage.setItem('glavspec.view:' + fromId, JSON.stringify(Object.fromEntries(VIEW_KEYS.map(k => [k, localStorage.getItem('glavspec.' + k)]))));
@@ -71,7 +71,7 @@ function viewTeam() {
   const subsOf = id => visible.filter(u => u.role === 'specialist' && u.chiefId === id).sort(byName);
   const budgetCell = u => u.role === 'chief' ? (gip
     ? `<label class="chk"><input type="checkbox" data-act="toggle-budget" data-id="${esc(u.id)}"${u.canSeeBudget ? ' checked' : ''}> видит бюджет</label>`
-    : (u.canSeeBudget ? 'видит бюджет' : 'бюджет скрыт')) : u.role === 'gip' ? 'полный доступ' : 'без бюджета';
+    : (u.canSeeBudget ? 'видит бюджет' : 'бюджет скрыт')) : A.isDirector(u) ? 'полный доступ' : u.role === 'gip' ? 'свои проекты и где участник' : 'без бюджета';
   // depth: 0 GIP, 1 chief, 2 specialist; `kids` — ids under this node, for branch totals and collapsing.
   const row = (u, depth, kids = [], last = false, trunk = false) => {
     const own = ownerStats(u.id);
@@ -97,7 +97,7 @@ function viewTeam() {
   if (gip) {
     const chiefs = visible.filter(u => u.role === 'chief').sort(byName);
     const orphans = visible.filter(u => u.role === 'specialist' && !chiefs.some(c => c.id === u.chiefId)).sort(byName);
-    const gips = visible.filter(u => u.role === 'gip').sort(byName);
+    const gips = visible.filter(A.isGip).sort((a, b) => A.isDirector(b) - A.isDirector(a) || byName(a, b));
     const top = gips[0];
     const under = chiefs.map((c, i) => chiefBranch(c, 1, i === chiefs.length - 1 && !orphans.length)).join('')
       + (orphans.length ? `<tr class="tree d1 last orphan-h" style="--d:1"><td colspan="7"><div class="tree-cell" style="--d:1"><span class="tree-tg ph"></span><span class="hint">Без главспеца — ${orphans.length}: назначьте руководителя в карточке сотрудника</span></div></td></tr>`
@@ -137,6 +137,8 @@ function openUser(id, role = 'specialist', chiefId = '') {
       <div class="f wide"><label class="req" for="u-name">Имя</label><input id="u-name" name="name" value="${esc(u.name || '')}" maxlength="120" placeholder="Иванов И. И."></div>
       <div class="f"><label for="u-role">Роль</label><select id="u-role" name="role"${id === state.me.id ? ' disabled' : ''}>
         ${Object.entries(A.ROLES).map(([r, x]) => `<option value="${r}"${u.role === r ? ' selected' : ''}>${x.label}</option>`).join('')}</select></div>
+      <p class="hint wide" data-for-role="director">Директор видит все проекты, деньги и людей, назначает других директоров.</p>
+      <p class="hint wide" data-for-role="gip">ГИП видит свои проекты и проекты без ГИПа полностью, чужие — только если его пригласили участником (без договора и денег). Людей, контрагентов и сервер ведёт наравне с директором.</p>
       <div class="f" data-for-role="specialist"><label for="u-chief">Главспец</label><select id="u-chief" name="chiefId">
         <option value="">— не назначен —</option>${chiefs.map(c => `<option value="${esc(c.id)}"${u.chiefId === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
       <div class="f wide" data-for-role="chief specialist"><span class="lbl">Направления</span><div class="chk-row">
@@ -174,7 +176,7 @@ async function submitUser() {
   data.chiefId = role === 'specialist' ? val('chiefId') : '';
   data.canSeeBudget = role === 'chief' && checked('canSeeBudget');
   data.canSeeContacts = role === 'chief' && checked('canSeeContacts');
-  if (role === 'gip') data.directions = [];
+  if (role === 'gip' || role === 'director') data.directions = [];
   if (id && role !== 'chief' && state.users.get(id)?.role === 'chief' && usersByRole('specialist').some(s => s.chiefId === id))
     return formError('У этого главспеца есть специалисты — сначала переведите их к другому главспецу.');
   const left = id ? [...state.tasks.values()].filter(t => hasOwner(t, id) && t.status !== 'done' && A.profileGaps({ ...state.users.get(id), ...data }, t).length).length : 0;

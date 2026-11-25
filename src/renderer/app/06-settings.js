@@ -1,4 +1,26 @@
 /* ---------- «Настройки»: one window for everything about the look ---------- */
+// 4.12: «О программе» — which version this is (and the server's, when working through «Сервер Пульта»).
+async function openAbout() {
+  document.querySelector('.about-modal')?.remove();
+  const info = (await api.appInfo?.().catch(() => null)) || {};
+  const srv = state.remote?.server;
+  const row = (k, v) => (v ? `<div class="about-row"><span class="hint">${k}</span><b>${esc(v)}</b></div>` : '');
+  const root = document.createElement('div');
+  root.className = 'modal-back about-modal';
+  root.innerHTML = `<div class="modal about" role="dialog" aria-modal="true" aria-labelledby="about-t"><div class="about-head">${appIconSvg(state.win?.appIcon || 1)}<div><h2 id="about-t">Пульт главспеца</h2><p class="hint">ПМ «Тандем» · управление проектами мастерской</p></div></div>
+    ${row('Версия', info.web ? `веб-версия${srv?.version ? ` сервера ${srv.version}` : ''}` : info.version ? `${info.version}${info.platform ? ` (${info.platform})` : ''}` : '—')}
+    ${srv ? row('Сервер Пульта', `${srv.name ? srv.name + ' · ' : ''}версия ${srv.version || '—'}`) : row('Данные', 'на этом компьютере')}
+    ${state.remote?.url ? row('Адрес', state.remote.url) : ''}
+    ${row('Пользователь', state.me ? `${state.me.name} — ${A.ROLES[state.me.role]?.label || ''}` : '')}
+    <div class="modal-f"><button class="btn primary" type="button" data-m="close">Закрыть</button>${info.version || srv?.version ? '<button class="btn ghostbtn" type="button" data-m="copy">Скопировать</button>' : ''}</div></div>`;
+  document.body.append(root);
+  root.addEventListener('click', e => {
+    if (e.target === root || e.target.dataset.m === 'close') root.remove();
+    if (e.target.dataset.m === 'copy') navigator.clipboard?.writeText([...root.querySelectorAll('.about-row')].map(r => r.innerText.replace(/\s*\n\s*/, ': ')).join('\n')).then(() => toast('Скопировано'), () => {});
+  });
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); root.remove(); } });
+  root.querySelector('[data-m="close"]').focus();
+}
 function openSettings(sec = '') {
   setViewMenu(false);
   let root = document.querySelector('.settings-modal');
@@ -6,7 +28,7 @@ function openSettings(sec = '') {
     root = document.createElement('div');
     root.className = 'modal-back settings-modal';
     root.innerHTML = `<div class="modal wide-modal settings" role="dialog" aria-modal="true" aria-labelledby="stitle"><h2 id="stitle">Настройки</h2><div id="set-body"></div>
-      <div class="modal-f"><button class="btn primary" type="button" data-m="close">Готово</button><span class="hint">Настройки вида хранятся на этом компьютере.</span></div></div>`;
+      <div class="modal-f"><button class="btn primary" type="button" data-m="close">Готово</button><button class="btn ghostbtn" type="button" data-act="about">О программе</button><span class="hint">Настройки вида хранятся на этом компьютере.</span></div></div>`;
     document.body.append(root);
     root.addEventListener('click', e => {
       if (e.target === root || e.target.dataset.m === 'close') { root.remove(); return; }
@@ -22,9 +44,9 @@ function renderSettings() {
   const body = $('#set-body');
   if (!body) return;
   const top = body.scrollTop;
-  const tabs = visibleTabs();
+  const tabs = orderedTabs().filter(t => t.act ? !SOLO : visibleTabs().includes(t));
   body.innerHTML = `<section class="set-sec" data-sec-id="view"><h3>Вид и окно</h3>${viewSectionsHtml(true)}<p class="hint">Прозрачность, «поверх окон» и сквозные клики — в меню «Окно» в заголовке.</p></section>
-    <section class="set-sec" data-sec-id="tabs"><h3>Порядок вкладок</h3><p class="hint">Вкладки можно и просто перетащить мышью на панели.</p>${tabs.map((x, i) => `<div class="cols-row"><span>${icon(x.id)} ${esc(x.label)}</span><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'}>↑</button><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="1"${i < tabs.length - 1 ? '' : ' disabled'}>↓</button></div>`).join('')}
+    <section class="set-sec" data-sec-id="tabs"><h3>Меню</h3><p class="hint">Снимите галку — пункт уйдёт из меню (раздел останется доступен по ссылкам). Порядок — стрелками или перетаскиванием прямо в меню.</p>${tabs.map((x, i) => `<div class="cols-row"><label class="chk"><input type="checkbox" data-act="tab-hide" data-id="${x.id}"${hiddenTabs.includes(x.id) ? '' : ' checked'}> ${icon(x.act ? 'chat' : x.id)} ${esc(x.label)}${x.act ? ' <span class="hint">— мессенджер на всё окно</span>' : ''}</label><span class="spacer"></span><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="-1"${i ? '' : ' disabled'}>↑</button><button class="btn ghostbtn sm" type="button" data-act="tab-move" data-id="${x.id}" data-dir="1"${i < tabs.length - 1 ? '' : ' disabled'}>↓</button></div>`).join('')}
       <button class="btn ghostbtn sm" type="button" data-act="tabs-reset">Как было</button></section>
     <section class="set-sec" data-sec-id="game"><h3>Поощрения</h3><p class="hint">«Принято с первого раза», общая цель проекта и «Спасибо» в обсуждении. Считаются качество и общий результат, а не количество карточек.</p>
       <div class="seg"><button class="btn sm ${game ? 'on' : ''}" type="button" data-act="set-game" data-v="1">Показывать</button><button class="btn sm ${game ? '' : 'on'}" type="button" data-act="set-game" data-v="0">Выключить</button></div></section>
@@ -131,6 +153,7 @@ const attention = () => {
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
+  'about': () => { openAbout(); },
   'tips-reset': () => { tipsClosed.clear(); saveLocal('tipsClosed', []); renderNow(); },
   'cols-pop': ({ el }) => { colsOpen = !colsOpen; el.closest('.cols-wrap').querySelector('.cols-menu').hidden = !colsOpen; },
   'settings': ({ el }) => { openSettings(el.dataset.sec); },

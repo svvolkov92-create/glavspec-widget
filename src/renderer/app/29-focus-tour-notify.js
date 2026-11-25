@@ -20,7 +20,7 @@ function refreshFocusSlot() { const slot = $('#focus-slot'), t = state.drawer?.k
 function tourSteps() {
   const me = state.me, gip = A.isGip(me), chief = A.isChief(me);
   const search = { sel: '[data-act="open-search"]', title: 'Поиск — Ctrl+K', text: A.canCreateTasks(me) ? 'Ищет проекты, карточки и людей. Начните с «+», чтобы сразу завести карточку: «+ ЭОМ Корпус 3 до 15.12 @Орлов».' : 'Ищет проекты, карточки и людей. Недавно открытое — первым.' };
-  const msgs = { sel: '[data-act="msg-open"]', title: 'Сообщения', text: 'Чаты проектов, личные и групповые. Сразу уведомляем только о том, где нужны вы.' };
+  const msgs = { sel: '[data-act="msg-open"], [data-act="msg-full"]', title: 'Сообщения', text: 'Чаты проектов, личные и групповые. Сразу уведомляем только о том, где нужны вы.' };
   if (gip) return [
     { sel: '#tabs [data-id="day"]', tab: 'day', title: 'Мой день', text: 'С него удобно начинать: что ждёт вашей проверки, что просрочено, кто остался без работы.' },
     { sel: '[data-act="review-queue"]', tab: 'day', title: 'Очередь проверки', text: 'Карточки «на проверке» подряд: «Принять» или «Вернуть с замечанием», клавиши A и R.' },

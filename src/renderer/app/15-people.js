@@ -12,7 +12,7 @@ function misfitText(t, kind, toId) {
 function askReassign(t, kind, fromId, toId = '') {
   return new Promise(resolve => {
     const cands = kind === 'staff'
-      ? A.assignableOwners(state.me, liveUsers()).filter(u => u.role !== 'gip' && u.id !== fromId).sort(byName)
+      ? A.assignableOwners(state.me, liveUsers()).filter(u => !A.isGip(u) && u.id !== fromId).sort(byName)
       : contractorsArr().filter(c => c.id !== fromId);
     const nameOf = id => (kind === 'staff' ? state.users.get(id)?.name : state.contractors.get(id)?.name) || 'не назначен';
     const root = document.createElement('div');
@@ -189,7 +189,7 @@ function staffList(staff, list) {
 // «Люди» (4.1, backlog item 17): the GIP sees all staff and all outside people; a chief — all staff and own outside
 // people (added by him or working on his team's cards); a specialist — staff only.
 function peopleStaff() {
-  return liveUsers().filter(u => u.role !== 'gip').sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
+  return liveUsers().filter(u => !A.isGip(u)).sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
 }
 function peopleOutside() {
   if (A.isGip(state.me)) return contractorsArr();
@@ -218,7 +218,7 @@ function viewPeople() {
 
 // Staff have their own panel in the program; outside contractors do not and are tracked by the chief.
 function staffArr() {
-  const all = liveUsers().filter(u => u.role !== 'gip');
+  const all = liveUsers().filter(u => !A.isGip(u));
   const mine = A.isGip(state.me) ? all : all.filter(u => u.id === state.me?.id || (u.role === 'specialist' && u.chiefId === state.me?.id));
   return mine.sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
 }

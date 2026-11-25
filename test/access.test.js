@@ -166,3 +166,51 @@ test('counterparties (4.9): customers to contacts people, contractors and contra
   assert.match(A.checkWrite(gip, 'orgs', null, { name: ' ' }, []), /название/);
   assert.match(A.checkWrite(gip, 'orgs', null, { name: 'Д', roles: ['boss'] }, []), /Роль/);
 });
+
+test('4.12: several GIPs and a director — own projects in full, invited ones without money, others hidden', () => {
+  const people = [
+    { id: 'dir', role: 'director' }, { id: 'g1', role: 'gip' }, { id: 'g2', role: 'gip' },
+    { id: 'c', role: 'chief', canSeeBudget: true },
+  ];
+  const projects = [
+    { id: 'p1', gipId: 'g1', contract: { sum: 100 } },
+    { id: 'p2', gipId: 'g2', contract: { sum: 200 }, members: ['g1'] },
+    { id: 'p3', gipId: 'g2', contract: { sum: 300 } },
+    { id: 'p0' }, // no GIP yet — every GIP's
+  ];
+  const t = [
+    { id: 't1', projectId: 'p1', ownerId: 'c', budget: 10 },
+    { id: 't2', projectId: 'p2', ownerId: 'c', budget: 20 },
+    { id: 't3', projectId: 'p3', ownerId: 'c', budget: 30 },
+  ];
+  const s = { users: people, tasks: t, projects, contractors: [] };
+  const g1 = people[1], dir = people[0];
+  const v = A.viewFor(g1, s);
+  assert.deepEqual(v.projects.map(p => p.id).sort(), ['p0', 'p1', 'p2']);
+  assert.equal(v.projects.find(p => p.id === 'p1').contract.sum, 100);
+  assert.equal(v.projects.find(p => p.id === 'p2').contract, undefined, 'invited: no customer contract');
+  assert.deepEqual(v.tasks.map(x => x.id).sort(), ['t1', 't2']);
+  assert.equal(v.tasks.find(x => x.id === 't1').budget, 10);
+  assert.equal(v.tasks.find(x => x.id === 't2').budget, undefined, 'invited: no card money');
+  const vd = A.viewFor(dir, s);
+  assert.equal(vd.projects.length, 4); assert.equal(vd.tasks.length, 3); assert.equal(vd.tasks.find(x => x.id === 't3').budget, 30);
+  // Writes.
+  assert.match(A.checkWrite(g1, 'projects', projects[2], { ...projects[2], name: 'x' }, people, 'p3', projects), /другого ГИПа/);
+  assert.match(A.checkWrite(g1, 'projects', projects[1], { ...projects[1], contract: { sum: 1 } }, people, 'p2', projects), /Договор/);
+  assert.equal(A.checkWrite(g1, 'projects', projects[1], { ...projects[1], name: 'Новое' }, people, 'p2', projects), null);
+  assert.match(A.checkWrite(g1, 'projects', projects[1], null, people, 'p2', projects), /удаляет/);
+  assert.match(A.checkWrite(g1, 'tasks', t[2], { ...t[2], title: 'x' }, people, 't3', projects), /другого ГИПа/);
+  assert.match(A.checkWrite(g1, 'tasks', t[1], { ...t[1], budget: 99 }, people, 't2', projects), /Бюджет/);
+  assert.equal(A.checkWrite(g1, 'tasks', t[1], { ...t[1], title: 'ok' }, people, 't2', projects), null);
+  assert.equal(A.checkWrite(dir, 'tasks', t[2], { ...t[2], budget: 1 }, people, 't3', projects), null);
+  // The director's role: given by the director; a GIP may appoint only the first one.
+  assert.match(A.checkWrite(g1, 'users', people[2], { ...people[2], role: 'director' }, people, 'g2'), /Директор/);
+  assert.equal(A.checkWrite(dir, 'users', people[2], { ...people[2], role: 'director' }, people, 'g2'), null);
+  const noDir = people.slice(1);
+  assert.equal(A.checkWrite(g1, 'users', people[2], { ...people[2], role: 'director' }, noDir, 'g2'), null);
+  // Review notices go to the project's GIP.
+  assert.deepEqual(A.reviewersOf({ projectId: 'p3', ownerId: 'c' }, people, projects), ['g2']);
+  assert.deepEqual(A.reviewersOf({ projectId: 'p0', ownerId: 'c' }, people, projects).sort(), ['dir', 'g1', 'g2']);
+  // Chats: the invited GIP is in p2's chat, not in p3's.
+  assert.ok(A.canChat(g1, projects[1])); assert.ok(!A.canChat(g1, projects[2])); assert.ok(A.canChat(dir, projects[2]));
+});

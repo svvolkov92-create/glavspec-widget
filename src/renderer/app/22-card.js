@@ -180,7 +180,7 @@ function ownerOptions(selected, marks = []) {
   };
   // Keep a current owner who is outside the list (e.g. moved to another chief) visible rather than silently dropped.
   const extra = selected && !list.some(u => u.id === selected) ? `<option value="${esc(selected)}" selected>${esc(userLabel(state.users.get(selected)))}</option>` : '';
-  return extra + [['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
+  return extra + [['director', 'Директор'], ['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
     .map(([r, l]) => byRole(r).length ? `<optgroup label="${l}">${byRole(r).map(opt).join('')}</optgroup>` : '').join('');
 }
 

@@ -46,7 +46,7 @@ module.exports = function cabinetOnBase({ cfg, store, core, asUser, inTurnAs, A,
   const contacts = u => A.isGip(u) || !!u?.canSeeContacts;
   // The customer's page is the same whoever presses the button: it is built as the GIP sees the project. Built as a
   // chief (who sees no money, not every card) it would differ — and the next sync would send it again, back and forth.
-  const gipId = () => Object.keys(acc.byUser).find(id => store.data.users[id]?.role === 'gip' && !store.data.users[id]?.deletedAt && !acc.byUser[id].disabled);
+  const gipId = () => Object.keys(acc.byUser).find(id => A.isGip(store.data.users[id]) && !store.data.users[id]?.deletedAt && !acc.byUser[id].disabled);
   const asGip = fn => { const g = gipId(); return g && inTurnAs ? inTurnAs(g, fn) : fn(); };
   const seesProject = id => core.userView().projects.some(p => p.id === String(id));
   const visibleOnly = ids => { const seen = new Set(core.userView().projects.map(p => p.id)); return (Array.isArray(ids) ? ids : []).map(String).filter(id => seen.has(id)); };

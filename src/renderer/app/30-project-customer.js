@@ -9,8 +9,10 @@ const BILL_STATUS = [['to_pay', 'к оплате'], ['to_sign', 'на подпи
 const CONTRACT_STATUS = [['draft', 'готовится'], ['signing', 'на подписании'], ['signed', 'подписан'], ['signed_edo', 'подписан в ЭДО']];
 const tm = v => (/^\d{1,2}:\d{2}$/.test(String(v || '').trim()) ? String(v).trim().padStart(5, '0') : '');
 const money0 = v => { const n = parseMoney(String(v ?? '')); return Number.isNaN(n) ? 0 : n; };
+// 4.12: the customer's contract and money — the project's own GIP and the director (an invited GIP does not see them).
+const projMoney = () => A.seesProjectMoney(state.me, state.drawer?.kind === 'project' ? state.projects.get(state.drawer.id) : null);
 function projectDraft(p) {
-  const phases = (Array.isArray(p.phases) && p.phases.length ? p.phases : L.defaultPhases().filter(ph => A.isGip(state.me) || ph.key !== 'contract'))
+  const phases = (Array.isArray(p.phases) && p.phases.length ? p.phases : L.defaultPhases().filter(ph => projMoney() || ph.key !== 'contract'))
     .map(ph => ({ key: ph.key, start: ph.start || '', finish: ph.finish || '', done: ph.done || '' }));
   return {
     phases, milestones: clone(p.milestones || []), requests: clone(p.requests || []), docs: clone(p.docs || []),
@@ -40,7 +42,7 @@ function projectDraftData() {
     ird: keep(d.ird, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), kind: IRD_KINDS.some(k => k[0] === x.kind) ? x.kind : irdKindOf(x.title), who: String(x.who || '').trim(), status: IRD_STATUS.some(s => s[0] === x.status) ? x.status : 'plan', due: x.due || '', note: String(x.note || '').trim() })),
     meetings: d.meetings.filter(x => String(x.title || '').trim() || isDate(x.date)).map(x => ({ id: x.id || newId(), date: x.date || '', from: tm(x.from), to: tm(x.to), title: String(x.title || '').trim(), place: String(x.place || '').trim(), protocolNo: String(x.protocolNo || '').trim() })),
     // The customer's contract and payments: kept only from the GIP (others do not see them, so they never overwrite).
-    ...(A.isGip(state.me) ? {
+    ...(projMoney() ? {
       contract: { no: String(d.contract.no || '').trim(), date: d.contract.date || '', subject: String(d.contract.subject || '').trim(), sum: money0(d.contract.sum), status: CONTRACT_STATUS.some(s => s[0] === d.contract.status) ? d.contract.status : 'signed' },
       payments: keep(d.payments, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), sum: money0(x.sum), cond: String(x.cond || '').trim(), status: PAY_STATUS.some(s => s[0] === x.status) ? x.status : 'upcoming', date: x.date || '' })),
       bills: keep(d.bills, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), date: x.date || '', status: BILL_STATUS.some(s => s[0] === x.status) ? x.status : 'to_pay', due: x.due || '' })),
@@ -114,7 +116,7 @@ function custUnread(pid) {
 function custNav() {
   const panel = $('.dpanel[data-panel="cust"]');
   if (!panel) return;
-  const secs = CUST_SECS.filter(([k]) => k !== 'money' || A.isGip(state.me));
+  const secs = CUST_SECS.filter(([k]) => k !== 'money' || projMoney());
   if (!secs.some(([k]) => k === custSec)) custSec = 'plan';
   const unread = custUnread(state.drawer?.id);
   let nav = panel.querySelector('.cust-nav');
@@ -133,7 +135,7 @@ function renderCustomer() {
   custNav();
   box.innerHTML = `<div class="cust-top"><span class="hint">${now.planned ? `Сейчас: <b>${esc(now.current?.label || '—')}</b> · ${now.behind ? `<span class="neg">отставание ${now.behind} дн.</span>` : 'по графику'}${now.next ? ` · до «${esc(now.next.title)}» ${now.daysToNext} дн.` : ''}` : 'Задайте даты этапов — по ним строится план и «N дней до…» на странице заказчика.'}</span><span class="spacer"></span>
       <button class="btn" type="button" data-act="cust-page" data-format="pdf">PDF</button><button class="btn primary" type="button" data-act="cust-page" data-format="html">Сохранить и создать страницу</button></div>
-    <div class="sub" data-cs="plan"><h3>Этапы проекта</h3>${A.isGip(state.me) ? '' : '<p class="hint">Этап «Договор» ведёт ГИП.</p>'}
+    <div class="sub" data-cs="plan"><h3>Этапы проекта</h3>${projMoney() ? '' : '<p class="hint">Этап «Договор» ведёт ГИП.</p>'}
       ${phaseTableHtml(d.phases, (i, f) => `data-pd="phases.${i}.${f}"`)}${phaseGanttHtml(d.phases, d.milestones)}</div>
     <div class="sub" data-cs="plan"><h3>Вехи</h3>${list('milestones', (x, i) => `<td class="grow">${pdIn(`milestones.${i}.title`, x.title, 'placeholder="Заключение экспертизы" maxlength="120"')}</td><td>${pdDate(`milestones.${i}.date`, x.date)}</td><td>${pdChk(`milestones.${i}.done`, x.done, ' пройдена')}</td>`, ['Веха', 'Дата', ''], 'Ключевые даты для заказчика: договор, ПД на экспертизу, заключение, выдача РД.')}</div>
     <div class="sub" data-cs="req"><h3>Нужно от заказчика</h3>${list('requests', (x, i) => `<td class="grow">${pdIn(`requests.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}
@@ -161,7 +163,7 @@ function renderCustomer() {
           <td>${pdIn(`docs.${i}.no`, x.no, 'class="sm-in" placeholder="№" maxlength="40"')}</td><td>${pdDate(`docs.${i}.issued`, x.issued)}</td>
           <td>${pdDate(`docs.${i}.until`, x.until)}<div class="hint doc-rule">${rule ? (x.until && x.until !== auto && auto ? `вручную · по правилу: ${fmtDate(auto)}` : esc(rule.basis)) : 'по тексту документа'}${left !== null ? ` · ${left < 0 ? `<span class="neg">истёк</span>` : left <= (x.remind ?? 60) ? `<span class="warnv">истекает через ${left} дн.</span>` : `ещё ${left} дн.`}` : ''}</div></td>
           <td>за ${pdIn(`docs.${i}.remind`, x.remind ?? 60, 'class="sm-in" inputmode="numeric"')} дн.</td>`; }, ['Тип', 'Документ', '№', 'Дата выпуска', 'Действует до', 'Напомнить в сводке'], 'ГПЗУ, изыскания, ТУ — когда истекают. Для ГПЗУ и топосъёмки срок считается от даты выпуска сам; ТУ, СТУ и прочее — по тексту документа. Напоминание появится в сводке.')}</div>
-    ${A.isGip(state.me) ? `<div class="sub" data-cs="money"><h3>Договор и финансы <span class="chip tone-idle">только ГИП</span></h3><p class="hint">Договор заказчика с «Тандемом» — не путать с бюджетами подрядчиков. Пока номер договора пуст, вкладки «Договор и финансы» у заказчика нет.</p>
+    ${projMoney() ? `<div class="sub" data-cs="money"><h3>Договор и финансы <span class="chip tone-idle">только ГИП</span></h3><p class="hint">Договор заказчика с «Тандемом» — не путать с бюджетами подрядчиков. Пока номер договора пуст, вкладки «Договор и финансы» у заказчика нет.</p>
       <div class="fgrid"><div class="f"><label>Номер договора</label>${pdIn('contract.no', d.contract.no, 'placeholder="26/07-12" maxlength="40"')}</div><div class="f"><label>Дата</label>${pdDate('contract.date', d.contract.date)}</div>
         <div class="f wide"><label>Предмет</label>${pdIn('contract.subject', d.contract.subject, 'placeholder="Инженерные изыскания и проектная документация, стадия П" maxlength="200"')}</div>
         <div class="f"><label>Стоимость, ₽</label>${pdIn('contract.sum', d.contract.sum, 'inputmode="decimal" placeholder="4 860 000" maxlength="20"')}</div><div class="f"><label>Статус</label>${pdSel('contract.status', CONTRACT_STATUS, d.contract.status)}</div></div>
@@ -171,7 +173,7 @@ function renderCustomer() {
       <div class="fgrid"><div class="f wide"><label>Заголовок</label>${pdIn('advice.title', d.advice.title, 'placeholder="Рабочая документация на сети" maxlength="120"')}</div>
         <div class="f wide"><label>Текст</label><textarea data-pd="advice.text" maxlength="600" placeholder="Что посоветовать заказчику на этом этапе">${esc(d.advice.text)}</textarea></div>
         <div class="f"><label>Контакт на странице</label><select data-pd="contactId"><option value="">— не показывать —</option>${staff.map(u => `<option value="${esc(u.id)}"${u.id === d.contactId ? ' selected' : ''}>${esc(u.name)}${u.phone ? '' : ' (нет телефона)'}</option>`).join('')}</select><span class="hint">Телефон и почта — из карточки сотрудника.</span></div></div></div>
-    <div class="sub" data-cs="show"><h3>Что показывать заказчику</h3><div class="pd-show">${pdChk('show.plan', d.show.plan, ' план и вехи')}${pdChk('show.sections', d.show.sections, ' разделы проекта')}${pdChk('show.advice', d.show.advice, ' рекомендация ГИПа')}${pdChk('show.revisions', d.show.revisions, ' номера изменений')}${pdChk('show.ird', d.show.ird, ' исходные данные')}${pdChk('show.meetings', d.show.meetings, ' встречи и протокол')}${pdChk('show.team', d.show.team, ' команда проекта (участники)')}${A.isGip(state.me) ? pdChk('show.finance', d.show.finance, ' договор и финансы') : ''}${pdChk('show.soon', d.show.soon, ' «Навигатор» и «3D-модель» с пометкой «скоро»')}</div>
+    <div class="sub" data-cs="show"><h3>Что показывать заказчику</h3><div class="pd-show">${pdChk('show.plan', d.show.plan, ' план и вехи')}${pdChk('show.sections', d.show.sections, ' разделы проекта')}${pdChk('show.advice', d.show.advice, ' рекомендация ГИПа')}${pdChk('show.revisions', d.show.revisions, ' номера изменений')}${pdChk('show.ird', d.show.ird, ' исходные данные')}${pdChk('show.meetings', d.show.meetings, ' встречи и протокол')}${pdChk('show.team', d.show.team, ' команда проекта (участники)')}${projMoney() ? pdChk('show.finance', d.show.finance, ' договор и финансы') : ''}${pdChk('show.soon', d.show.soon, ' «Навигатор» и «3D-модель» с пометкой «скоро»')}</div>
       <p class="hint">Подрядчики, бюджеты подрядчиков и внутренние замечания на странице не показываются никогда; договор заказчика — только если ГИП его заполнил и включил.</p></div>`;
 }
 // Source data and requests: a row is «asked» when an open request points to it.

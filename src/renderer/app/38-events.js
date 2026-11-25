@@ -91,7 +91,7 @@ document.addEventListener('drop', e => {
   const hintsOff = () => { clearTimeout(altT); altT = null; document.body.classList.remove('alt-hints'); document.querySelectorAll('[data-alt-key]').forEach(x => x.removeAttribute('data-alt-key')); };
   const hintsOn = () => {
     if (state.win.compact) return;
-    visibleTabs().slice(0, 9).forEach((t, i) => $(`#tabs [data-id="${t.id}"]`)?.setAttribute('data-alt-key', `Alt+${i + 1}`));
+    menuItems().slice(0, 9).forEach((t, i) => $(`#tabs [data-id="${t.id}"]`)?.setAttribute('data-alt-key', `Alt+${i + 1}`));
     $('[data-act="open-search"]')?.setAttribute('data-alt-key', 'Ctrl+K');
     $('#btn-max')?.setAttribute('data-alt-key', 'F11');
     if (state.drawer?.kind === 'task') $('[data-act="save-stay"]')?.setAttribute('data-alt-key', 'Ctrl+S');
@@ -146,7 +146,8 @@ document.addEventListener('keydown', e => {
   if (ctrl && !e.altKey && !e.shiftKey && code === 'KeyZ' && !typing && !document.querySelector('.modal-back, .palette-back')) { e.preventDefault(); track('key:undo'); undoLast(); return; }
   if (e.altKey && !ctrl && /^Digit[1-9]$/.test(code) && !state.win.compact) {
     e.preventDefault();
-    const t = visibleTabs()[Number(code.slice(5)) - 1];
+    const t = menuItems()[Number(code.slice(5)) - 1];
+    if (t?.act === 'msg-full') { msgFull(); return; }
     if (t) { state.tab = t.id; saveLocal('tab', t.id); renderNow(); }
     return;
   }

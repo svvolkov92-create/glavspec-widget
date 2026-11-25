@@ -162,14 +162,22 @@ document.addEventListener('auxclick', e => {
   const t = e.target.closest?.('.dtab[data-doc]');
   if (t) { e.preventDefault(); docTabClose(t.dataset.docId); return; }
   // 13: middle click on a section opens it as a tab.
-  const s = e.target.closest?.('#tabs .tab[data-id]');
+  const s = e.target.closest?.('#tabs .tab[data-id]:not(.tab-act)');
   if (s) { e.preventDefault(); wsAddSection(s.dataset.id); }
 });
 document.addEventListener('mousedown', e => { if (e.button === 1 && e.target.closest?.('#tabs .tab[data-id], .dtab[data-doc]')) e.preventDefault(); }); // no autoscroll
 function orderedTabs() {
-  const known = TABS.map(x => x.id), order = tabOrder.filter(id => known.includes(id));
-  TABS.forEach((x, i) => { if (!order.includes(x.id)) order.splice(Math.min(i, order.length), 0, x.id); });
-  return order.map(id => TABS.find(x => x.id === id));
+  const all = [...TABS, ...MENU_EXTRA];
+  const known = all.map(x => x.id), order = tabOrder.filter(id => known.includes(id));
+  all.forEach((x, i) => { if (!order.includes(x.id)) order.splice(Math.min(i, order.length), 0, x.id); });
+  return order.map(id => all.find(x => x.id === id));
+}
+// 4.12: hide or show a menu item; at least one section stays in the menu.
+function setTabHidden(id, hide) {
+  const next = hide ? [...new Set([...hiddenTabs, id])] : hiddenTabs.filter(x => x !== id);
+  if (hide && !visibleTabs().some(t => !next.includes(t.id))) return toast('Хотя бы один раздел должен остаться в меню.', true);
+  hiddenTabs = next; saveLocal('hiddenTabs', next);
+  renderNow(); if (document.querySelector('.settings-modal')) renderSettings();
 }
 function setTabOrder(order) { tabOrder = order; saveLocal('tabOrder', order); renderNow(); if (document.querySelector('.settings-modal')) renderSettings(); }
 function moveTab(id, dir) {
@@ -182,7 +190,8 @@ function moveTab(id, dir) {
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
   'tab-move': ({ el, id }) => { moveTab(id, Number(el.dataset.dir)); },
-  'tabs-reset': () => { setTabOrder([]); },
+  'tabs-reset': () => { hiddenTabs = []; saveLocal('hiddenTabs', []); setTabOrder([]); },
+  'tab-hide': ({ el, id }) => { setTabHidden(id, !el.checked); },
   'tab': ({ e, id }) => { if (e.ctrlKey) { wsAddSection(id); return; } wsRemember(); wsActive = ''; saveWs(); if (id === 'projects' && state.tab === 'projects') state.openProjectId = null; scrollPos[state.tab] = $('#app').scrollTop; state.tab = id; saveLocal('tab', id); renderNow(); restoreScroll(); },
   'dtab-close': ({ id }) => { docTabClose(id); },
   'ws-open': ({ el }) => { wsOpen(el.dataset.key); },

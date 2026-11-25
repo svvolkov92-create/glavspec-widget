@@ -18,14 +18,18 @@ const DATA = {
     'u-bud': { name: 'Бюджетов Б.', role: 'chief', directions: ['ov'], canSeeBudget: true, createdAt: now },
     'u-spec': { name: 'Смирнова О.', role: 'specialist', directions: ['ar'], chiefId: 'u-chief', createdAt: now },
     'u-other': { name: 'Иванов Е.', role: 'specialist', directions: ['el'], chiefId: 'u-gip', createdAt: now },
+    'u-gip2': { name: 'Второй ГИП', role: 'gip', directions: [], createdAt: now }, // 4.12: several GIPs and a director
+    'u-dir': { name: 'Директор', role: 'director', directions: [], createdAt: now },
   },
   projects: {
     p1: { name: 'Цех', code: '25-047', client: 'ООО Заказчик', gipId: 'u-gip', members: ['u-chief', 'u-spec'], contract: { no: '47-П', date: '2026-05-12', sum: 9000000 }, payments: [{ date: '2026-06-01', sum: 100 }] },
+    p4: { name: 'Общий', code: '25-060', client: 'ООО Заказчик', gipId: 'u-gip', members: ['u-gip2'], contract: { no: '60-П', sum: 6666666 } },
     p2: { name: 'Склад секретный', code: '25-050', client: 'АО Другой', gipId: 'u-gip', members: [], contract: { no: '50-П', sum: 7777777 } },
   },
   tasks: {
     t1: { projectId: 'p1', marks: ['КР'], title: 'КР', ownerId: 'u-chief', status: 'work', start: '2026-11-01', finish: '2026-12-01', budget: 500000, history: [] },
     t2: { projectId: 'p1', marks: ['АР'], title: 'АР', ownerId: 'u-spec', status: 'todo', start: '2026-11-01', finish: '2026-12-10', budget: 300000, history: [] },
+    t4: { projectId: 'p4', marks: ['ОВ'], title: 'ОВ', ownerId: 'u-bud', status: 'work', start: '2026-11-01', finish: '2026-12-20', budget: 444444, history: [] },
     t3: { projectId: 'p2', marks: ['ЭОМ'], title: 'ЭОМ секрет', ownerId: 'u-other', status: 'todo', start: '2026-11-01', finish: '2026-12-20', budget: 200000, history: [] },
   },
   contractors: {}, chats: {}, depts: {},
@@ -246,6 +250,27 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
     expect('H9 a chief with contacts takes away a project he does not see from a login', chiefSees || (!!upd2 && (upd2.ok === false || ids2.includes('p2'))), chiefSees ? 'n/a: chiefs see every project' : JSON.stringify(upd2).slice(0, 140));
     const cview = await rpc(chief, 'cabinet', 'view');
     expect('H10 cabinet view: messages only for visible projects', !(cview.messages || []).some(m => m.projectId === 'p2'));
+    /* ===== J. Several GIPs (4.12) ===== */
+    const gip2 = await join('u-gip2', 'gip2');
+    const v2 = await view(gip2);
+    const has = (col, id) => (v2[col] || []).some(x => x.id === id);
+    expect('J1 another GIP does not see a project he is not in (and its cards)', !has('projects', 'p2') && !has('tasks', 't3'));
+    const p4 = (v2.projects || []).find(x => x.id === 'p4'), t4 = (v2.tasks || []).find(x => x.id === 't4');
+    expect('J2 an invited GIP sees the project without the customer contract and the cards without money', !!p4 && !p4.contract && !!t4 && t4.budget === undefined, JSON.stringify({ c: p4?.contract, b: t4?.budget }));
+    const wj3 = await w(gip2, [{ type: 'update', col: 'tasks', id: 't3', data: { title: 'взлом' } }]);
+    expect('J3 another GIP changes a card of a project he is not in', wj3.ok === false, JSON.stringify(wj3));
+    const wj4 = await w(gip2, [{ type: 'update', col: 'projects', id: 'p4', data: { contract: { no: 'X', sum: 1 } } }]);
+    expect('J4 an invited GIP rewrites the customer contract', wj4.ok === false);
+    const wj5 = await w(gip2, [{ type: 'update', col: 'tasks', id: 't4', data: { budget: 1 } }]);
+    expect('J5 an invited GIP changes a card budget in another GIP\'s project', wj5.ok === false);
+    const wj6 = await w(gip2, [{ type: 'update', col: 'users', id: 'u-gip2', data: { role: 'director' } }]);
+    expect('J6 a GIP makes himself director while there is one', wj6.ok === false);
+    const jr = await rpc(gip2, 'journalGet', {});
+    const jl = Array.isArray(jr) ? jr : jr.entries || jr.list || [];
+    expect('J7 the journal of another GIP has no hidden project or card', !jl.some(e => e.id === 'p2' || e.id === 't3'), `${jl.length} entries`);
+    const ws = await w(gip2, [{ type: 'set', col: 'projects', id: 'p4', data: { ...p4, name: 'Общий (переименован)' } }]);
+    const kept = app.store?.data?.projects?.p4?.contract?.sum;
+    expect('J8 a «set» of an invited project keeps the hidden contract', ws.ok !== false && (kept === undefined || kept === 6666666), JSON.stringify({ ok: ws.ok, kept }));
     // Party lookup for a specialist.
     expect('I1 a specialist uses the INN lookup (the team\'s DaData limit)', (await call('POST', '/api/party', { inns: ['7707083893'] }, spec2)).status === 403);
   } catch (e) { out.push('ERROR ' + (e.stack || e)); }

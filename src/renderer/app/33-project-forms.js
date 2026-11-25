@@ -1,7 +1,7 @@
 /* ---------- project & contractor ---------- */
 // The project's GIP: any GIP of the team; a project made before 4.1 may name someone else — kept in the list.
 function gipOptions(sel) {
-  const list = liveUsers().filter(u => u.role === 'gip' || u.id === sel).sort(byName);
+  const list = liveUsers().filter(u => A.isGip(u) || u.id === sel).sort(byName);
   return `<option value="">— не назначен —</option>${list.map(u => `<option value="${esc(u.id)}"${u.id === sel ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}`;
 }
 const projectGip = p => (p?.gipId && state.users.get(p.gipId)) || null;

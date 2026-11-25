@@ -8,7 +8,7 @@ function orgTree() {
   const depts = [...(state.depts?.values() || [])];
   if (!depts.length) {
     // Virtual: the company with the GIP(s) on top, a group per chief with the chief's specialists.
-    const gips = staff.filter(u => u.role === 'gip'), chiefs = staff.filter(u => u.role === 'chief').sort(byName);
+    const gips = staff.filter(A.isGip).sort((a, b) => A.isDirector(b) - A.isDirector(a)), chiefs = staff.filter(u => u.role === 'chief').sort(byName);
     const loose = staff.filter(u => u.role === 'specialist' && !chiefs.some(c => c.id === u.chiefId));
     const groups = chiefs.map(c => ({ id: 'v:' + c.id, name: `Группа: ${A.directionLabels(c).join(', ') || c.name}`, head: c, people: staff.filter(u => u.role === 'specialist' && u.chiefId === c.id).sort(byName), kids: [], virtual: true }));
     return [{ id: 'v:root', name: 'ПМ «Тандем»', head: gips[0] || null, people: [...gips.slice(1), ...loose], kids: groups, virtual: true }];
@@ -119,7 +119,7 @@ function askDept(dept = null, parentId = '') {
 }
 // The groups of chiefs become departments under one top department with the GIP as its head.
 async function orgFromGroups() {
-  const gip = liveUsers().find(u => u.role === 'gip'), chiefs = liveUsers().filter(u => u.role === 'chief');
+  const gip = liveUsers().find(A.isDirector) || liveUsers().find(A.isGip), chiefs = liveUsers().filter(u => u.role === 'chief');
   const top = newId(), at = new Date().toISOString();
   const ops = [op.set('depts', top, { name: 'ПМ «Тандем»', headId: gip?.id || '', parentId: '', createdAt: at })];
   if (gip) ops.push(op.update('users', gip.id, { deptId: top }));
@@ -140,7 +140,7 @@ function officeState(u) {
   const away = A.absencesOf(u).find(a => a.from <= state.today && a.to >= state.today);
   if (away) return { state: 'away', awayText: `${A.ABSENCE_KINDS[away.kind] || 'нет'} до ${fmtDate(away.to).slice(0, 5)}`, cards: [] };
   const cards = tasksArr().filter(t => hasOwner(t, u.id) && t.status !== 'done').sort(sortByDeadline);
-  const toCheck = u.role === 'specialist' ? 0 : tasksArr().filter(t => t.status === 'review' && A.reviewersOf(t, liveUsers()).includes(u.id)).length;
+  const toCheck = u.role === 'specialist' ? 0 : tasksArr().filter(t => t.status === 'review' && A.reviewersOf(t, liveUsers(), state.projects).includes(u.id)).length;
   if (cards.some(t => timing(t).overdue)) return { state: 'late', cards };
   if (toCheck) return { state: 'checking', bubble: [`проверяет ${toCheck}`, '#EDE8F7', '#5A3FA0'], cards };
   if (cards.some(t => t.status === 'review')) return { state: 'carry', cards };

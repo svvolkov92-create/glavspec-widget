@@ -473,9 +473,12 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .kb-card.dragging { opacity: .45 }
 .kb-card.late { box-shadow: inset 3px 0 0 var(--bad) }
 /* No contractor: hazard-tape border, black and yellow */
-.kb-card.noexec { border: 3px solid transparent; padding: 6px 7px;
-  background: linear-gradient(var(--glass), var(--glass)) padding-box,
-              repeating-linear-gradient(45deg, #111 0 7px, #f5c400 7px 14px) border-box }
+/* The tape is a ring drawn by ::before (masked to the border): the card keeps its own background, so with
+   transparency, Mica or acrylic the stripes do not show through the whole card (4.11.1). */
+.kb-card.noexec { position: relative; border-color: transparent; padding: 8px 9px }
+.kb-card.noexec::before { content: ''; position: absolute; inset: -1px; padding: 3px; border-radius: inherit; pointer-events: none;
+  background: repeating-linear-gradient(45deg, #111 0 7px, #f5c400 7px 14px);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude }
 .kb-noexec { color: #8a6d00; font-weight: 700 }
 @media (prefers-color-scheme: dark) { .kb-noexec { color: #f5c400 } }
 .kb-top { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: space-between }
@@ -1972,3 +1975,14 @@ html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
 .org-pay .pay-add { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto }
 .org-pay .pay-add input[type=date] { width: 140px } .org-pay .pay-add input { width: 120px }
 .org-contract { border-bottom: 0; padding-bottom: 2px }
+
+/* 4.12: «Сообщения» in the menu opens the messenger over the whole window (below the title bar) */
+.msg-panel.full.max { left: 0; top: var(--bar-h, 48px); right: 0; bottom: 0; transform: none; width: auto; height: auto; border-radius: 0; border-width: 1px 0 0; box-shadow: none }
+.msg-panel.full.max .mp-full { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) }
+/* «О программе» */
+.about { width: min(440px, 94vw) }
+.about-head { display: flex; gap: 14px; align-items: center; margin-bottom: 12px }
+.about-head svg { width: 56px; height: 56px; flex: none }
+.about-head h2 { margin: 0 }
+.about-row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-top: 1px solid var(--line) }
+.about-row b { text-align: right; overflow-wrap: anywhere }

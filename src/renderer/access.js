@@ -7,7 +7,11 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  // 4.12: several GIPs and a director above them. The director sees and manages everything; a GIP manages the
+  // common things (people, catalogue, server, trash) like the director, but sees his own projects (and those without
+  // a GIP) in full and others' only when invited to them (project.members) — without the customer's money.
   const ROLES = {
+    director: { label: 'Директор', title: 'Пульт директора' },
     gip: { label: 'ГИП', title: 'Пульт ГИПа' },
     chief: { label: 'Главспец', title: 'Пульт главспеца' },
     specialist: { label: 'Специалист', title: 'Пульт специалиста' },
@@ -53,7 +57,28 @@
   const SPECIALIST_FIELDS = ['status', 'history', 'milestones', 'note', 'timeLog', 'files'];
 
   const roleOf = u => (u && ROLES[u.role] ? u.role : null);
-  const isGip = u => roleOf(u) === 'gip';
+  const isDirector = u => roleOf(u) === 'director';
+  // «ГИП» in the rules below means the managing roles: a GIP or the director.
+  const isGip = u => roleOf(u) === 'gip' || isDirector(u);
+  const isGipOnly = u => roleOf(u) === 'gip';
+  // How a managing user stands to a project: 'own' — everything, money included; 'member' — invited to another GIP's
+  // project: sees and works in it, without the customer's contract and the cards' money; null — not his.
+  function projectRole(user, p) {
+    if (!user || !p || !isGip(user)) return null;
+    if (isDirector(user) || !p.gipId || p.gipId === user.id) return 'own';
+    return Array.isArray(p.members) && p.members.includes(user.id) ? 'member' : null;
+  }
+  const findProject = (projects, id) => (!projects || !id ? null : projects instanceof Map ? projects.get(id) || null
+    : Array.isArray(projects) ? projects.find(p => p.id === id) || null : projects[id] ? { ...projects[id], id } : null);
+  // A GIP's look at a card through its project: no projects given (the window's own view) or a card without a known
+  // project — as before.
+  function taskProjectRole(user, task, projects) {
+    if (!isGipOnly(user) || !projects || !task?.projectId) return 'own';
+    const p = findProject(projects, task.projectId);
+    return p ? projectRole(user, p) : 'own';
+  }
+  const seesProjectMoney = (user, p) => isGip(user) && (!p || projectRole(user, p) === 'own');
+  const canSeeTaskMoney = (user, task, projects) => canSeeMoney(user) && taskProjectRole(user, task, projects) === 'own';
   const isChief = u => roleOf(u) === 'chief';
   const isSpecialist = u => roleOf(u) === 'specialist';
   const titleFor = u => (roleOf(u) ? ROLES[u.role].title : 'Пульт главспеца');
@@ -149,9 +174,9 @@
   // Responsible staff of a card: the main one plus co-owners (one job shared by several people).
   const ownersOf = t => [...new Set([t?.ownerId, ...(Array.isArray(t?.coOwnerIds) ? t.coOwnerIds : [])].filter(Boolean))];
 
-  function canSeeTask(user, task, users, team = null) {
+  function canSeeTask(user, task, users, team = null, projects = null) {
     if (!user || !task) return false;
-    if (isGip(user)) return true;
+    if (isGip(user)) return !!taskProjectRole(user, task, projects);
     team = team || teamIds(user, users);
     const owners = ownersOf(task);
     return owners.length ? owners.some(id => team.has(id)) : team.has('');
@@ -173,7 +198,7 @@
 
   // The slice of the database a user may see. `snapshot` has arrays with `id` on each record.
   // Who reads and writes the project chat: the GIP and the participants (project.members).
-  const canChat = (user, p) => !!user && !!p && (isGip(user) || (Array.isArray(p.members) && p.members.includes(user.id)));
+  const canChat = (user, p) => !!user && !!p && (!!projectRole(user, p) || (Array.isArray(p.members) && p.members.includes(user.id)));
   // Messenger (3.8): a project chat is the project's (GIP and participants); personal and group chats — their members.
   const canSeeChat = (user, chat, projects) => {
     if (!user || !chat) return false;
@@ -184,18 +209,19 @@
     const users = snapshot.users || [];
     const money = canSeeMoney(user);
     const team = teamIds(user, users); // once, not per card
-    const tasks = (snapshot.tasks || []).filter(t => canSeeTask(user, t, users, team)).map(t => (money ? t : redactTask(t)));
-    let projects = snapshot.projects || [];
+    const all = snapshot.projects || [];
+    const tasks = (snapshot.tasks || []).filter(t => canSeeTask(user, t, users, team, all)).map(t => (money && canSeeTaskMoney(user, t, all) ? t : redactTask(t)));
+    let projects = isGipOnly(user) ? all.filter(p => projectRole(user, p)) : all;
     let contractors = snapshot.contractors || [];
     if (isSpecialist(user)) {
       const pids = new Set(tasks.map(t => t.projectId)), cids = new Set(tasks.map(t => t.contractorId));
       projects = projects.filter(p => pids.has(p.id) || (Array.isArray(p.members) && p.members.includes(user.id))); // participants see the project
       contractors = contractors.filter(c => cids.has(c.id)).map(c => { const { requisites, ...rest } = c; return rest; });
     }
-    const chats = (snapshot.chats || []).filter(c => canSeeChat(user, c, snapshot.projects || []));
+    const chats = (snapshot.chats || []).filter(c => canSeeChat(user, c, all));
     // «Договор» in the project plan and the customer's contract, payments and bills are for GIPs only
     // («видит бюджет» opens the cards' budgets, not the customer's contract).
-    if (!isGip(user)) projects = projects.map(p => { const { contract, payments, bills, ...rest } = p; return Array.isArray(p.phases) ? { ...rest, phases: p.phases.filter(ph => ph.key !== 'contract') } : rest; });
+    projects = projects.map(p => { if (seesProjectMoney(user, p)) return p; const { contract, payments, bills, ...rest } = p; return Array.isArray(p.phases) ? { ...rest, phases: p.phases.filter(ph => ph.key !== 'contract') } : rest; });
     // The org structure is seen by every staff member (4.1).
     const depts = (snapshot.depts || []).filter(d => !d.deletedAt);
     const orgs = (snapshot.orgs || []).filter(o => isGip(user) || !o.deletedAt).map(o => orgView(user, o));
@@ -203,7 +229,7 @@
   }
   // A non-GIP saves the plan without the hidden «Договор» row: keep the stored one.
   function keepHiddenPhases(user, before, data) {
-    if (isGip(user) || !data || !Array.isArray(data.phases)) return data;
+    if (seesProjectMoney(user, before) || !data || !Array.isArray(data.phases)) return data;
     const hidden = (before?.phases || []).filter(ph => ph.key === 'contract');
     return { ...data, phases: [...hidden, ...data.phases.filter(ph => ph.key !== 'contract')] };
   }
@@ -241,9 +267,12 @@
     if (!user || !target) return false;
     return isGip(user) || user.id === target.id || (isChief(user) && isSpecialist(target) && target.chiefId === user.id);
   }
-  function checkWrite(user, col, before, after, users, id = '') {
+  function checkWrite(user, col, before, after, users, id = '', projects = null) {
     if (!user) return 'Не выбран пользователь.';
     if (col === 'users') {
+      // The director's role is given and taken by a director; while there is none, by a GIP (to appoint the first one).
+      const director = liveUsers(users).some(u => isDirector(u) && u.id !== id);
+      if ((before?.role === 'director' || after?.role === 'director') && before?.role !== after?.role && !isDirector(user) && director) return 'Роль «Директор» назначает директор.';
       if (canManageUsers(user)) return null;
       const target = before && { ...before, id };
       if (before && after && changedKeys(before, after).every(k => k === 'absences') && canEditAbsences(user, target)) return null;
@@ -261,6 +290,14 @@
       const may = new Set(orgFields(user, before || after));
       if (changedKeys(before, after).some(k => k !== 'updatedAt' && !may.has(k))) return 'Эти сведения о контрагенте вам не открыты.';
       return orgDataError(after);
+    }
+    if (col === 'projects' && isGipOnly(user) && before) {
+      const role = projectRole(user, before);
+      if (!role) return 'Это проект другого ГИПа — он может пригласить вас в участники.';
+      if (role === 'member') {
+        if (!after) return 'Проект удаляет его ГИП.';
+        if (['contract', 'payments', 'bills', 'gipId'].some(k => k in after && !same(before[k], after[k]))) return 'Договор, деньги и ГИПа проекта меняет его ГИП.';
+      }
     }
     if (col === 'projects' || col === 'contractors') return !canManageCatalog(user) ? 'Проекты и внештатных исполнителей ведут ГИП и главспецы.' : col === 'projects' ? projectDataError(after) : null;
     if (col !== 'tasks') return 'Неизвестный раздел данных.';
@@ -281,7 +318,12 @@
       const r = Number(after.readiness);
       if (!Number.isInteger(r) || r < 1 || r > 90) return 'Готовность в работе — целое число от 1 до 90 %.';
     }
-    if (isGip(user)) return null;
+    if (isGip(user)) {
+      const was = before ? taskProjectRole(user, before, projects) : 'own', now = after ? taskProjectRole(user, after, projects) : 'own';
+      if (!was || !now) return 'Эта карточка — в проекте другого ГИПа.';
+      if ((was !== 'own' || now !== 'own') && changedKeys(before, after).some(k => MONEY_FIELDS.includes(k))) return 'Бюджет карточек чужого проекта ведёт его ГИП.';
+      return null;
+    }
     if (before && !canSeeTask(user, before, users)) return 'Эта карточка вне вашей зоны доступа.';
     if (!before && !canCreateTasks(user)) return 'Специалист не создаёт карточки — их спускает главспец или ГИП.';
     if (!after) return isSpecialist(user) ? 'Специалист не удаляет карточки.' : null;
@@ -328,20 +370,23 @@
     return ts.sort().at(-1) || '';
   }
   // Who should hear about a card: its people and their chiefs (the GIP for cards led by a chief or nobody).
-  function reviewersOf(task, users) {
+  // 4.12: with several GIPs — the GIP of the card's project (projects given), else every GIP and the director.
+  function reviewersOf(task, users, projects = null) {
     const all = liveUsers(users), out = new Set();
+    const p = findProject(projects, task?.projectId), pg = p?.gipId && all.find(u => u.id === p.gipId && isGip(u));
+    const gips = pg ? [pg] : all.filter(isGip);
     for (const id of ownersOf(task)) {
       const u = all.find(x => x.id === id);
       if (isSpecialist(u) && u.chiefId) out.add(u.chiefId);
-      else all.filter(isGip).forEach(g => out.add(g.id));
+      else gips.forEach(g => out.add(g.id));
     }
-    if (!ownersOf(task).length) all.filter(isGip).forEach(g => out.add(g.id));
+    if (!ownersOf(task).length) gips.forEach(g => out.add(g.id));
     return [...out];
   }
 
   return {
     ROLES, ABSENCE_KINDS, absencesOf, absenceHits, absenceText, isUnread, lastActivity, reviewersOf, canEditAbsences, DIRECTIONS, MONEY_FIELDS, SPECIALIST_FIELDS,
-    roleOf, isGip, isChief, isSpecialist, titleFor, directionLabels,
+    roleOf, isGip, isDirector, isGipOnly, projectRole, seesProjectMoney, canSeeTaskMoney, isChief, isSpecialist, titleFor, directionLabels,
     teamIds, canSeeMoney, canCreateTasks, canManageCatalog, canManageUsers, canUseDataTools, canEditTaskFields,
     ORG_ROLES, orgRoles, isCustomerOrg, canSeeContacts, canSeeOrgs, orgCard, canSeeOrgContracts, orgView,
     canSeeTask, assignableOwners, redactTask, viewFor, canChat, canSeeChat, checkWrite, keepHiddenPhases, projectDataError,
