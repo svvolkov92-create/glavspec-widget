@@ -84,10 +84,6 @@ function setFold(keys, on) {
   saveLocal('folded', [...folded]);
   renderNow();
 }
-function foldAllBar(keys) {
-  return `<div class="fold-bar"><button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="1" data-keys="${esc(keys.join(' '))}"${keys.length && keys.every(isFolded) ? ' disabled' : ''}>▸ Свернуть все</button>
-    <button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="0" data-keys="${esc(keys.join(' '))}"${keys.some(isFolded) ? '' : ' disabled'}>▾ Развернуть все</button></div>`;
-}
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({

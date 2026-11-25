@@ -9,12 +9,14 @@ const root = path.join(__dirname, '..', '..');
 const from = path.join(root, 'src', 'renderer');
 const to = path.join(root, 'build', 'tauri-ui');
 
-// app.js is built from its parts (src/renderer/app/*.js); a stale app.js would ship old code.
-if (!require(path.join(root, 'tools', 'build-app.js')).isBuilt(fs.readFileSync(path.join(from, 'app.js'), 'utf8'))) {
-  throw new Error('src/renderer/app.js is not built from src/renderer/app/*.js — run: node tools/build-app.js');
+// app.js and styles.css are built from their parts (src/renderer/app/*.js, styles/*.css); stale ones would ship old code.
+const built = require(path.join(root, 'tools', 'build-app.js'));
+if (!built.isBuilt(fs.readFileSync(path.join(from, 'app.js'), 'utf8')) || !built.isCssBuilt(fs.readFileSync(path.join(from, 'styles.css'), 'utf8'))) {
+  throw new Error('src/renderer/app.js or styles.css is not built from its parts — run: node tools/build-app.js');
 }
 fs.rmSync(to, { recursive: true, force: true });
-fs.cpSync(from, to, { recursive: true, filter: src => src !== path.join(from, 'app') }); // the parts: already in app.js
+// The parts are already in app.js and styles.css.
+fs.cpSync(from, to, { recursive: true, filter: src => src !== path.join(from, 'app') && src !== path.join(from, 'styles') });
 fs.copyFileSync(path.join(__dirname, 'tauri-windows.js'), path.join(to, 'tauri-windows.js'));
 fs.copyFileSync(path.join(__dirname, 'tauri-api.js'), path.join(to, 'tauri-api.js'));
 fs.copyFileSync(path.join(__dirname, 'tauri-core.js'), path.join(to, 'tauri-core.js'));

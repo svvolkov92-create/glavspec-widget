@@ -79,66 +79,17 @@ function taskAssignsBlock(t) {
   return `<div class="f wide asg-list">${out.length ? `<span class="lbl">Исходящие задания (${out.length})</span><ul>${out.map(x => line(x, 'out')).join('')}</ul>` : ''}
     ${inc.length ? `<span class="lbl">Входящие задания (${inc.length})</span><ul>${inc.map(x => line(x, 'in')).join('')}</ul>` : ''}</div>`;
 }
-function marksPicker(selected) {
-  const known = new Set(MARK_GROUPS.flatMap(g => g.marks.map(m => m[0])));
-  const custom = selected.filter(m => !known.has(m));
-  const groups = MARK_GROUPS.map(g => `<fieldset class="mk-group" data-dir="${esc(g.dir || '')}"><legend>${esc(g.title)}</legend><div class="mk-grid">${g.marks.map(([code, name]) =>
-    `<label class="mk" title="${esc(name)}"><input type="checkbox" name="mark" value="${esc(code)}"${selected.includes(code) ? ' checked' : ''}><span class="code">${esc(code)}</span><small>${esc(name)}</small></label>`).join('')}</div></fieldset>`).join('');
-  return `<div class="f wide marks-f">
-    <div class="mk-head"><span class="lbl req" id="marks-lbl">Разделы</span><span class="hint" id="marks-count"></span></div>
-    <div class="mk-tools" data-transient><input id="mk-search" type="search" placeholder="Найти раздел: ЭО, вент, пожар…" autocomplete="off">
-      <button class="btn ghostbtn sm" type="button" data-act="mk-all" id="mk-all"></button></div>
-    <div class="mk-groups" role="group" aria-labelledby="marks-lbl">${groups}</div>
-    <label for="t-marks-extra">Другие разделы, через запятую</label>
-    <input id="t-marks-extra" name="marksExtra" value="${esc(custom.join(', '))}" placeholder="ЭОМ1, АИИС КУЭ" maxlength="200" autocomplete="off">
-  </div>`;
-}
-// Shows only the directions of the chosen responsible person (plus groups with ticked marks); search looks everywhere.
-function applyMarksFilter() {
-  const box = $('#dform .mk-groups');
-  if (!box) return;
-  const q = ($('#mk-search')?.value || '').trim().toLowerCase();
-  const owner = state.users?.get($('#t-owner')?.value);
-  const own = new Set(owner && !A.isGip(owner) ? owner.directions || [] : []);
-  const limit = !state.drawer?.allMarks && own.size > 0 && !q;
-  let hiddenGroups = 0;
-  for (const g of $$('.mk-group', box)) {
-    let any = false;
-    for (const l of $$('.mk', g)) {
-      const hit = !q || l.textContent.toLowerCase().includes(q);
-      l.hidden = !hit;
-      any ||= hit;
-    }
-    const keep = any && (!limit || own.has(g.dataset.dir) || $$('input:checked', g).length > 0);
-    g.hidden = !keep;
-    if (!keep && any) hiddenGroups++;
-  }
-  const btn = $('#mk-all');
-  if (btn) {
-    btn.hidden = !(own.size && !q);
-    btn.textContent = state.drawer?.allMarks ? 'Только направления ответственного' : `Все направления${hiddenGroups ? ` (+${hiddenGroups})` : ''}`;
-  }
-}
 function selectedMarks() {
   const doc = $('#t-doc');
   if (doc && doc.value && doc.value !== 'free') return docRefSections(val('projectId'), doc.value);
   if (doc && !doc.value) return [];
-  const checked = $$('#dform input[name="mark"]:checked').map(i => i.value);
-  return normalizeMarks([...checked, ...splitMarks(val('marksExtra'))]);
+  return normalizeMarks(splitMarks(val('marksExtra')));
 }
 function onMarksChanged() {
   const list = selectedMarks();
-  const el = $('#dform .mk-groups') && $('#marks-count');
-  if (el) el.textContent = list.length ? `выбрано ${list.length}: ${list.join(', ')}` : 'ничего не выбрано';
   const own = $('#t-owner');
   if (own && !own.disabled) { const v = own.value; own.innerHTML = ownerOptions(v, list); own.value = v; }
   execPickersRefresh();
   updateOwnerWarn();
-  applyMarksFilter();
   smartDefaults();
 }
-
-/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
-onAct({
-  'mk-all': () => { state.drawer.allMarks = !state.drawer.allMarks; applyMarksFilter(); },
-});

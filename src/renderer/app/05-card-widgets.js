@@ -106,10 +106,8 @@ const EDIT_HINT = 'Двойной щелчок — изменить прямо �
 // Asks why the deadline moves; resolves to {reason, note} or null when cancelled.
 function askShiftReason(t, from, to, followers = null) {
   return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
     const d = dayNum(to) - dayNum(from);
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
+    const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
       <h2 id="mtitle">Перенос срока</h2>
       <p><b>${esc(marksText(t))}</b> · ${esc(projectOf(t)?.name || '')}</p>
       <p class="shift-h">${fmtDate(from)} → ${fmtDate(to)} <b>(${d >= 0 ? '+' : ''}${d} дн.)</b></p>
@@ -119,12 +117,8 @@ function askShiftReason(t, from, to, followers = null) {
       <div class="f"><label for="m-note">Комментарий</label><input id="m-note" maxlength="200" placeholder="Например: заказчик сменил ТУ"></div>
       <div class="err" id="m-err" hidden>Выберите причину переноса.</div>
       <div class="modal-f"><button class="btn primary" type="submit">Перенести</button><button class="btn" type="button" data-m="cancel">Отмена</button></div>
-    </form>`;
-    document.body.append(root);
-    const close = v => { root.remove(); resolve(v); };
+    </form>`, { onClose: resolve });
     root.querySelector('#m-reason').focus();
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
     root.querySelector('form').addEventListener('submit', e => {
       e.preventDefault();
       e.stopPropagation();

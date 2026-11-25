@@ -11,3 +11,9 @@ test('app.js is built from src/renderer/app/*.js', () => {
   const now = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'app.js'), 'utf8');
   assert.ok(isBuilt(now), 'src/renderer/app.js differs from its parts — edit the parts and run: node tools/build-app.js');
 });
+
+test('styles.css is built from src/renderer/styles/*.css', () => {
+  const { isCssBuilt } = require('../tools/build-app.js');
+  const now = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'styles.css'), 'utf8');
+  assert.ok(isCssBuilt(now), 'src/renderer/styles.css differs from its parts — edit src/renderer/styles/*.css and run: node tools/build-app.js');
+});

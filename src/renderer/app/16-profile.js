@@ -38,9 +38,9 @@ function profileHtml(u) {
     u.phone ? ['Телефон', esc(u.phone)] : null, u.email ? ['Почта', esc(u.email)] : null, u.messenger ? ['Мессенджер', esc(u.messenger)] : null,
   ].filter(Boolean);
   const progs = Array.isArray(u.programs) ? u.programs : [];
-  return `<div class="pf">${rows.length ? `<div class="pf-kv">${rows.map(([k, v]) => `<span class="hint">${k}</span><span>${v}</span>`).join('')}</div>` : ''}
-    ${u.about ? `<p class="pf-about">${esc(u.about)}</p>` : ''}
-    ${progs.length ? `<div class="pf-progs"><span class="hint">Программы:</span> ${progs.map(x => `<span class="chip tone-idle">${esc(x)}</span>`).join(' ')}</div>` : ''}
+  return `<div class="prof">${rows.length ? `<div class="prof-kv">${rows.map(([k, v]) => `<span class="hint">${k}</span><span>${v}</span>`).join('')}</div>` : ''}
+    ${u.about ? `<p class="prof-about">${esc(u.about)}</p>` : ''}
+    ${progs.length ? `<div class="prof-progs"><span class="hint">Программы:</span> ${progs.map(x => `<span class="chip tone-idle">${esc(x)}</span>`).join(' ')}</div>` : ''}
     ${!rows.length && !u.about && !progs.length ? '<p class="hint">Анкета не заполнена.</p>' : ''}</div>`;
 }
 
@@ -53,9 +53,7 @@ function personPopup(uid) {
       ${canEditFields() ? `<button class="btn ghostbtn sm" type="button" data-op-move="${esc(t.id)}" title="Передать другому сотруднику">⇄ Передать</button>` : ''}</div>`;
   const asgRow = t => `<div class="op-row"><button class="linkbtn" type="button" data-op-open="${esc(t.id)}">${esc(t.note || t.title)} <span>${esc(projectOf(t)?.name || '')}</span></button><span class="hint">${esc(t.title)}</span>
       <span class="due ${asgLate(t) ? 'bad' : ''}">${isDate(t.finish) ? fmtDate(t.finish) : '—'}</span></div>`;
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<div class="modal wide-modal person-modal" role="dialog" aria-modal="true" aria-labelledby="optitle">
+  const { root, close } = openModal(`<div class="modal wide-modal person-modal" role="dialog" aria-modal="true" aria-labelledby="optitle">
     <div class="pm-head">${avatarHtml(u, 'big')}<div><h2 id="optitle"><span class="kicons">${userIcons(u)}</span>${esc(u.name)}</h2>
       <p class="hint">${esc(A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''}</p>${personStateChip(st)}</div></div>
     ${profileHtml(u)}
@@ -66,12 +64,9 @@ function personPopup(uid) {
     ${give.length ? `<h3 class="pm-h">Должен выдать задания <span class="cnt">${give.length}</span></h3><div class="op-list">${give.map(asgRow).join('')}</div>` : ''}
     <div class="modal-f"><button class="btn" type="button" data-op-all>Все карточки</button>${A.canEditAbsences(state.me, u) ? '<button class="btn ghostbtn" type="button" data-op-abs>Отпуска</button>' : ''}
       ${me ? '<button class="btn ghostbtn" type="button" data-op-profile>Моя анкета</button>' : ''}${A.isGip(state.me) ? '<button class="btn ghostbtn" type="button" data-op-edit>Изменить</button>' : ''}
-      <span class="spacer"></span><button class="btn primary" type="button" data-m="close">Закрыть</button></div></div>`;
-  document.body.append(root);
-  const close = () => root.remove();
+      <span class="spacer"></span><button class="btn primary" type="button" data-m="close">Закрыть</button></div></div>`);
   root.addEventListener('click', e => {
     const b = e.target.closest('button');
-    if (e.target === root || b?.dataset.m === 'close') return close();
     if (!b) return;
     if (b.dataset.opOpen) { close(); openTask(b.dataset.opOpen); }
     else if (b.dataset.opMove) { close(); reassign(b.dataset.opMove, 'staff', uid); }
@@ -80,7 +75,6 @@ function personPopup(uid) {
     else if (b.hasAttribute('data-op-profile')) { close(); openProfile(); }
     else if (b.hasAttribute('data-op-edit')) { close(); openUser(uid); }
   });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('[data-m="close"]').focus();
 }
 
@@ -113,33 +107,28 @@ function openProfile() {
   if (!u) return;
   const gip = A.isGip(state.me), bdayLocked = !gip && isDate(u.birthday);
   let photo = A.photoOf(u);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="pf-t" novalidate><h2 id="pf-t">Моя анкета</h2>
-    <div class="pf-photo"><span id="pf-ava">${avatarHtml({ ...u, photo }, 'big')}</span><div><label class="btn sm" for="pf-file">Выбрать фото</label><input id="pf-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+  const { root, close } = openModal(`<form class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="pf-t" novalidate><h2 id="pf-t">Моя анкета</h2>
+    <div class="prof-photo"><span id="pf-ava">${avatarHtml({ ...u, photo }, 'big')}</span><div><label class="btn sm" for="pf-file">Выбрать фото</label><input id="pf-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
       <button class="btn ghostbtn sm" type="button" id="pf-nophoto"${photo ? '' : ' hidden'}>Убрать фото</button><p class="hint">Фото обрежется до квадрата.</p></div></div>
     <div class="fgrid">
-      <div class="f wide"><label for="pf-about">О себе</label><textarea id="pf-about" rows="3" maxlength="1500" placeholder="Чем занимаюсь, в чём силён, к кому обращаться">${esc(u.about || '')}</textarea></div>
+      <div class="f wide"><label for="prof-about">О себе</label><textarea id="pf-about" rows="3" maxlength="1500" placeholder="Чем занимаюсь, в чём силён, к кому обращаться">${esc(u.about || '')}</textarea></div>
       <div class="f"><label for="pf-phone">Телефон</label><input id="pf-phone" type="tel" value="${esc(u.phone || '')}" maxlength="40"></div>
       <div class="f"><label for="pf-email">Почта</label><input id="pf-email" type="email" value="${esc(u.email || '')}" maxlength="120"></div>
       <div class="f"><label for="pf-msg">Мессенджер</label><input id="pf-msg" value="${esc(u.messenger || '')}" maxlength="120"></div>
       <div class="f"><label for="pf-bday">День рождения</label><input id="pf-bday" type="date" value="${esc(u.birthday || '')}"${bdayLocked ? ' disabled' : ''}>
         <span class="hint">${bdayLocked ? 'Уже указан — изменить может ГИП.' : 'Указывается один раз, потом меняет только ГИП. Год никому не показывается.'}</span></div>
-      <div class="f wide"><label for="pf-progs">Программы, которыми владею</label><textarea id="pf-progs" rows="2" maxlength="2000" placeholder="AutoCAD, Revit, nanoCAD, ГРАНД-Смета — через запятую">${esc((u.programs || []).join(', '))}</textarea></div>
+      <div class="f wide"><label for="prof-progs">Программы, которыми владею</label><textarea id="pf-progs" rows="2" maxlength="2000" placeholder="AutoCAD, Revit, nanoCAD, ГРАНД-Смета — через запятую">${esc((u.programs || []).join(', '))}</textarea></div>
     </div>
     <p class="hint">Должность${u.position ? ` (${esc(u.position)})` : ''}, дату приёма${isDate(u.hireDate) ? ` (${fmtDate(u.hireDate)})` : ''}, роль и направления заполняет ГИП.</p>
     <div class="err" id="pf-err" hidden></div>
-    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+  const q = s => root.querySelector(s);
   const showPhoto = () => { q('#pf-ava').innerHTML = avatarHtml({ ...u, photo }, 'big'); q('#pf-nophoto').hidden = !photo; };
   q('#pf-file').addEventListener('change', async e => {
     try { photo = await photoFromFile(e.target.files[0]); showPhoto(); q('#pf-err').hidden = true; } catch (err) { modalErr(root, '#pf-err', err.message); }
     e.target.value = '';
   });
   q('#pf-nophoto').addEventListener('click', () => { photo = ''; showPhoto(); });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const data = { photo, about: q('#pf-about').value.trim(), phone: q('#pf-phone').value.trim(), email: q('#pf-email').value.trim(), messenger: q('#pf-msg').value.trim(), programs: programsFrom(q('#pf-progs').value) };

@@ -55,9 +55,7 @@ function askDept(dept = null, parentId = '') {
   const others = [...state.depts.values()].filter(x => x.id !== d.id);
   const staff = liveUsers().sort(byName);
   const members = new Set(staff.filter(u => dept && u.deptId === dept.id).map(u => u.id));
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal org-modal" role="dialog" aria-modal="true" aria-labelledby="org-t" novalidate><h2 id="org-t">${dept ? 'Отдел' : 'Новый отдел'}</h2>
+  const { root, close } = openModal(`<form class="modal org-modal" role="dialog" aria-modal="true" aria-labelledby="org-t" novalidate><h2 id="org-t">${dept ? 'Отдел' : 'Новый отдел'}</h2>
     <div class="f"><label class="req" for="org-name">Название</label><input id="org-name" maxlength="120" value="${esc(d.name)}" placeholder="Отдел инженерных систем"></div>
     <div class="f"><label for="org-head">Руководитель</label><select id="org-head"><option value="">— не назначен —</option>${staff.map(u => `<option value="${esc(u.id)}"${u.id === d.headId ? ' selected' : ''}>${esc(u.name)} · ${esc(A.ROLES[u.role]?.label || '')}</option>`).join('')}</select></div>
     <div class="f"><label for="org-parent">Входит в</label><select id="org-parent"><option value="">— верхний уровень —</option>${others.map(x => `<option value="${esc(x.id)}"${x.id === d.parentId ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
@@ -69,9 +67,8 @@ function askDept(dept = null, parentId = '') {
         return `<label class="pick-row" data-name="${esc(u.name.toLowerCase())}" data-free="${u.deptId && state.depts.get(u.deptId) ? '0' : '1'}"><input type="checkbox" value="${esc(u.id)}"${members.has(u.id) ? ' checked' : ''}><span class="pick-name">${esc(u.name)}</span>${now ? `<span class="pick-now" title="Сейчас: ${esc(now)}">сейчас: ${esc(now)}</span>` : ''}</label>`;
       }).join('')}<p class="hint pick-none" hidden>Никого не найдено.</p></div></fieldset>
     <div class="err" id="org-err" hidden></div>
-    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${dept ? '<button class="btn danger" type="button" data-m="del">Удалить отдел</button>' : ''}</div></form>`;
-  document.body.append(root);
-  const q = sel => root.querySelector(sel), close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${dept ? '<button class="btn danger" type="button" data-m="del">Удалить отдел</button>' : ''}</div></form>`);
+  const q = sel => root.querySelector(sel);
   q('#org-name').focus();
   // The list: search by surname, «только без отдела», how many are chosen.
   const pickList = () => {
@@ -90,9 +87,7 @@ function askDept(dept = null, parentId = '') {
   q('#org-find').addEventListener('input', pickList);
   q('#org-free').addEventListener('change', pickList);
   q('.pick-list').addEventListener('change', pickList);
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.addEventListener('click', async e => {
-    if (e.target === root || e.target.dataset.m === 'cancel') close();
     if (e.target.dataset.m === 'del') {
       // Sub-departments move up a level, people become «без отдела».
       const ops = [op.update('depts', dept.id, { deletedAt: new Date().toISOString() }),

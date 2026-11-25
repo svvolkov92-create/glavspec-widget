@@ -56,16 +56,11 @@ async function asgIssue(id) {
 function asgReturn(id) {
   const t = state.tasks.get(id);
   if (!t) return;
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="asr-t" novalidate><h2 id="asr-t">Вернуть задание</h2><p class="hint">${esc(t.title)}</p>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="asr-t" novalidate><h2 id="asr-t">Вернуть задание</h2><p class="hint">${esc(t.title)}</p>
     <div class="f wide"><label class="req" for="asr-note">Замечание</label><textarea id="asr-note" rows="3" maxlength="500" placeholder="Нет отметок низа отверстий"></textarea></div><div class="err" id="asr-err" hidden></div>
-    <div class="modal-f"><button class="btn warnbtn" type="submit">Вернуть</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
+    <div class="modal-f"><button class="btn warnbtn" type="submit">Вернуть</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+  const q = s => root.querySelector(s);
   q('#asr-note').focus();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const note = q('#asr-note').value.trim();

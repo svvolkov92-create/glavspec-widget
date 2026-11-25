@@ -15,9 +15,7 @@ function askReassign(t, kind, fromId, toId = '') {
       ? A.assignableOwners(state.me, liveUsers()).filter(u => !A.isGip(u) && u.id !== fromId).sort(byName)
       : contractorsArr().filter(c => c.id !== fromId);
     const nameOf = id => (kind === 'staff' ? state.users.get(id)?.name : state.contractors.get(id)?.name) || 'не назначен';
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
+    const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
       <h2 id="mtitle">Передать карточку</h2>
       <p><b>${esc(marksText(t))}</b> · ${esc(projectOf(t)?.name || '')}</p>
       <p class="hint">Сейчас: ${esc(nameOf(fromId))}</p>
@@ -29,16 +27,12 @@ function askReassign(t, kind, fromId, toId = '') {
         <label class="chk"><input type="checkbox" id="m-force"> Всё равно назначить</label></div>
       <div class="err" id="m-err" hidden></div>
       <div class="modal-f"><button class="btn primary" type="submit">Передать</button><button class="btn" type="button" data-m="cancel">Отмена</button></div>
-    </form>`;
-    document.body.append(root);
+    </form>`, { onClose: resolve });
     const sel = root.querySelector('#m-to'), warn = root.querySelector('#m-warn');
     const sync = () => { const txt = sel.value ? misfitText(t, kind, sel.value) : ''; warn.hidden = !txt; root.querySelector('#m-warn-text').textContent = txt; root.querySelector('#m-force').checked = false; };
     sync();
     sel.addEventListener('change', sync);
     (toId ? root.querySelector('#m-force') : sel).focus();
-    const close = v => { root.remove(); resolve(v); };
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
     root.querySelector('form').addEventListener('submit', e => {
       e.preventDefault(); e.stopPropagation();
       const err = root.querySelector('#m-err');

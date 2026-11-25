@@ -1,0 +1,32 @@
+/* ===== Animations (root class «anim»; switched in «Окно → Анимации», off by default when Windows asks for less motion) ===== */
+@keyframes a-slide-in { from { transform: translateX(28px); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes a-slide-out { from { transform: none; opacity: 1 } to { transform: translateX(48px); opacity: 0 } }
+@keyframes a-fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes a-fade-out { from { opacity: 1 } to { opacity: 0 } }
+@keyframes a-pop { from { transform: translateY(6px) scale(.98); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes a-drop { from { transform: translateY(-4px); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes a-rise { from { transform: translateY(8px); opacity: 0 } to { transform: none; opacity: 1 } }
+.anim .drawer { animation: a-slide-in .2s cubic-bezier(.2, .8, .2, 1) }
+.anim .scrim { animation: a-fade-in .2s ease-out }
+.anim .msg-panel.enter { animation: a-slide-in .22s cubic-bezier(.2, .8, .2, 1) }
+.anim .mp-back.enter { animation: a-fade-in .22s ease-out }
+/* A closing panel or card is a detached copy that slides out to the right and is then removed. */
+.leaving { pointer-events: none }
+.anim .drawer.leaving, .anim .msg-panel.leaving { animation: a-slide-out .18s ease-in forwards }
+.anim .scrim.leaving, .anim .mp-back.leaving { animation: a-fade-out .18s ease-in forwards }
+.anim .modal, .anim .palette { animation: a-pop .16s cubic-bezier(.2, .8, .2, 1) }
+.anim .modal-back, .anim .palette-back { animation: a-fade-in .16s ease-out }
+.anim .menu:not([hidden]) { animation: a-drop .14s ease-out }
+.anim .toast:not([hidden]) { animation: a-rise .18s ease-out }
+.anim .mc-ac:not([hidden]) { animation: a-drop .12s ease-out }
+.anim .btn, .anim .mc-tab, .anim .mc-item, .anim .kb-card, .anim .tab, .anim .dtab { transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s, transform .15s }
+.anim .kb-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(20, 24, 33, .12) }
+.anim .dpanel:not([hidden]) { animation: a-fade-in .14s ease-out }
+.anim .chat-msg.fresh { animation: a-rise .2s ease-out }
+/* Off: nothing moves. */
+.marks .st-stage { font-size: 10px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 3px; align-self: center }
+/* Files attached to a request to the customer */
+.aq-files, .req-files { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin: 4px 0 }
+.aq-file { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; background: var(--glass) }
+.aq-file .ico { width: 13px; height: 13px }
+

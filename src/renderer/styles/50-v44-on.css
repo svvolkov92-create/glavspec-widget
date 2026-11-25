@@ -1,0 +1,215 @@
+/* 50: a new card suggests dates from the project stage and an executor */
+.smart-hint:not([hidden]) { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 12.5px; color: var(--muted); padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--accent-soft) }
+.smart-hint b { color: var(--ink) }
+/* 56: introduction by role */
+.tour { position: fixed; z-index: 80; width: min(320px, calc(100vw - 16px)); background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-top: 3px solid #F26A1F; box-shadow: var(--shadow); padding: 12px 14px; font-size: 13px }
+.tour b { display: block; font-size: 14px; margin: 2px 0 4px }
+.tour p { margin: 0 0 10px; line-height: 1.45 }
+.tour-n { font-size: 11px }
+.tour-acts { display: flex; gap: 8px }
+.tour-on { outline: 2px solid #F26A1F !important; outline-offset: 2px }
+/* 4.4 (32): Mica / acrylic — Windows paints the blurred background, the page only tints it; no halo needed */
+:root[data-backdrop="mica"], :root[data-backdrop="acrylic"] { --alpha: .5 !important }
+:root[data-backdrop="mica"] .shell, :root[data-backdrop="acrylic"] .shell { text-shadow: none; background: color-mix(in srgb, var(--bg) 28%, transparent) }
+:root[data-backdrop="mica"] .kpi, :root[data-backdrop="mica"] .panel, :root[data-backdrop="mica"] .card,
+:root[data-backdrop="acrylic"] .kpi, :root[data-backdrop="acrylic"] .panel, :root[data-backdrop="acrylic"] .card { background: color-mix(in srgb, var(--surface) 72%, transparent) }
+.alpha:has(input:disabled) { opacity: .45 }
+/* 4.4 (40): holding Alt shows the keys */
+body.alt-hints [data-alt-key] { position: relative }
+body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: absolute; bottom: 1px; right: 1px; z-index: 90; font: 600 10.5px/1 var(--f-mono); padding: 3px 5px; border-radius: 4px; background: #1A1A1A; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); white-space: nowrap; pointer-events: none }
+.pal-quick #pal-q { border-left: 3px solid #F26A1F }
+/* 4.5 (12): a pinned messages window, cards in chats */
+.msg-stick.on { color: #F26A1F; background: color-mix(in srgb, #F26A1F 12%, transparent) }
+.msg-panel.drop-card { outline: 2px dashed #F26A1F; outline-offset: -6px }
+.msg-card { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: 2px 0; padding: 3px 8px; border: 1px solid var(--line); border-left: 3px solid #F26A1F; border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; vertical-align: middle }
+.msg-card svg { width: 14px; height: 14px; flex: none }
+.msg-card span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.msg-card.off { cursor: default; color: var(--muted); border-left-color: var(--line) }
+/* 4.5 (14): own pictures */
+.own-ic { display: inline-block; width: 18px; height: 18px; object-fit: cover; border-radius: 4px; vertical-align: middle; flex: none }
+.own-ic.big { width: 32px; height: 32px; border-radius: 6px }
+.mc-ic.pic { padding: 0; overflow: hidden; background: none }
+.mc-ic.pic .own-ic { width: 100%; height: 100%; border-radius: inherit }
+.pcard-open { display: flex; align-items: center; gap: 8px }
+.dt-open .own-ic { width: 16px; height: 16px; margin-right: 4px }
+.icon-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.lbl-t { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px }
+/* 4.5 (13): the strip for the whole program */
+.doc-tabs .ws-plus { flex: none; min-width: 32px; padding: 0 10px; justify-content: center; font-size: 16px }
+.dtab.ws-tab .dt-open svg, .dtab.ws-chat .mc-ic { margin-right: 4px }
+.dtab .dt-open .hint { margin-left: 4px; font-weight: 400 }
+.dtab.ws-chat .mc-ic { width: 18px; height: 18px; font-size: 10px }
+/* 4.6 (1): «Для заказчика» by tabs */
+.cust-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line) }
+.cust-nav .btn.on { border-color: var(--accent); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent) }
+.cust-new { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; background: #F26A1F; color: #fff; font-style: normal; font-size: 11px; font-weight: 700 }
+.dpanel[data-panel="cust"][data-cs] .sub[data-cs] { display: none }
+.dpanel[data-panel="cust"][data-cs="plan"] .sub[data-cs="plan"], .dpanel[data-panel="cust"][data-cs="req"] .sub[data-cs="req"], .dpanel[data-panel="cust"][data-cs="ird"] .sub[data-cs="ird"],
+.dpanel[data-panel="cust"][data-cs="meet"] .sub[data-cs="meet"], .dpanel[data-panel="cust"][data-cs="docs"] .sub[data-cs="docs"], .dpanel[data-panel="cust"][data-cs="money"] .sub[data-cs="money"],
+.dpanel[data-panel="cust"][data-cs="show"] .sub[data-cs="show"] { display: block }
+.dpanel[data-panel="cust"][data-cs]:not([data-cs="cab"]) #cab-box { display: none }
+.dpanel[data-panel="cust"][data-cs="cab"] #cust-box .sub[data-cs] { display: none }
+/* 4.6 (10): who gives what to whom */
+.tc-secs { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px }
+.tc-sec { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--glass) }
+.tc-sec h4 { margin: 0 0 6px; font-size: 14px }
+.tc-io { display: grid; grid-template-columns: 74px 1fr; gap: 6px; margin-top: 4px }
+.tc-io ul { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.4 }
+.tc-io-h { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #1E7A45; padding-top: 2px }
+.tc-io-h.out { color: #B04E0D }
+/* 4.6 (11): surveys */
+.sv-t tr.off td { opacity: .5 }
+.sv-t input:not([type="checkbox"]), .sv-t select { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--glass); min-width: 0; width: 100% }
+.sv-choice { display: flex; flex-direction: column; gap: 4px; align-items: flex-start }
+/* «Сервер Пульта» */
+.srv-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; margin-left: 6px; border: 1px solid var(--line); border-radius: 13px; background: var(--glass); color: var(--ink); font: 600 12px/1 var(--f-ui, inherit); cursor: pointer; white-space: nowrap }
+.srv-chip i { width: 8px; height: 8px; border-radius: 50%; background: #1E7A45 }
+.srv-chip.off i, .srv-chip.wait i { background: #F26A1F }
+.srv-chip.off { border-color: #F6D6C1; background: #FFF4EC; color: #B04E0D }
+.srv-chip.bad i { background: #B3261E } .srv-chip.bad { color: #B3261E }
+.srv-modal .modal.wide { width: min(880px, calc(100vw - 32px)) }
+.srv-tabs { margin: 8px 0 12px }
+.srv-acc td { vertical-align: top }
+.srv-acc tr.off td { opacity: .6 }
+.srv-acts { white-space: nowrap }
+.srv-invite { margin-top: 10px; padding: 10px; border: 1px dashed #F26A1F; border-radius: 8px }
+.srv-invite textarea { width: 100%; font: 12.5px/1.4 var(--f-mono, monospace); margin: 6px 0 }
+.srv-invite .big { font-size: 18px; letter-spacing: .08em }
+.conflict-modal .modal { width: min(760px, calc(100vw - 32px)) }
+
+/* Own comment / message not sent yet (no connection to the server): grey until it goes out. */
+.msg-item.pending, .chat-msg.pending { opacity: .6 }
+.pending-t { font-style: italic }
+
+/* ---------- «Контрагенты» (4.9) ---------- */
+.org-q { width: 220px; max-width: 100% }
+.org-t td .chip { margin-left: 2px; vertical-align: 1px }
+.org-mig .org-sug { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 0; border-top: 1px solid var(--line) }
+.org-mig .org-sug .grow { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere }
+.org-mig .org-sug select { max-width: 260px }
+.org-roles { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 4px 0 }
+.org-roles .chk { width: auto }
+.org-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px }
+.org-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-bottom: 6px; border-bottom: 1px dashed var(--line) }
+.org-row input, .org-row select { min-width: 0; width: auto }
+.org-row .icon { margin-left: auto }
+.org-contact [data-k="name"] { flex: 2 1 190px } .org-contact [data-k="position"] { flex: 2 1 170px }
+.org-contact [data-k="phone"] { flex: 1 1 130px } .org-contact [data-k="email"] { flex: 1 1 150px }
+.org-contract [data-k="no"] { flex: 0 1 110px } .org-contract [data-k="date"] { flex: 0 0 140px } .org-contract [data-k="sum"] { flex: 1 1 120px }
+.org-contract [data-k="subject"] { flex: 3 1 220px } .org-contract [data-k="projectId"] { flex: 2 1 180px }
+.org-projs { display: flex; flex-wrap: wrap; gap: 4px 14px }
+#org-cab .org-login { width: 160px; min-width: 0 }
+.org-mig > .hint, .org-mig .org-sug { padding-left: 12px; padding-right: 12px }
+.party-diff { display: flex; flex-direction: column; gap: 4px; align-items: flex-start }
+.party-row { display: flex; align-items: center; gap: 8px; width: 100% }
+.party-row .grow { flex: 1; min-width: 0; overflow-wrap: anywhere }
+.oc-item { padding: 8px 0; border-top: 1px solid var(--line) }
+.oc-h { margin-bottom: 4px }
+.oc-row { display: flex !important; align-items: baseline; gap: 8px; width: 100%; padding: 2px 0 2px 4px }
+.oc-row .oc-f { flex: 0 0 170px; color: var(--muted, inherit) }
+.oc-row .oc-v { flex: 1; min-width: 0; overflow-wrap: anywhere }
+.oc-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--line) }
+
+/* 4.10: icon picker (69) and the strip of a window hidden at the edge */
+.app-icons { display: flex; gap: 8px; flex-wrap: wrap }
+.app-ic { padding: 4px; border: 2px solid transparent; border-radius: 12px; background: none; cursor: pointer; line-height: 0 }
+.app-ic:hover { border-color: var(--line) }
+.app-ic.on { border-color: var(--accent, #F26A1F) }
+/* 4.11: payments under a contract */
+.org-pay { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 8px 4px; border-bottom: 1px dashed var(--line) }
+.org-pay .pay-chip { display: inline-flex; align-items: center; gap: 4px }
+.org-pay .pay-chip .icon { padding: 0 2px; min-width: 0; height: auto }
+.org-pay .pay-add { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto }
+.org-pay .pay-add input[type=date] { width: 140px } .org-pay .pay-add input { width: 120px }
+.org-contract { border-bottom: 0; padding-bottom: 2px }
+
+/* 4.12: «Сообщения» in the menu opens the messenger over the whole window (below the title bar) */
+.msg-panel.full.max { left: 18px; top: calc(var(--bar-h, 48px) + 14px); right: 18px; bottom: 18px; transform: none; width: auto; height: auto }
+.msg-panel.full.max .mp-full { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) }
+/* «О программе» */
+.about { width: min(440px, 94vw) }
+.about-head { display: flex; gap: 14px; align-items: center; margin-bottom: 12px }
+.about-head svg { width: 56px; height: 56px; flex: none }
+.about-head h2 { margin: 0 }
+.about-row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-top: 1px solid var(--line) }
+.about-row b { text-align: right; overflow-wrap: anywhere }
+/* 4.13: a card waits for source data */
+.st-wait { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; font-size: 13px; border-top: 1px dashed var(--line) }
+#gantt .tl-bar.waitid { outline: 2px dashed var(--bad); outline-offset: -2px }
+.kb-wait { font-size: 10.5px; padding: 1px 6px }
+.ird-for { width: 104px }
+.doc-renew { margin-top: 4px }
+/* 4.13: «Исходные данные» got a column — the table scrolls sideways in a narrow window instead of squeezing the fields */
+.sub[data-cs="ird"] { overflow-x: auto }
+.sub[data-cs="ird"] .pd-t { min-width: 940px }
+.sub[data-cs="ird"] .pd-t select[data-pd$=".status"] { min-width: 132px }
+.sub[data-cs="ird"] .pd-t select[data-pd$=".kind"] { min-width: 96px }
+.sub[data-cs="ird"] .pd-t td.grow input { min-width: 190px }
+/* 4.14: РВИ */
+.rev-rvi { white-space: nowrap; font-size: 11px }
+.rev-sheets { width: 80px }
+.rvi-big { color: var(--accent); margin-left: 6px }
+.rvi-f { max-width: 180px }
+/* 4.15: expertise */
+.ex-org { min-width: 220px; max-width: 300px }
+.ex-kpis { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 }
+.ex-kpi { border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px; background: var(--surface) }
+.ex-kpi b { font-size: 16px }
+.ex-row { cursor: pointer }
+.ex-row:hover td { background: color-mix(in srgb, var(--accent) 5%, transparent) }
+.ex-text { max-width: 520px }
+.ex-ans { margin-top: 3px }
+.ex-mark { display: inline-block; border: 1.5px solid var(--idle); border-radius: 4px; padding: 0 5px; font-size: 11.5px }
+.ex-modal { width: min(720px, 94vw) }
+.ex-modal textarea { width: 100% }
+/* 4.16: assignments, contractor statement */
+.asg-hold { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 }
+.asg-t td .marks { vertical-align: middle }
+.cm-sub { margin-top: 6px }
+.cm-kpis { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 10px }
+.cm-kpi { flex: 1; min-width: 140px; border: 1px solid var(--line); border-radius: 9px; padding: 8px 12px; background: var(--surface) }
+.cm-kpi b { display: block; font-size: 18px }
+.cm-kpi b.pos { color: var(--ok) }
+.cm-pays { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 6px 0 }
+.cm-rows { display: grid; gap: 0; font-size: 12.5px }
+.cm-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)); gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--line); align-items: start }
+.cm-row .r { text-align: right }
+.cm-hd { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted) }
+/* 4.17: passport */
+.pass-grid { margin-bottom: 8px }
+/* 4.18: «Настройки» by categories */
+.settings .set-wrap { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 14px; min-height: 360px }
+.set-nav { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); padding-right: 10px }
+.set-cat { text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 6px; font: inherit; color: var(--ink); cursor: pointer }
+.set-cat:hover { background: color-mix(in srgb, var(--accent) 8%, transparent) }
+.set-cat.on { background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent) }
+.settings #set-body { align-content: start }
+@media (max-width: 640px) { .settings .set-wrap { grid-template-columns: 1fr } .set-nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 6px } }
+.cm-pos { display: flex; gap: 4px; align-items: center; padding: 4px 10px }
+/* 4.19: short people cards, the person window, the profile */
+.ava { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; flex: none; object-fit: cover; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 14px; line-height: 1 }
+.ava.big { width: 72px; height: 72px; font-size: 24px }
+.ava.sm { width: 22px; height: 22px; font-size: 10px; margin-right: 6px; vertical-align: middle }
+.pplcards { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)) }
+.card.pplcard { cursor: pointer; transition: border-color .15s }
+.card.pplcard:hover, .card.pplcard:focus-visible { border-color: var(--accent) }
+.card-h .pplcard-row { flex-wrap: nowrap; align-items: center; gap: 10px }
+.pc-name { flex: 1; min-width: 0; display: grid; gap: 1px }
+.card-h .pc-name h3 { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.pplcard-row > .btn { flex: none; align-self: start }
+.pc-state { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px }
+.stats.stats5 { grid-template-columns: repeat(5, minmax(0, 1fr)) }
+.stats5 .stat { padding: 5px 6px }
+.stats5 .stat .k { letter-spacing: 0; white-space: normal; line-height: 1.15; min-height: 2.3em; display: flex; align-items: end }
+.stat.waitv .v { color: var(--warn) }
+@media (max-width: 640px) { .stats.stats5 { grid-template-columns: repeat(3, 1fr) } }
+.pm-head { display: flex; gap: 14px; align-items: center; margin-bottom: 10px }
+.pm-head h2 { margin: 0 0 2px }
+.pm-head .hint { margin: 0 0 6px }
+.pm-h { margin: 14px 0 6px; font-size: 13px }
+.prof { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line) }
+.prof-kv { display: grid; grid-template-columns: 130px 1fr; gap: 3px 12px; font-size: 13px }
+.prof-about { margin: 0; white-space: pre-wrap }
+.prof-progs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center }
+.prof-photo { display: flex; gap: 14px; align-items: center; margin-bottom: 10px }
+.prof-photo .hint { margin: 4px 0 0 }

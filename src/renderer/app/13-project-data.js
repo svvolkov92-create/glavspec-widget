@@ -137,10 +137,8 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
     const t = LETTER_TPL[preset.tpl];
     Object.assign(l, { tpl: preset.tpl, subject: fillTpl(t.subject, p, preset.vars), body: fillTpl(t.body, p, preset.vars) + sig, ...(preset.corr !== undefined ? { corr: preset.corr } : {}), ...(preset.docId ? { docId: preset.docId } : {}) });
   }
-  const root = document.createElement('div');
-  root.className = 'modal-back';
   const st = LETTER_STATUS[l.dir];
-  root.innerHTML = `<form class="modal let-modal" role="dialog" aria-modal="true" aria-labelledby="let-t" novalidate>
+  const { root, close } = openModal(`<form class="modal let-modal" role="dialog" aria-modal="true" aria-labelledby="let-t" novalidate>
     <h2 id="let-t">${l.dir === 'in' ? 'Входящее' : 'Исходящее'} письмо <span class="num">№ ${l.seq}</span> <span class="hint">${isNew ? '(номер присвоен сам)' : ''}</span></h2>
     <div class="fgrid"><div class="f"><label for="let-date">Дата</label><input type="date" id="let-date" value="${esc(l.date)}"></div>
       <div class="f"><label for="let-corr">${l.dir === 'in' ? 'От кого' : 'Кому'}</label><input id="let-corr" maxlength="160" value="${esc(l.corr || '')}" placeholder="${l.dir === 'in' ? 'Минстрой края' : 'Заказчик, организация'}"></div>
@@ -152,8 +150,7 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
       <div class="f"><label for="let-st">Состояние</label><select id="let-st">${Object.entries(st).map(([k, [, t]]) => `<option value="${k}"${k === l.status ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
       ${canFiles() ? `<div class="f wide let-files"><span class="lbl">Вложения</span><div id="let-flist"></div><div class="tf-drop" id="let-drop">Перетащите файлы сюда</div></div>` : ''}</div>
     <div class="err" id="let-err" hidden></div>
-    <div class="modal-f"><button class="btn primary" type="submit">${isNew ? 'Зарегистрировать' : 'Сохранить'}</button>${l.dir === 'out' ? '<button class="btn" type="button" data-m="mail">Сохранить и открыть в почте</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${isNew ? '' : '<button class="btn danger" type="button" data-m="del">Удалить</button>'}</div></form>`;
-  document.body.append(root);
+    <div class="modal-f"><button class="btn primary" type="submit">${isNew ? 'Зарегистрировать' : 'Сохранить'}</button>${l.dir === 'out' ? '<button class="btn" type="button" data-m="mail">Сохранить и открыть в почте</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${isNew ? '' : '<button class="btn danger" type="button" data-m="del">Удалить</button>'}</div></form>`);
   const q = sel => root.querySelector(sel);
   const drawFiles = () => { const el = q('#let-flist'); if (el) el.innerHTML = (l.files || []).map((f, i) => `<span class="aq-file">${icon('file')}${esc(f.name)} <span class="hint">${fileSize(f.size)}</span><button class="btn ghostbtn sm" type="button" data-m="unf" data-i="${i}">×</button></span>`).join(''); };
   drawFiles();
@@ -166,7 +163,6 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
     for (const f of files) { const r = await api.attachBytes(p.id, f.name, new Uint8Array(await f.arrayBuffer())); if (r?.ok) l.files.push(r.file); else toast(r?.message || 'Не удалось приложить файл.', true); }
     drawFiles();
   }, true);
-  const close = () => root.remove();
   const collect = () => Object.assign(l, { date: q('#let-date').value || state.today, corr: q('#let-corr').value.trim(), email: q('#let-email')?.value.trim() || l.email || '', subject: q('#let-subj').value.trim(), body: q('#let-body').value, status: q('#let-st').value, due: q('#let-due')?.value || l.due || '', theirNo: q('#let-no2')?.value.trim() || l.theirNo || '' });
   const save = async () => {
     collect();
@@ -176,10 +172,8 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
     const cur = state.projects.get(p.id), list = [...(cur.letters || []).filter(x => x.id !== l.id), l];
     return write(op.update('projects', p.id, { letters: list }), `${letterNo(l)} от ${fmtDate(l.date)} — ${isNew ? 'зарегистрировано' : 'сохранено'}`);
   };
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.addEventListener('click', async e => {
     const m = e.target.closest('[data-m]')?.dataset.m;
-    if (e.target === root || m === 'cancel') return close();
     if (m === 'unf') { l.files.splice(Number(e.target.closest('[data-m]').dataset.i), 1); drawFiles(); }
     if (m === 'del') { const cur = state.projects.get(p.id); if (await write(op.update('projects', p.id, { letters: (cur.letters || []).filter(x => x.id !== l.id) }), `${letterNo(l)} удалено`)) close(); }
     if (m === 'mail') { if (await save()) { close(); mailLetter(l); } }
@@ -221,24 +215,18 @@ function askRvi(p) {
   const cards = [...state.tasks.values()].filter(t => t.projectId === p.id && !t.deletedAt && sectionsOf(t).length).sort((a, b) => marksText(a).localeCompare(marksText(b), 'ru'));
   if (!cards.length) return toast('В проекте нет карточек разделов — изменение не к чему привязать.', true);
   const n = nextRvi(p.id);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="rvi-t" novalidate><h2 id="rvi-t">Новое изменение <span class="rvi-big">${rviNo(n)}</span></h2>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="rvi-t" novalidate><h2 id="rvi-t">Новое изменение <span class="rvi-big">${rviNo(n)}</span></h2>
     <div class="fgrid"><div class="f wide"><label for="rvi-card">Раздел</label><select id="rvi-card">${cards.map(t => `<option value="${esc(t.id)}">${esc(marksText(t))}${t.title ? ' · ' + esc(t.title) : ''}</option>`).join('')}</select></div>
       <div class="f"><label for="rvi-sheets">Листы</label><input id="rvi-sheets" maxlength="60" placeholder="3, 5, 12"></div>
       <div class="f"><label for="rvi-date">Дата</label><input id="rvi-date" type="date" value="${esc(state.today)}"></div>
       <div class="f wide"><label class="req" for="rvi-note">Что изменено и почему</label><input id="rvi-note" maxlength="200" placeholder="Замечание экспертизы № 14: армирование плиты"></div></div>
     <p class="hint" id="rvi-hint"></p><div class="err" id="rvi-err" hidden></div>
-    <div class="modal-f"><button class="btn primary" type="submit">Выдать номер</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
+    <div class="modal-f"><button class="btn primary" type="submit">Выдать номер</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
   const q = s => root.querySelector(s);
   const hint = () => { const t = state.tasks.get(q('#rvi-card').value), next = (t.revisions || []).reduce((m, r) => Math.max(m, parseInt(r.no, 10) || 0), 0) + 1; q('#rvi-hint').textContent = `В карточке «${marksText(t)}» будет «Изм. ${next}».`; return next; };
   hint();
   q('#rvi-card').addEventListener('change', hint);
   q('#rvi-note').focus();
-  const close = () => root.remove();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const note = q('#rvi-note').value.trim(), date = isDate(q('#rvi-date').value) ? q('#rvi-date').value : state.today;

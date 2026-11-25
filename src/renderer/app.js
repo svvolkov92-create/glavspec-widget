@@ -451,15 +451,25 @@ onAct({
   'create-menu': () => { setCreateMenu($('#create-menu').hidden); },
   'att-go': ({ el }) => { state.tab = 'tasks'; state.filters.status = el.dataset.v; renderNow(); },
 });
-// Small modal with one text field; resolves to the text or null.
-// A longer note (up to 200 characters) in a small dialog; null when cancelled.
+// 4.20: one way to put up a modal. Esc, a click on the backdrop and a [data-m="cancel"] / [data-m="close"] button
+// close it; close(v) removes it and hands `v` to `onClose` (a promise dialog resolves with it), dismissing gives
+// `dismissed`. Returns { root, q, close }; the dialog's own buttons and submit stay in the dialog.
+function openModal(html, { onClose = null, dismissed = null } = {}) {
+  const root = document.createElement('div');
+  root.className = 'modal-back';
+  root.innerHTML = html;
+  document.body.append(root);
+  let open = true;
+  const close = (v = dismissed) => { if (!open) return; open = false; root.remove(); onClose?.(v); };
+  root.addEventListener('click', e => { if (e.target === root || ['cancel', 'close'].includes(e.target.dataset?.m)) close(); });
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  return { root, q: s => root.querySelector(s), close };
+}
 // «Запросить у заказчика» from the project page: one request (and a row of source data unless it is a decision).
 function askCustomer(p) {
   const kinds = [...IRD_KINDS, ['decision', 'Решение или ответ']];
   return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="aqt" novalidate><h2 id="aqt">Запросить у заказчика · ${esc(p.name)}</h2>
+    const { root, q, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="aqt" novalidate><h2 id="aqt">Запросить у заказчика · ${esc(p.name)}</h2>
       <p class="hint">Заказчик увидит запрос в «Нужно от вас» и в «Вопросах» и ответит прямо со страницы. ТУ, письма, согласования и документы попадут ещё и в «Исходные данные».</p>
       <div class="f"><span class="lbl">Что запрашиваем</span><div class="aq-kinds" role="radiogroup">${kinds.map(([k, l], i) => `<label><input type="radio" name="aq-kind" value="${k}"${i === 0 ? ' checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div></div>
       <div class="f"><label for="aq-title" class="req">Что нужно</label><input id="aq-title" maxlength="160" placeholder="ТУ на электроснабжение 630 кВт" list="aq-dl"><datalist id="aq-dl">${Techcard.SOURCE_DATA.map(([t]) => `<option value="${esc(t)}">`).join('')}</datalist></div>
@@ -469,19 +479,15 @@ function askCustomer(p) {
       <div class="f"><span class="lbl">Файлы для согласования</span><div class="aq-files" id="aq-files"></div>
         <div class="row-in"><button class="btn sm" type="button" data-m="attach">Приложить файл…</button><span class="hint">Заказчик скачает их в кабинете и ответит «Согласовано» или «Есть замечания».</span></div></div>
       <p class="neg" id="aq-err"></p>
-      <div class="modal-f"><button class="btn primary" type="submit">Запросить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-    document.body.append(root);
-    const q = s => root.querySelector(s), close = v => { root.remove(); resolve(v); };
+      <div class="modal-f"><button class="btn primary" type="submit">Запросить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`, { onClose: resolve, dismissed: false });
     const files = [];
     const drawFiles = () => { q('#aq-files').innerHTML = files.map((f, i) => `<span class="aq-file">${icon('file')}${esc(f.name)} <span class="hint">${fileSize(f.size)}</span><button type="button" class="linkbtn" data-m="unattach" data-i="${i}" aria-label="Убрать">✕</button></span>`).join(''); };
     q('#aq-title').focus();
     root.addEventListener('click', async e => {
-      if (e.target === root || e.target.dataset.m === 'cancel') return close(false);
       const m = e.target.closest('[data-m]')?.dataset.m;
       if (m === 'attach') { const r = await api.attachAdd(p.id); if (r?.ok) { files.push(r.file); drawFiles(); } else if (r && !r.canceled) q('#aq-err').textContent = r.message; }
       if (m === 'unattach') { files.splice(Number(e.target.closest('[data-m]').dataset.i), 1); drawFiles(); }
     });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } });
     root.addEventListener('change', e => { if (e.target.id === 'aq-title' && !root.querySelector('input[name="aq-kind"]:checked').dataset.touched) { const k = irdKindOf(e.target.value); root.querySelector(`input[name="aq-kind"][value="${k}"]`).checked = true; } if (e.target.name === 'aq-kind') e.target.dataset.touched = '1'; });
     q('form').addEventListener('submit', async e => {
       e.preventDefault(); e.stopPropagation();
@@ -503,19 +509,14 @@ function askCustomer(p) {
     });
   });
 }
+// A longer note (up to 200 characters) in a small dialog; null when cancelled.
 function askNote(title, label, value = '') {
   return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="ntitle" novalidate><h2 id="ntitle">${esc(title)}</h2>
+    const { q, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="ntitle" novalidate><h2 id="ntitle">${esc(title)}</h2>
       <div class="f"><label for="n-text">${esc(label)}</label><textarea id="n-text" rows="3" maxlength="200">${esc(value)}</textarea></div>
-      <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-    document.body.append(root);
-    const close = v => { root.remove(); resolve(v); };
-    root.querySelector('#n-text').focus();
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
-    root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); close(root.querySelector('#n-text').value.trim()); });
+      <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`, { onClose: resolve });
+    q('#n-text').focus();
+    q('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); close(q('#n-text').value.trim()); });
   });
 }
 // Backlog 45 for dialogs: a stopped submit shows its reason in the dialog, highlights the field it is about,
@@ -536,33 +537,23 @@ function modalErr(root, errSel, msg, fieldSel = '') {
 }
 // The same outside dialogs: an error plate plus the highlighted field.
 function pageErr(msg, fieldSel) { toast(msg, true); return modalErr(document, '#page-err-none', msg, fieldSel); }
+// Small modal with one text field; resolves to the text or null.
 function askText(title, label, placeholder = '') {
   return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate><h2 id="mtitle">${esc(title)}</h2>
+    const { root, q, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate><h2 id="mtitle">${esc(title)}</h2>
       <div class="f"><label class="req" for="m-text">${esc(label)}</label><input id="m-text" maxlength="40" placeholder="${esc(placeholder)}"></div>
       <div class="err" id="m-err" hidden></div>
-      <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-    document.body.append(root);
-    const close = v => { root.remove(); resolve(v); };
-    root.querySelector('#m-text').focus();
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
-    root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const v = root.querySelector('#m-text').value.trim(); if (v) close(v); else modalErr(root, '#m-err', 'Заполните поле «' + label + '».', '#m-text'); });
+      <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`, { onClose: resolve });
+    q('#m-text').focus();
+    q('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const v = q('#m-text').value.trim(); if (v) close(v); else modalErr(root, '#m-err', 'Заполните поле «' + label + '».', '#m-text'); });
   });
 }
 function confirmBox(text, yes = 'Да', no = 'Отмена') {
   return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true"><p>${esc(text)}</p><div class="modal-f"><button class="btn danger solid" type="button" data-m="yes">${esc(yes)}</button><button class="btn" type="button" data-m="no">${esc(no)}</button></div></div>`;
-    document.body.append(root);
-    const close = r => { root.remove(); resolve(r); };
     // Yes → true, the second button → false, dismissed (backdrop, Esc) → null.
-    root.addEventListener('click', e => { if (e.target === root) close(null); if (e.target.dataset.m === 'no') close(false); if (e.target.dataset.m === 'yes') close(true); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
-    root.querySelector('[data-m="no"]').focus();
+    const { root, q, close } = openModal(`<div class="modal" role="alertdialog" aria-modal="true"><p>${esc(text)}</p><div class="modal-f"><button class="btn danger solid" type="button" data-m="yes">${esc(yes)}</button><button class="btn" type="button" data-m="no">${esc(no)}</button></div></div>`, { onClose: resolve });
+    root.addEventListener('click', e => { if (e.target.dataset.m === 'no') close(false); if (e.target.dataset.m === 'yes') close(true); });
+    q('[data-m="no"]').focus();
   });
 }
 async function askDocNames(format) {
@@ -573,21 +564,16 @@ async function askDocNames(format) {
   const gipUser = contact || (A.isGip(state.me) ? state.me : liveUsers().find(u => u.role === 'gip'));
   const v = { customer: p.client || '', gip: saved.gip || gipUser?.name || '', developer: saved.developer || state.me?.name || '', director: saved.director || def.director || '', year: todayStr().slice(0, 4) };
   return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
     const f = (k, label, hint = '') => `<div class="f"><label for="dn-${k}">${label}</label><input id="dn-${k}" value="${esc(v[k])}" maxlength="${k === 'customer' ? 300 : 60}">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="dntitle" novalidate><h2 id="dntitle">${format === 'vok' ? 'Ведомость основных комплектов (РД)' : 'Состав проектной документации'}</h2>
+    const { root, q, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="dntitle" novalidate><h2 id="dntitle">${format === 'vok' ? 'Ведомость основных комплектов (РД)' : 'Состав проектной документации'}</h2>
       <p class="hint">Обложка, титульный лист и штампы — из шаблона офиса. Номера листов и «Листов» Word пересчитает сам при открытии.${def.own.includes(format) ? ' Используется ваш шаблон из папки шаблонов.' : ''}</p>
       ${f('customer', 'Заказчик', 'На обложке: «Заказчик – …»')}${f('gip', 'Главный инженер проекта', 'Титульный лист; в штамп — фамилия')}${f('developer', 'Разработал', 'В штамп — фамилия')}${f('director', 'Генеральный директор')}${f('year', 'Год')}
-      <div class="modal-f"><button class="btn primary" type="submit">Сохранить файл…</button><button class="btn" type="button" data-m="cancel">Отмена</button><button class="linkbtn" type="button" data-m="tpl">Свои шаблоны…</button></div></form>`;
-    document.body.append(root);
-    const close = r => { root.remove(); resolve(r); };
-    root.querySelector('#dn-customer').focus();
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); if (e.target.dataset.m === 'tpl') api.openTemplates(); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
-    root.querySelector('form').addEventListener('submit', e => {
+      <div class="modal-f"><button class="btn primary" type="submit">Сохранить файл…</button><button class="btn" type="button" data-m="cancel">Отмена</button><button class="linkbtn" type="button" data-m="tpl">Свои шаблоны…</button></div></form>`, { onClose: resolve });
+    q('#dn-customer').focus();
+    root.addEventListener('click', e => { if (e.target.dataset.m === 'tpl') api.openTemplates(); });
+    q('form').addEventListener('submit', e => {
       e.preventDefault(); e.stopPropagation();
-      const out = Object.fromEntries(Object.keys(v).map(k => [k, root.querySelector('#dn-' + k).value.trim()]));
+      const out = Object.fromEntries(Object.keys(v).map(k => [k, q('#dn-' + k).value.trim()]));
       saveLocal('docNames', { gip: out.gip, developer: out.developer, director: out.director });
       close(out);
     });
@@ -910,10 +896,8 @@ const EDIT_HINT = 'Двойной щелчок — изменить прямо �
 // Asks why the deadline moves; resolves to {reason, note} or null when cancelled.
 function askShiftReason(t, from, to, followers = null) {
   return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
     const d = dayNum(to) - dayNum(from);
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
+    const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
       <h2 id="mtitle">Перенос срока</h2>
       <p><b>${esc(marksText(t))}</b> · ${esc(projectOf(t)?.name || '')}</p>
       <p class="shift-h">${fmtDate(from)} → ${fmtDate(to)} <b>(${d >= 0 ? '+' : ''}${d} дн.)</b></p>
@@ -923,12 +907,8 @@ function askShiftReason(t, from, to, followers = null) {
       <div class="f"><label for="m-note">Комментарий</label><input id="m-note" maxlength="200" placeholder="Например: заказчик сменил ТУ"></div>
       <div class="err" id="m-err" hidden>Выберите причину переноса.</div>
       <div class="modal-f"><button class="btn primary" type="submit">Перенести</button><button class="btn" type="button" data-m="cancel">Отмена</button></div>
-    </form>`;
-    document.body.append(root);
-    const close = v => { root.remove(); resolve(v); };
+    </form>`, { onClose: resolve });
     root.querySelector('#m-reason').focus();
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
     root.querySelector('form').addEventListener('submit', e => {
       e.preventDefault();
       e.stopPropagation();
@@ -1319,7 +1299,6 @@ onAct({
   'set-theme': ({ el }) => { api.setTheme(el.dataset.v); },
 });
 /* ---------- 4.1.1: «Мой день» (item 48) — what is mine today, per role; every row is a button ---------- */
-const inScope = t => A.isGip(state.me) || hasOwner(t, state.me?.id) || executorOf(t)?.u?.id === state.me?.id || A.isChief(state.me);
 function myCards() { const me = state.me?.id; return tasksArr().filter(t => ACTIVE.has(t.status) && (t.ownerId === me || executorOf(t)?.u?.id === me || hasOwner(t, me))); }
 function dayDocs() {
   const out = [];
@@ -2336,7 +2315,6 @@ function chatPeople(c) {
 }
 const msgUnread = c => { const me = state.me?.id, seen = c.seen?.[me] || ''; return (c.messages || []).filter(m => m.userId !== me && m.ts > seen); };
 const msgMentions = c => msgUnread(c).filter(m => (m.mentions || []).includes(state.me?.id));
-const lastTs = c => (c.messages || []).at(-1)?.ts || '';
 function msgTotals() {
   let n = 0, at = 0;
   for (const th of msgThreads()) { n += th.unread; at += th.at; }
@@ -2842,16 +2820,11 @@ async function asgIssue(id) {
 function asgReturn(id) {
   const t = state.tasks.get(id);
   if (!t) return;
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="asr-t" novalidate><h2 id="asr-t">Вернуть задание</h2><p class="hint">${esc(t.title)}</p>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="asr-t" novalidate><h2 id="asr-t">Вернуть задание</h2><p class="hint">${esc(t.title)}</p>
     <div class="f wide"><label class="req" for="asr-note">Замечание</label><textarea id="asr-note" rows="3" maxlength="500" placeholder="Нет отметок низа отверстий"></textarea></div><div class="err" id="asr-err" hidden></div>
-    <div class="modal-f"><button class="btn warnbtn" type="submit">Вернуть</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
+    <div class="modal-f"><button class="btn warnbtn" type="submit">Вернуть</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+  const q = s => root.querySelector(s);
   q('#asr-note').focus();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const note = q('#asr-note').value.trim();
@@ -2956,17 +2929,12 @@ function expertiseBlock(p) {
 
 function askCycle(p) {
   const ex = exOf(p), no = ex.cycles.length + 1;
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="exc-t" novalidate><h2 id="exc-t">Цикл экспертизы ${no}</h2>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="exc-t" novalidate><h2 id="exc-t">Цикл экспертизы ${no}</h2>
     <div class="fgrid"><div class="f"><label for="exc-date">Замечания получены</label><input id="exc-date" type="date" value="${esc(state.today)}"></div>
       <div class="f"><label for="exc-due">Ответить экспертизе до</label><input id="exc-due" type="date" value="${esc(addDays(state.today, 10))}"></div></div>
     <p class="hint">Срок ответа станет сроком новых замечаний — у каждого его можно поменять.</p>
-    <div class="modal-f"><button class="btn primary" type="submit">Завести цикл</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
+    <div class="modal-f"><button class="btn primary" type="submit">Завести цикл</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+  const q = s => root.querySelector(s);
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const id = newId();
@@ -2985,10 +2953,8 @@ function askRemark(p, rid = '') {
   const marks = projectMarks(p.id);
   const rvis = rviRows(p).filter(x => x.r.rvi);
   const people = liveUsers().slice().sort(byName);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
   const dis = edit ? '' : ' disabled';
-  root.innerHTML = `<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exr-t" novalidate><h2 id="exr-t">${was ? `Замечание ${esc(r.n)}` : 'Новое замечание'} <span class="hint">цикл ${esc(c.no)}</span></h2>
+  const { root, close } = openModal(`<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exr-t" novalidate><h2 id="exr-t">${was ? `Замечание ${esc(r.n)}` : 'Новое замечание'} <span class="hint">цикл ${esc(c.no)}</span></h2>
     <div class="fgrid"><div class="f"><label for="exr-n">№ у экспертизы</label><input id="exr-n" value="${esc(r.n)}" maxlength="12"${dis}></div>
       <div class="f"><label for="exr-mark">Раздел</label><input id="exr-mark" value="${esc(r.mark)}" list="exr-marks" maxlength="20" placeholder="КЖ"${dis}><datalist id="exr-marks">${marks.map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>
       <div class="f wide"><label class="req" for="exr-text">Замечание</label><textarea id="exr-text" rows="3" maxlength="4000"${dis}>${esc(r.text)}</textarea></div>
@@ -2998,16 +2964,13 @@ function askRemark(p, rid = '') {
       <div class="f"><label for="exr-rvi">Изменение (РВИ)</label><select id="exr-rvi"${dis}><option value="">—</option>${rvis.map(({ t, r: x }) => `<option value="${x.rvi}"${Number(r.rvi) === x.rvi ? ' selected' : ''}>${rviNo(x.rvi)} · ${esc(marksText(t))}</option>`).join('')}</select></div>
       <div class="f wide"><label for="exr-ans">Ответ</label><textarea id="exr-ans" rows="3" maxlength="4000" placeholder="Что исправлено и где: том, листы"${dis}>${esc(r.answer || '')}</textarea></div></div>
     <div class="err" id="exr-err" hidden></div>
-    <div class="modal-f">${edit ? `<button class="btn primary" type="submit">Сохранить</button>` : ''}<button class="btn" type="button" data-m="cancel">${edit ? 'Отмена' : 'Закрыть'}</button>${was && edit ? '<span class="spacer"></span><button class="btn ghostbtn" type="button" data-m="del">Удалить</button>' : ''}</div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
+    <div class="modal-f">${edit ? `<button class="btn primary" type="submit">Сохранить</button>` : ''}<button class="btn" type="button" data-m="cancel">${edit ? 'Отмена' : 'Закрыть'}</button>${was && edit ? '<span class="spacer"></span><button class="btn ghostbtn" type="button" data-m="del">Удалить</button>' : ''}</div></form>`);
+  const q = s => root.querySelector(s);
   // A mark typed: the owner of that section's card answers by default.
   q('#exr-mark').addEventListener('change', () => { if (!q('#exr-owner').value) { const o = exOwnerFor(p.id, q('#exr-mark').value); if (o) q('#exr-owner').value = o; } });
   (was ? q('#exr-ans') : q('#exr-text')).focus();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.addEventListener('click', async e => {
     const m = e.target.dataset.m;
-    if (e.target === root || m === 'cancel') close();
     if (m === 'del' && await exSave(p, x => { const cc = x.cycles.find(y => y.id === c.id); cc.remarks = cc.remarks.filter(y => y.id !== r.id); }, `Замечание ${r.n} удалено`)) close();
   });
   q('form').addEventListener('submit', async e => {
@@ -3040,20 +3003,15 @@ function askPaste(p) {
   const c = exCycleOf(p);
   if (!c) return;
   const marks = projectMarks(p.id), startN = c.remarks.reduce((m, r) => Math.max(m, parseInt(r.n, 10) || 0), 0) + 1;
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exp-t" novalidate><h2 id="exp-t">Замечания списком · цикл ${esc(c.no)}</h2>
+  const { root, close } = openModal(`<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exp-t" novalidate><h2 id="exp-t">Замечания списком · цикл ${esc(c.no)}</h2>
     <p class="hint">По строке на замечание. В начале строки можно номер и раздел: «14. КЖ: Не представлен расчёт…». Отвечает — ответственный карточки раздела, срок — срок цикла.</p>
     <textarea id="exp-text" rows="10" maxlength="60000" placeholder="1. АР: Уточнить отметку входа\n2. КЖ: Не представлен расчёт плиты на продавливание"></textarea>
     <p class="hint" id="exp-sum"></p>
-    <div class="modal-f"><button class="btn primary" type="submit">Добавить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Добавить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+  const q = s => root.querySelector(s);
   const rows = () => parseRemarks(q('#exp-text').value, marks, startN);
   q('#exp-text').addEventListener('input', () => { const r = rows(); q('#exp-sum').textContent = r.length ? `Замечаний: ${r.length}${r.some(x => x.mark) ? `, с разделом: ${r.filter(x => x.mark).length}` : ''}` : ''; });
   q('#exp-text').focus();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const list = rows();
@@ -3220,10 +3178,8 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
     const t = LETTER_TPL[preset.tpl];
     Object.assign(l, { tpl: preset.tpl, subject: fillTpl(t.subject, p, preset.vars), body: fillTpl(t.body, p, preset.vars) + sig, ...(preset.corr !== undefined ? { corr: preset.corr } : {}), ...(preset.docId ? { docId: preset.docId } : {}) });
   }
-  const root = document.createElement('div');
-  root.className = 'modal-back';
   const st = LETTER_STATUS[l.dir];
-  root.innerHTML = `<form class="modal let-modal" role="dialog" aria-modal="true" aria-labelledby="let-t" novalidate>
+  const { root, close } = openModal(`<form class="modal let-modal" role="dialog" aria-modal="true" aria-labelledby="let-t" novalidate>
     <h2 id="let-t">${l.dir === 'in' ? 'Входящее' : 'Исходящее'} письмо <span class="num">№ ${l.seq}</span> <span class="hint">${isNew ? '(номер присвоен сам)' : ''}</span></h2>
     <div class="fgrid"><div class="f"><label for="let-date">Дата</label><input type="date" id="let-date" value="${esc(l.date)}"></div>
       <div class="f"><label for="let-corr">${l.dir === 'in' ? 'От кого' : 'Кому'}</label><input id="let-corr" maxlength="160" value="${esc(l.corr || '')}" placeholder="${l.dir === 'in' ? 'Минстрой края' : 'Заказчик, организация'}"></div>
@@ -3235,8 +3191,7 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
       <div class="f"><label for="let-st">Состояние</label><select id="let-st">${Object.entries(st).map(([k, [, t]]) => `<option value="${k}"${k === l.status ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
       ${canFiles() ? `<div class="f wide let-files"><span class="lbl">Вложения</span><div id="let-flist"></div><div class="tf-drop" id="let-drop">Перетащите файлы сюда</div></div>` : ''}</div>
     <div class="err" id="let-err" hidden></div>
-    <div class="modal-f"><button class="btn primary" type="submit">${isNew ? 'Зарегистрировать' : 'Сохранить'}</button>${l.dir === 'out' ? '<button class="btn" type="button" data-m="mail">Сохранить и открыть в почте</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${isNew ? '' : '<button class="btn danger" type="button" data-m="del">Удалить</button>'}</div></form>`;
-  document.body.append(root);
+    <div class="modal-f"><button class="btn primary" type="submit">${isNew ? 'Зарегистрировать' : 'Сохранить'}</button>${l.dir === 'out' ? '<button class="btn" type="button" data-m="mail">Сохранить и открыть в почте</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${isNew ? '' : '<button class="btn danger" type="button" data-m="del">Удалить</button>'}</div></form>`);
   const q = sel => root.querySelector(sel);
   const drawFiles = () => { const el = q('#let-flist'); if (el) el.innerHTML = (l.files || []).map((f, i) => `<span class="aq-file">${icon('file')}${esc(f.name)} <span class="hint">${fileSize(f.size)}</span><button class="btn ghostbtn sm" type="button" data-m="unf" data-i="${i}">×</button></span>`).join(''); };
   drawFiles();
@@ -3249,7 +3204,6 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
     for (const f of files) { const r = await api.attachBytes(p.id, f.name, new Uint8Array(await f.arrayBuffer())); if (r?.ok) l.files.push(r.file); else toast(r?.message || 'Не удалось приложить файл.', true); }
     drawFiles();
   }, true);
-  const close = () => root.remove();
   const collect = () => Object.assign(l, { date: q('#let-date').value || state.today, corr: q('#let-corr').value.trim(), email: q('#let-email')?.value.trim() || l.email || '', subject: q('#let-subj').value.trim(), body: q('#let-body').value, status: q('#let-st').value, due: q('#let-due')?.value || l.due || '', theirNo: q('#let-no2')?.value.trim() || l.theirNo || '' });
   const save = async () => {
     collect();
@@ -3259,10 +3213,8 @@ function askLetter(p, letter = null, dir = 'out', preset = null) {
     const cur = state.projects.get(p.id), list = [...(cur.letters || []).filter(x => x.id !== l.id), l];
     return write(op.update('projects', p.id, { letters: list }), `${letterNo(l)} от ${fmtDate(l.date)} — ${isNew ? 'зарегистрировано' : 'сохранено'}`);
   };
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.addEventListener('click', async e => {
     const m = e.target.closest('[data-m]')?.dataset.m;
-    if (e.target === root || m === 'cancel') return close();
     if (m === 'unf') { l.files.splice(Number(e.target.closest('[data-m]').dataset.i), 1); drawFiles(); }
     if (m === 'del') { const cur = state.projects.get(p.id); if (await write(op.update('projects', p.id, { letters: (cur.letters || []).filter(x => x.id !== l.id) }), `${letterNo(l)} удалено`)) close(); }
     if (m === 'mail') { if (await save()) { close(); mailLetter(l); } }
@@ -3304,24 +3256,18 @@ function askRvi(p) {
   const cards = [...state.tasks.values()].filter(t => t.projectId === p.id && !t.deletedAt && sectionsOf(t).length).sort((a, b) => marksText(a).localeCompare(marksText(b), 'ru'));
   if (!cards.length) return toast('В проекте нет карточек разделов — изменение не к чему привязать.', true);
   const n = nextRvi(p.id);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="rvi-t" novalidate><h2 id="rvi-t">Новое изменение <span class="rvi-big">${rviNo(n)}</span></h2>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="rvi-t" novalidate><h2 id="rvi-t">Новое изменение <span class="rvi-big">${rviNo(n)}</span></h2>
     <div class="fgrid"><div class="f wide"><label for="rvi-card">Раздел</label><select id="rvi-card">${cards.map(t => `<option value="${esc(t.id)}">${esc(marksText(t))}${t.title ? ' · ' + esc(t.title) : ''}</option>`).join('')}</select></div>
       <div class="f"><label for="rvi-sheets">Листы</label><input id="rvi-sheets" maxlength="60" placeholder="3, 5, 12"></div>
       <div class="f"><label for="rvi-date">Дата</label><input id="rvi-date" type="date" value="${esc(state.today)}"></div>
       <div class="f wide"><label class="req" for="rvi-note">Что изменено и почему</label><input id="rvi-note" maxlength="200" placeholder="Замечание экспертизы № 14: армирование плиты"></div></div>
     <p class="hint" id="rvi-hint"></p><div class="err" id="rvi-err" hidden></div>
-    <div class="modal-f"><button class="btn primary" type="submit">Выдать номер</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
+    <div class="modal-f"><button class="btn primary" type="submit">Выдать номер</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
   const q = s => root.querySelector(s);
   const hint = () => { const t = state.tasks.get(q('#rvi-card').value), next = (t.revisions || []).reduce((m, r) => Math.max(m, parseInt(r.no, 10) || 0), 0) + 1; q('#rvi-hint').textContent = `В карточке «${marksText(t)}» будет «Изм. ${next}».`; return next; };
   hint();
   q('#rvi-card').addEventListener('change', hint);
   q('#rvi-note').focus();
-  const close = () => root.remove();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const note = q('#rvi-note').value.trim(), date = isDate(q('#rvi-date').value) ? q('#rvi-date').value : state.today;
@@ -3440,10 +3386,6 @@ function setFold(keys, on) {
   for (const k of keys) { if (on) folded.add(k); else folded.delete(k); }
   saveLocal('folded', [...folded]);
   renderNow();
-}
-function foldAllBar(keys) {
-  return `<div class="fold-bar"><button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="1" data-keys="${esc(keys.join(' '))}"${keys.length && keys.every(isFolded) ? ' disabled' : ''}>▸ Свернуть все</button>
-    <button class="btn ghostbtn sm" type="button" data-act="fold-all" data-on="0" data-keys="${esc(keys.join(' '))}"${keys.some(isFolded) ? '' : ' disabled'}>▾ Развернуть все</button></div>`;
 }
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
@@ -3760,16 +3702,12 @@ const partyStamp = inn => (partySeen && partySeen.inn === inn ? { regCheckedAt: 
 // The team's key — the GIP enters it once, it stays on the server.
 function openPartyKey() {
   const has = partyOn();
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="pk-title" novalidate><h2 id="pk-title">Реквизиты по ИНН</h2>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="pk-title" novalidate><h2 id="pk-title">Реквизиты по ИНН</h2>
     <p class="hint">Название, полное наименование, КПП, ОГРН, адрес и руководитель подтягиваются из ЕГРЮЛ и ЕГРИП через сервис DaData. Зарегистрируйтесь на dadata.ru (бесплатный тариф — до 10 000 запросов в день), в личном кабинете скопируйте «API-ключ» и вставьте сюда.</p>
     <p class="hint">Ключ хранится только на Сервере Пульта — на компьютеры и телефоны сотрудников он не попадает; в DaData уходит только ИНН. Работает у всех, кому открыты контрагенты.</p>
     <div class="f"><label for="pk-key">API-ключ DaData</label><input id="pk-key" type="password" autocomplete="off" maxlength="80" placeholder="${has ? 'сохранён — оставьте пустым, чтобы не менять' : '40 латинских букв и цифр'}"></div>
     <p class="neg" id="pk-err"></p>
-    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button>${api.openDadata ? '<button class="btn ghostbtn" type="button" data-m="site">Открыть dadata.ru</button>' : ''}${has ? '<button class="btn" type="button" data-m="off">Удалить ключ</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button>${api.openDadata ? '<button class="btn ghostbtn" type="button" data-m="site">Открыть dadata.ru</button>' : ''}${has ? '<button class="btn" type="button" data-m="off">Удалить ключ</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
   root.querySelector('#pk-key').focus();
   const save = async k => {
     const r = await api.serverCall('partyKeySet', k);
@@ -3781,11 +3719,9 @@ function openPartyKey() {
     if (state.tab === 'orgs') renderNow();
   };
   root.addEventListener('click', e => {
-    if (e.target === root || e.target.dataset.m === 'cancel') close();
     if (e.target.dataset.m === 'off') save('');
     if (e.target.dataset.m === 'site') api.openDadata();
   });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const k = root.querySelector('#pk-key').value.trim(); if (!k && has) return close(); if (!k) { root.querySelector('#pk-err').textContent = 'Вставьте ключ.'; return; } save(k); });
 }
 
@@ -4047,9 +3983,7 @@ function askReassign(t, kind, fromId, toId = '') {
       ? A.assignableOwners(state.me, liveUsers()).filter(u => !A.isGip(u) && u.id !== fromId).sort(byName)
       : contractorsArr().filter(c => c.id !== fromId);
     const nameOf = id => (kind === 'staff' ? state.users.get(id)?.name : state.contractors.get(id)?.name) || 'не назначен';
-    const root = document.createElement('div');
-    root.className = 'modal-back';
-    root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
+    const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
       <h2 id="mtitle">Передать карточку</h2>
       <p><b>${esc(marksText(t))}</b> · ${esc(projectOf(t)?.name || '')}</p>
       <p class="hint">Сейчас: ${esc(nameOf(fromId))}</p>
@@ -4061,16 +3995,12 @@ function askReassign(t, kind, fromId, toId = '') {
         <label class="chk"><input type="checkbox" id="m-force"> Всё равно назначить</label></div>
       <div class="err" id="m-err" hidden></div>
       <div class="modal-f"><button class="btn primary" type="submit">Передать</button><button class="btn" type="button" data-m="cancel">Отмена</button></div>
-    </form>`;
-    document.body.append(root);
+    </form>`, { onClose: resolve });
     const sel = root.querySelector('#m-to'), warn = root.querySelector('#m-warn');
     const sync = () => { const txt = sel.value ? misfitText(t, kind, sel.value) : ''; warn.hidden = !txt; root.querySelector('#m-warn-text').textContent = txt; root.querySelector('#m-force').checked = false; };
     sync();
     sel.addEventListener('change', sync);
     (toId ? root.querySelector('#m-force') : sel).focus();
-    const close = v => { root.remove(); resolve(v); };
-    root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(null); });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } });
     root.querySelector('form').addEventListener('submit', e => {
       e.preventDefault(); e.stopPropagation();
       const err = root.querySelector('#m-err');
@@ -4310,9 +4240,7 @@ function askDept(dept = null, parentId = '') {
   const others = [...state.depts.values()].filter(x => x.id !== d.id);
   const staff = liveUsers().sort(byName);
   const members = new Set(staff.filter(u => dept && u.deptId === dept.id).map(u => u.id));
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal org-modal" role="dialog" aria-modal="true" aria-labelledby="org-t" novalidate><h2 id="org-t">${dept ? 'Отдел' : 'Новый отдел'}</h2>
+  const { root, close } = openModal(`<form class="modal org-modal" role="dialog" aria-modal="true" aria-labelledby="org-t" novalidate><h2 id="org-t">${dept ? 'Отдел' : 'Новый отдел'}</h2>
     <div class="f"><label class="req" for="org-name">Название</label><input id="org-name" maxlength="120" value="${esc(d.name)}" placeholder="Отдел инженерных систем"></div>
     <div class="f"><label for="org-head">Руководитель</label><select id="org-head"><option value="">— не назначен —</option>${staff.map(u => `<option value="${esc(u.id)}"${u.id === d.headId ? ' selected' : ''}>${esc(u.name)} · ${esc(A.ROLES[u.role]?.label || '')}</option>`).join('')}</select></div>
     <div class="f"><label for="org-parent">Входит в</label><select id="org-parent"><option value="">— верхний уровень —</option>${others.map(x => `<option value="${esc(x.id)}"${x.id === d.parentId ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
@@ -4324,9 +4252,8 @@ function askDept(dept = null, parentId = '') {
         return `<label class="pick-row" data-name="${esc(u.name.toLowerCase())}" data-free="${u.deptId && state.depts.get(u.deptId) ? '0' : '1'}"><input type="checkbox" value="${esc(u.id)}"${members.has(u.id) ? ' checked' : ''}><span class="pick-name">${esc(u.name)}</span>${now ? `<span class="pick-now" title="Сейчас: ${esc(now)}">сейчас: ${esc(now)}</span>` : ''}</label>`;
       }).join('')}<p class="hint pick-none" hidden>Никого не найдено.</p></div></fieldset>
     <div class="err" id="org-err" hidden></div>
-    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${dept ? '<button class="btn danger" type="button" data-m="del">Удалить отдел</button>' : ''}</div></form>`;
-  document.body.append(root);
-  const q = sel => root.querySelector(sel), close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button><span class="spacer"></span>${dept ? '<button class="btn danger" type="button" data-m="del">Удалить отдел</button>' : ''}</div></form>`);
+  const q = sel => root.querySelector(sel);
   q('#org-name').focus();
   // The list: search by surname, «только без отдела», how many are chosen.
   const pickList = () => {
@@ -4345,9 +4272,7 @@ function askDept(dept = null, parentId = '') {
   q('#org-find').addEventListener('input', pickList);
   q('#org-free').addEventListener('change', pickList);
   q('.pick-list').addEventListener('change', pickList);
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.addEventListener('click', async e => {
-    if (e.target === root || e.target.dataset.m === 'cancel') close();
     if (e.target.dataset.m === 'del') {
       // Sub-departments move up a level, people become «без отдела».
       const ops = [op.update('depts', dept.id, { deletedAt: new Date().toISOString() }),
@@ -4434,9 +4359,9 @@ function profileHtml(u) {
     u.phone ? ['Телефон', esc(u.phone)] : null, u.email ? ['Почта', esc(u.email)] : null, u.messenger ? ['Мессенджер', esc(u.messenger)] : null,
   ].filter(Boolean);
   const progs = Array.isArray(u.programs) ? u.programs : [];
-  return `<div class="pf">${rows.length ? `<div class="pf-kv">${rows.map(([k, v]) => `<span class="hint">${k}</span><span>${v}</span>`).join('')}</div>` : ''}
-    ${u.about ? `<p class="pf-about">${esc(u.about)}</p>` : ''}
-    ${progs.length ? `<div class="pf-progs"><span class="hint">Программы:</span> ${progs.map(x => `<span class="chip tone-idle">${esc(x)}</span>`).join(' ')}</div>` : ''}
+  return `<div class="prof">${rows.length ? `<div class="prof-kv">${rows.map(([k, v]) => `<span class="hint">${k}</span><span>${v}</span>`).join('')}</div>` : ''}
+    ${u.about ? `<p class="prof-about">${esc(u.about)}</p>` : ''}
+    ${progs.length ? `<div class="prof-progs"><span class="hint">Программы:</span> ${progs.map(x => `<span class="chip tone-idle">${esc(x)}</span>`).join(' ')}</div>` : ''}
     ${!rows.length && !u.about && !progs.length ? '<p class="hint">Анкета не заполнена.</p>' : ''}</div>`;
 }
 
@@ -4449,9 +4374,7 @@ function personPopup(uid) {
       ${canEditFields() ? `<button class="btn ghostbtn sm" type="button" data-op-move="${esc(t.id)}" title="Передать другому сотруднику">⇄ Передать</button>` : ''}</div>`;
   const asgRow = t => `<div class="op-row"><button class="linkbtn" type="button" data-op-open="${esc(t.id)}">${esc(t.note || t.title)} <span>${esc(projectOf(t)?.name || '')}</span></button><span class="hint">${esc(t.title)}</span>
       <span class="due ${asgLate(t) ? 'bad' : ''}">${isDate(t.finish) ? fmtDate(t.finish) : '—'}</span></div>`;
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<div class="modal wide-modal person-modal" role="dialog" aria-modal="true" aria-labelledby="optitle">
+  const { root, close } = openModal(`<div class="modal wide-modal person-modal" role="dialog" aria-modal="true" aria-labelledby="optitle">
     <div class="pm-head">${avatarHtml(u, 'big')}<div><h2 id="optitle"><span class="kicons">${userIcons(u)}</span>${esc(u.name)}</h2>
       <p class="hint">${esc(A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''}</p>${personStateChip(st)}</div></div>
     ${profileHtml(u)}
@@ -4462,12 +4385,9 @@ function personPopup(uid) {
     ${give.length ? `<h3 class="pm-h">Должен выдать задания <span class="cnt">${give.length}</span></h3><div class="op-list">${give.map(asgRow).join('')}</div>` : ''}
     <div class="modal-f"><button class="btn" type="button" data-op-all>Все карточки</button>${A.canEditAbsences(state.me, u) ? '<button class="btn ghostbtn" type="button" data-op-abs>Отпуска</button>' : ''}
       ${me ? '<button class="btn ghostbtn" type="button" data-op-profile>Моя анкета</button>' : ''}${A.isGip(state.me) ? '<button class="btn ghostbtn" type="button" data-op-edit>Изменить</button>' : ''}
-      <span class="spacer"></span><button class="btn primary" type="button" data-m="close">Закрыть</button></div></div>`;
-  document.body.append(root);
-  const close = () => root.remove();
+      <span class="spacer"></span><button class="btn primary" type="button" data-m="close">Закрыть</button></div></div>`);
   root.addEventListener('click', e => {
     const b = e.target.closest('button');
-    if (e.target === root || b?.dataset.m === 'close') return close();
     if (!b) return;
     if (b.dataset.opOpen) { close(); openTask(b.dataset.opOpen); }
     else if (b.dataset.opMove) { close(); reassign(b.dataset.opMove, 'staff', uid); }
@@ -4476,7 +4396,6 @@ function personPopup(uid) {
     else if (b.hasAttribute('data-op-profile')) { close(); openProfile(); }
     else if (b.hasAttribute('data-op-edit')) { close(); openUser(uid); }
   });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('[data-m="close"]').focus();
 }
 
@@ -4509,33 +4428,28 @@ function openProfile() {
   if (!u) return;
   const gip = A.isGip(state.me), bdayLocked = !gip && isDate(u.birthday);
   let photo = A.photoOf(u);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="pf-t" novalidate><h2 id="pf-t">Моя анкета</h2>
-    <div class="pf-photo"><span id="pf-ava">${avatarHtml({ ...u, photo }, 'big')}</span><div><label class="btn sm" for="pf-file">Выбрать фото</label><input id="pf-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+  const { root, close } = openModal(`<form class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="pf-t" novalidate><h2 id="pf-t">Моя анкета</h2>
+    <div class="prof-photo"><span id="pf-ava">${avatarHtml({ ...u, photo }, 'big')}</span><div><label class="btn sm" for="pf-file">Выбрать фото</label><input id="pf-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
       <button class="btn ghostbtn sm" type="button" id="pf-nophoto"${photo ? '' : ' hidden'}>Убрать фото</button><p class="hint">Фото обрежется до квадрата.</p></div></div>
     <div class="fgrid">
-      <div class="f wide"><label for="pf-about">О себе</label><textarea id="pf-about" rows="3" maxlength="1500" placeholder="Чем занимаюсь, в чём силён, к кому обращаться">${esc(u.about || '')}</textarea></div>
+      <div class="f wide"><label for="prof-about">О себе</label><textarea id="pf-about" rows="3" maxlength="1500" placeholder="Чем занимаюсь, в чём силён, к кому обращаться">${esc(u.about || '')}</textarea></div>
       <div class="f"><label for="pf-phone">Телефон</label><input id="pf-phone" type="tel" value="${esc(u.phone || '')}" maxlength="40"></div>
       <div class="f"><label for="pf-email">Почта</label><input id="pf-email" type="email" value="${esc(u.email || '')}" maxlength="120"></div>
       <div class="f"><label for="pf-msg">Мессенджер</label><input id="pf-msg" value="${esc(u.messenger || '')}" maxlength="120"></div>
       <div class="f"><label for="pf-bday">День рождения</label><input id="pf-bday" type="date" value="${esc(u.birthday || '')}"${bdayLocked ? ' disabled' : ''}>
         <span class="hint">${bdayLocked ? 'Уже указан — изменить может ГИП.' : 'Указывается один раз, потом меняет только ГИП. Год никому не показывается.'}</span></div>
-      <div class="f wide"><label for="pf-progs">Программы, которыми владею</label><textarea id="pf-progs" rows="2" maxlength="2000" placeholder="AutoCAD, Revit, nanoCAD, ГРАНД-Смета — через запятую">${esc((u.programs || []).join(', '))}</textarea></div>
+      <div class="f wide"><label for="prof-progs">Программы, которыми владею</label><textarea id="pf-progs" rows="2" maxlength="2000" placeholder="AutoCAD, Revit, nanoCAD, ГРАНД-Смета — через запятую">${esc((u.programs || []).join(', '))}</textarea></div>
     </div>
     <p class="hint">Должность${u.position ? ` (${esc(u.position)})` : ''}, дату приёма${isDate(u.hireDate) ? ` (${fmtDate(u.hireDate)})` : ''}, роль и направления заполняет ГИП.</p>
     <div class="err" id="pf-err" hidden></div>
-    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+  const q = s => root.querySelector(s);
   const showPhoto = () => { q('#pf-ava').innerHTML = avatarHtml({ ...u, photo }, 'big'); q('#pf-nophoto').hidden = !photo; };
   q('#pf-file').addEventListener('change', async e => {
     try { photo = await photoFromFile(e.target.files[0]); showPhoto(); q('#pf-err').hidden = true; } catch (err) { modalErr(root, '#pf-err', err.message); }
     e.target.value = '';
   });
   q('#pf-nophoto').addEventListener('click', () => { photo = ''; showPhoto(); });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const data = { photo, about: q('#pf-about').value.trim(), phone: q('#pf-phone').value.trim(), email: q('#pf-email').value.trim(), messenger: q('#pf-msg').value.trim(), programs: programsFrom(q('#pf-progs').value) };
@@ -6147,69 +6061,20 @@ function taskAssignsBlock(t) {
   return `<div class="f wide asg-list">${out.length ? `<span class="lbl">Исходящие задания (${out.length})</span><ul>${out.map(x => line(x, 'out')).join('')}</ul>` : ''}
     ${inc.length ? `<span class="lbl">Входящие задания (${inc.length})</span><ul>${inc.map(x => line(x, 'in')).join('')}</ul>` : ''}</div>`;
 }
-function marksPicker(selected) {
-  const known = new Set(MARK_GROUPS.flatMap(g => g.marks.map(m => m[0])));
-  const custom = selected.filter(m => !known.has(m));
-  const groups = MARK_GROUPS.map(g => `<fieldset class="mk-group" data-dir="${esc(g.dir || '')}"><legend>${esc(g.title)}</legend><div class="mk-grid">${g.marks.map(([code, name]) =>
-    `<label class="mk" title="${esc(name)}"><input type="checkbox" name="mark" value="${esc(code)}"${selected.includes(code) ? ' checked' : ''}><span class="code">${esc(code)}</span><small>${esc(name)}</small></label>`).join('')}</div></fieldset>`).join('');
-  return `<div class="f wide marks-f">
-    <div class="mk-head"><span class="lbl req" id="marks-lbl">Разделы</span><span class="hint" id="marks-count"></span></div>
-    <div class="mk-tools" data-transient><input id="mk-search" type="search" placeholder="Найти раздел: ЭО, вент, пожар…" autocomplete="off">
-      <button class="btn ghostbtn sm" type="button" data-act="mk-all" id="mk-all"></button></div>
-    <div class="mk-groups" role="group" aria-labelledby="marks-lbl">${groups}</div>
-    <label for="t-marks-extra">Другие разделы, через запятую</label>
-    <input id="t-marks-extra" name="marksExtra" value="${esc(custom.join(', '))}" placeholder="ЭОМ1, АИИС КУЭ" maxlength="200" autocomplete="off">
-  </div>`;
-}
-// Shows only the directions of the chosen responsible person (plus groups with ticked marks); search looks everywhere.
-function applyMarksFilter() {
-  const box = $('#dform .mk-groups');
-  if (!box) return;
-  const q = ($('#mk-search')?.value || '').trim().toLowerCase();
-  const owner = state.users?.get($('#t-owner')?.value);
-  const own = new Set(owner && !A.isGip(owner) ? owner.directions || [] : []);
-  const limit = !state.drawer?.allMarks && own.size > 0 && !q;
-  let hiddenGroups = 0;
-  for (const g of $$('.mk-group', box)) {
-    let any = false;
-    for (const l of $$('.mk', g)) {
-      const hit = !q || l.textContent.toLowerCase().includes(q);
-      l.hidden = !hit;
-      any ||= hit;
-    }
-    const keep = any && (!limit || own.has(g.dataset.dir) || $$('input:checked', g).length > 0);
-    g.hidden = !keep;
-    if (!keep && any) hiddenGroups++;
-  }
-  const btn = $('#mk-all');
-  if (btn) {
-    btn.hidden = !(own.size && !q);
-    btn.textContent = state.drawer?.allMarks ? 'Только направления ответственного' : `Все направления${hiddenGroups ? ` (+${hiddenGroups})` : ''}`;
-  }
-}
 function selectedMarks() {
   const doc = $('#t-doc');
   if (doc && doc.value && doc.value !== 'free') return docRefSections(val('projectId'), doc.value);
   if (doc && !doc.value) return [];
-  const checked = $$('#dform input[name="mark"]:checked').map(i => i.value);
-  return normalizeMarks([...checked, ...splitMarks(val('marksExtra'))]);
+  return normalizeMarks(splitMarks(val('marksExtra')));
 }
 function onMarksChanged() {
   const list = selectedMarks();
-  const el = $('#dform .mk-groups') && $('#marks-count');
-  if (el) el.textContent = list.length ? `выбрано ${list.length}: ${list.join(', ')}` : 'ничего не выбрано';
   const own = $('#t-owner');
   if (own && !own.disabled) { const v = own.value; own.innerHTML = ownerOptions(v, list); own.value = v; }
   execPickersRefresh();
   updateOwnerWarn();
-  applyMarksFilter();
   smartDefaults();
 }
-
-/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
-onAct({
-  'mk-all': () => { state.drawer.allMarks = !state.drawer.allMarks; applyMarksFilter(); },
-});
 /* ---------- card discussion ---------- */
 function renderTalk() {
   const box = $('#talk-box'), t = state.tasks.get(state.drawer?.id);
@@ -6717,7 +6582,7 @@ function setUserMenu(open) {
   if (open) menu.querySelector('[aria-current]')?.focus();
 }
 // «Свой вид» (3.6): each person on this computer keeps their own tab, columns, sorting, folded blocks, Gantt and
-// office settings. Switching the user stores the current set under the old user and brings back the new one's.
+// view settings. Switching the user stores the current set under the old user and brings back the new one's.
 const VIEW_KEYS = ['tab', 'cols', 'sort', 'folded', 'gantt', 'kbLanes', 'overview', 'peopleMode', 'presets', 'dense', 'teamCollapsed', 'progWeight', 'quietDays', 'tabOrder', 'hiddenTabs', 'nav', 'scroll'];
 function swapView(fromId, toId) {
   try {
@@ -6910,20 +6775,14 @@ function weeklyText(list = tasksArr()) {
 }
 function openWeekly() {
   setFileMenu(false);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<div class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+  const { root, close } = openModal(`<div class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="mtitle">
     <h2 id="mtitle">Сводка за неделю</h2>
     <p class="hint">Текст можно поправить перед отправкой. Деньги в сводку не попадают.</p>
     <textarea id="wk-text" class="wk-text" rows="16">${esc(weeklyText())}</textarea>
-    <div class="modal-f"><button class="btn primary" type="button" data-m="copy">Копировать</button><button class="btn" type="button" data-m="cancel">Закрыть</button></div></div>`;
-  document.body.append(root);
-  const close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="button" data-m="copy">Копировать</button><button class="btn" type="button" data-m="cancel">Закрыть</button></div></div>`);
   root.addEventListener('click', e => {
-    if (e.target === root || e.target.dataset.m === 'cancel') close();
     if (e.target.dataset.m === 'copy') copyText($('#wk-text').value).then(ok => toast(ok ? 'Сводка скопирована — вставьте в мессенджер или почту' : 'Текст выделен — нажмите Ctrl+C'));
   });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   $('#wk-text').focus();
 }
 
@@ -6932,8 +6791,6 @@ function openAbsences(uid) {
   const u = state.users.get(uid);
   if (!u || !A.canEditAbsences(state.me, u)) return toast('Отсутствия этого сотрудника ведут ГИП или его главспец.', true);
   let rows = clone(A.absencesOf(u).length ? u.absences : []);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
   const draw = () => {
     root.querySelector('#abs-rows').innerHTML = rows.length ? rows.map((a, i) => `<div class="abs-row" data-i="${i}">
       <select data-k="kind">${Object.entries(A.ABSENCE_KINDS).map(([k, l]) => `<option value="${k}"${a.kind === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
@@ -6941,25 +6798,21 @@ function openAbsences(uid) {
       <input data-k="note" value="${esc(a.note || '')}" placeholder="Комментарий" maxlength="100">
       <button class="btn ghostbtn sm" type="button" data-m="del" data-i="${i}" title="Удалить">✕</button></div>`).join('') : '<div class="hint">Отсутствий не отмечено.</div>';
   };
-  root.innerHTML = `<form class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
+  const { root, close } = openModal(`<form class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="mtitle" novalidate>
     <h2 id="mtitle">Отсутствия: ${esc(u.name)}</h2>
     <p class="hint">Отпуска и больничные. Программа предупредит, если срок карточки сотрудника попадает на эти дни, и покажет их на диаграмме Ганта.</p>
     <div id="abs-rows"></div>
     <button class="btn sm" type="button" data-m="add">+ Добавить период</button>
     <div class="err" id="m-err" hidden></div>
     <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div>
-  </form>`;
-  document.body.append(root);
+  </form>`);
   draw();
-  const close = () => root.remove();
   root.addEventListener('input', e => { const r = e.target.closest('.abs-row'); if (r) rows[Number(r.dataset.i)][e.target.dataset.k] = e.target.value; });
   root.addEventListener('click', e => {
     const m = e.target.dataset.m;
-    if (e.target === root || m === 'cancel') close();
     if (m === 'add') { rows.push({ id: newId(), kind: 'vacation', from: todayStr(), to: addDays(todayStr(), 13), note: '' }); draw(); }
     if (m === 'del') { rows.splice(Number(e.target.dataset.i), 1); draw(); }
   });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const bad = rows.find(a => !isDate(a.from) || !isDate(a.to) || a.to < a.from);
@@ -7548,10 +7401,8 @@ function askTimeline(p) {
   let phases = L.defaultPhases().map(d => { const was = (p.phases || []).find(x => x.key === d.key); return { ...d, ...(was || {}), ...(!was?.start && was?.chain === undefined && ['expertise', 'r'].includes(d.key) ? { chain: true } : {}) }; });
   const shown = () => phases.map((ph, i) => ({ ph, i })).filter(x => gip || x.ph.key !== 'contract');
   return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
     const msRow = (m, i) => `<div class="tq-ms" data-i="${i}"><input class="tq-ms-t" value="${esc(m.title || '')}" placeholder="Например: выдача ТУ, оплата аванса, сдача сметы" maxlength="120"><input class="tq-ms-d" type="date" value="${esc(m.date || '')}"><button class="btn ghostbtn sm" type="button" data-m="ms-del" aria-label="Убрать">✕</button></div>`;
-    root.innerHTML = `<form class="modal tq-modal" role="dialog" aria-modal="true" aria-labelledby="tltitle" novalidate><h2 id="tltitle">Сроки по договору · ${esc(p.name || '')}</h2>
+    const { root, close } = openModal(`<form class="modal tq-modal" role="dialog" aria-modal="true" aria-labelledby="tltitle" novalidate><h2 id="tltitle">Сроки по договору · ${esc(p.name || '')}</h2>
       <p class="hint">По этим срокам программа расставит предварительные даты разделов по волнам техкарты и сроки заданий смежникам. Можно заполнить потом: кнопка «Сроки» на странице проекта.</p>
       <div id="tq-phases"></div>
       <div class="tq-mode"><span class="lbl">Рабочая документация</span>
@@ -7560,8 +7411,7 @@ function askTimeline(p) {
         <span class="hint" id="tq-hint"></span></div>
       <div class="tq-ms-box"><span class="lbl">Иные сроки по договору</span><div id="tq-ms">${ms.map(msRow).join('')}</div><button class="btn sm" type="button" data-m="ms-add">+ срок</button></div>
       <div class="err" id="tq-err" hidden></div>
-      <div class="modal-f"><button class="btn primary" type="submit">Сохранить сроки</button><button class="btn" type="button" data-m="cancel">Заполню потом</button></div></form>`;
-    document.body.append(root);
+      <div class="modal-f"><button class="btn primary" type="submit">Сохранить сроки</button><button class="btn" type="button" data-m="cancel">Заполню потом</button></div></form>`, { onClose: resolve, dismissed: false });
     const q = sel => root.querySelector(sel);
     const draw = () => {
       const list = shown();
@@ -7578,7 +7428,6 @@ function askTimeline(p) {
       phases = L.planPhases(phases);
       q('#tq-hint').textContent = m === 'parallel' ? 'Р стартует сразу после П; замечания экспертизы правятся в обоих.' : 'Р стартует после положительного заключения.';
     };
-    const close = r => { root.remove(); resolve(r); };
     root.addEventListener('input', e => { const k = e.target.dataset.ph?.split('.'); if (k) { const x = phases[Number(k[0])]; x[k[1]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; } });
     root.addEventListener('change', e => {
       const k = e.target.dataset.ph?.split('.');
@@ -7587,11 +7436,9 @@ function askTimeline(p) {
     });
     root.addEventListener('click', e => {
       const m = e.target.dataset.m;
-      if (e.target === root || m === 'cancel') close(false);
       if (m === 'ms-add') { q('#tq-ms').insertAdjacentHTML('beforeend', msRow({}, Date.now())); q('#tq-ms .tq-ms:last-child .tq-ms-t').focus(); }
       if (m === 'ms-del') e.target.closest('.tq-ms').remove();
     });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } });
     mode(); draw();
     q('[data-ph$=".start"]')?.focus();
     q('form').addEventListener('submit', async e => {
@@ -7817,16 +7664,12 @@ async function cabRemark(mid) {
 }
 // Connection: a separate small dialog (the settings window re-renders on every click and would lose typed text).
 function openCabinetSettings() {
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="ctitle" novalidate><h2 id="ctitle">Кабинет заказчика</h2>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="ctitle" novalidate><h2 id="ctitle">Кабинет заказчика</h2>
     <p class="hint">Адрес и ключ команды показывает сервер кабинета при запуске. Ключ хранится на этом компьютере в зашифрованном виде.</p>
     <div class="f"><label for="c-url">Адрес сервера</label><input id="c-url" value="${esc(cab?.url || '')}" placeholder="https://cabinet.example.ru или http://192.168.1.10:8080" maxlength="300"></div>
     <div class="f"><label for="c-key">Ключ команды</label><input id="c-key" type="password" autocomplete="off" placeholder="${cab?.hasKey ? 'сохранён — оставьте пустым, чтобы не менять' : 'длинная строка из окна сервера'}" maxlength="200"></div>
     ${cab?.lastSync ? `<p class="hint">Последняя связь: ${cabTime(cab.lastSync)}</p>` : ''}<p class="neg" id="c-err">${cab?.keyLost ? 'Ключ команды, сохранённый прошлой версией Пульта, не читается — введите его заново.' : ''}</p>
-    <div class="modal-f"><button class="btn primary" type="submit">Проверить и сохранить</button>${cab?.configured ? '<button class="btn" type="button" data-m="off">Отключить</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Проверить и сохранить</button>${cab?.configured ? '<button class="btn" type="button" data-m="off">Отключить</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
   root.querySelector('#c-url').focus();
   const save = async (url, key) => {
     const btn = root.querySelector('button[type=submit]');
@@ -7840,10 +7683,8 @@ function openCabinetSettings() {
     renderCabinetBox();
   };
   root.addEventListener('click', e => {
-    if (e.target === root || e.target.dataset.m === 'cancel') close();
     if (e.target.dataset.m === 'off') save('', '');
   });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); save(root.querySelector('#c-url').value.trim(), root.querySelector('#c-key').value.trim()); });
 }
 
@@ -9180,10 +9021,9 @@ document.addEventListener('input', e => {
   if (t.id === 'jr-q') { state.journal.q = t.value; const pos = t.selectionStart; renderJournal(); const n = $('#jr-q'); n.focus(); n.setSelectionRange(pos, pos); return; }
   if (t.id === 'msg-text') { msg.drafts[msg.chatId] = t.value; msgAutocomplete(t); return; }
   if (t.id === 'mc-title') { msg.newTitle = t.value; return; }
-  if (t.name === 'mark' || t.id === 't-marks-extra') { onMarksChanged(); return; }
-  if (t.id === 't-owner') { execPickersRefresh(); applyMarksFilter(); return; }
+  if (t.id === 't-marks-extra') { onMarksChanged(); return; }
+  if (t.id === 't-owner') { execPickersRefresh(); return; }
   if (t.id === 'exec-fit') { saveLocal('execFit', t.checked); for (const box of $$('#dform .exec-pick')) if (!box.querySelector('.ep-list').hidden) epRender(box, true); return; }
-  if (t.id === 'mk-search') { applyMarksFilter(); return; }
   if (t.id === 't-ready-r') { $('#t-ready').value = t.value; return; }
   if (t.id === 't-ready') { $('#t-ready-r').value = t.value; return; }
   if (t.id === 'gq-project' || t.id === 'gq-mark') { state.ganttFilter[t.id === 'gq-project' ? 'project' : 'mark'] = t.value; renderNow(); return; }

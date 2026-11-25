@@ -1,0 +1,168 @@
+/* =================== 3.1: «Тандем», project tabs, composition, customer data =================== */
+.brand-logo { display: none; height: 20px; margin-right: 8px; vertical-align: -4px }
+:root[data-theme="tandem"] {
+  --bg: #F2F4F7; --surface: #FFFFFF; --sunk: #F2F4F7; --ink: #1D1E21; --muted: #5E6673; --line: #DFE4EA;
+  --accent: #F26A1F; --accent-ink: #FFFFFF; --accent-soft: #FFF4EC;
+  --ok: #1E7A45; --ok-soft: #E3F2E8; --warn: #A34700; --warn-soft: #FFF0E3; --bad: #B3261E; --bad-soft: #FCE8E6;
+  --review: #2457A6; --review-soft: #E4ECF8; --idle: #4B5361; --idle-soft: #EDF0F4; color-scheme: light;
+}
+:root[data-theme="tandem"] .brand-logo { display: inline-block }
+:root[data-theme="tandem"] #app-title { font-weight: 600; color: var(--muted); font-size: 12.5px }
+/* 3.7: «Тандем» — not only colours: the controls of the customer page (square corners, 600 weight, orange solid
+   primary, soft-orange «burn», segments and tabs with an orange line, square chips, round orange counters). */
+:root[data-theme="tandem"] { --accent-text: #B04E0D; --accent-line: #F6D6C1 }
+:root[data-theme="tandem"] .btn { border-radius: 0; font-weight: 600; font-size: 13px; min-height: 34px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent); text-shadow: none }
+:root[data-theme="tandem"] .btn:hover { border-color: var(--accent) }
+:root[data-theme="tandem"] .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff }
+:root[data-theme="tandem"] .btn.primary:hover { background: #E45E14; border-color: #E45E14 }
+:root[data-theme="tandem"] .btn.sm { min-height: 28px; padding: 0 10px; font-size: 12px }
+:root[data-theme="tandem"] .btn.ghostbtn { background: none; border-color: transparent; color: var(--muted); min-height: 28px; padding: 0 8px }
+:root[data-theme="tandem"] .btn.ghostbtn:hover { color: var(--accent-text); background: var(--accent-soft) }
+:root[data-theme="tandem"] .btn.danger { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)) }
+:root[data-theme="tandem"] .btn.danger.solid { background: var(--bad); border-color: var(--bad); color: #fff }
+:root[data-theme="tandem"] .btn.danger.solid:hover { background: color-mix(in srgb, var(--bad) 88%, #000) }
+:root[data-theme="tandem"] .btn.on, :root[data-theme="tandem"] .stage-bar .btn.on, :root[data-theme="tandem"] .g-mode .btn.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); box-shadow: inset 0 -2px 0 var(--accent) }
+:root[data-theme="tandem"] .btn.burn, :root[data-theme="tandem"] #btn-create.primary { }
+:root[data-theme="tandem"] .seg { display: inline-flex; gap: 0 !important; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent) }
+:root[data-theme="tandem"] .seg > .btn { border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); min-height: 32px }
+:root[data-theme="tandem"] .seg > .btn:last-child { border-right: 0 }
+:root[data-theme="tandem"] .seg > .btn.on, :root[data-theme="tandem"] .seg > .btn.primary { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 -2px 0 var(--accent) }
+:root[data-theme="tandem"] .tab[aria-selected="true"] { color: var(--accent-text); border-bottom-color: var(--accent); font-weight: 600 }
+:root[data-theme="tandem"] .tab .cnt { font-family: inherit; background: var(--idle-soft); color: var(--idle); border-radius: 10px; padding: 0 6px; min-width: 18px; text-align: center; font-weight: 700; font-size: 10.5px }
+:root[data-theme="tandem"] .tab .cnt.bad { background: var(--accent); color: #fff }
+:root[data-theme="tandem"] .tab .cnt:empty { display: none }
+:root[data-theme="tandem"] .nav-left .tab { border-radius: 0 }
+:root[data-theme="tandem"] .nav-left .tab[aria-selected="true"] { background: var(--accent-soft); border-left-color: var(--accent) }
+:root[data-theme="tandem"] .nav-bottom .tab[aria-selected="true"] { border-top-color: var(--accent) }
+:root[data-theme="tandem"] .chip { border-radius: 0; font-weight: 600; padding: 2px 7px }
+:root[data-theme="tandem"] .chip::before { display: none }
+:root[data-theme="tandem"] .panel, :root[data-theme="tandem"] .menu, :root[data-theme="tandem"] .modal, :root[data-theme="tandem"] .toast, :root[data-theme="tandem"] .toast button,
+:root[data-theme="tandem"] .f input, :root[data-theme="tandem"] .f select, :root[data-theme="tandem"] .f textarea, :root[data-theme="tandem"] .modal .f input, :root[data-theme="tandem"] .modal .f select,
+:root[data-theme="tandem"] .palette, :root[data-theme="tandem"] .pcard, :root[data-theme="tandem"] .pt-kpi, :root[data-theme="tandem"] .note-box, :root[data-theme="tandem"] .user-chip, :root[data-theme="tandem"] .att-btn { border-radius: 0 }
+:root[data-theme="tandem"] .f input:focus, :root[data-theme="tandem"] .f select:focus, :root[data-theme="tandem"] .f textarea:focus { outline: 0; border-color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent) }
+:root[data-theme="tandem"] .panel-h h3, :root[data-theme="tandem"] .drawer-h h2, :root[data-theme="tandem"] .pt-top h2 { font-weight: 500; letter-spacing: -.01em }
+:root[data-theme="tandem"] .lbl, :root[data-theme="tandem"] .pd-t th { letter-spacing: .09em; font-weight: 600 }
+:root[data-theme="tandem"] .ab-person, :root[data-theme="tandem"] .ab-task, :root[data-theme="tandem"] .ab-gh { border-radius: 0 }
+:root[data-theme="tandem"][data-font="montserrat"] { --f-ui: "Montserrat", "Segoe UI", Arial, sans-serif }
+.seg.wrap { flex-wrap: wrap }
+.pd-t { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 6px }
+.pd-t th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 4px 6px; border-bottom: 1px solid var(--line) }
+.pd-t td { padding: 3px 6px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent) }
+.pd-t td.grow { width: 40% }
+.pd-t input:not([type="checkbox"]), .pd-t select, .comp-t input:not([type="checkbox"]), .comp-t select, .row-in .sm-in, .sub textarea, .sub .f input {
+  width: 100%; border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; background: var(--glass); color: var(--ink); font: inherit; font-size: 13px; min-width: 0 }
+.pd-t input[type="date"], .comp-t input[type="date"] { width: 136px }
+input.sm-in { width: 64px !important }
+.pd-t tr.gip-only { background: color-mix(in srgb, var(--accent) 6%, transparent) }
+.pd-show { display: flex; flex-wrap: wrap; gap: 6px 18px }
+.cust-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 4px 0 10px; border-bottom: 1px solid var(--line); margin-bottom: 6px }
+.cust-top .spacer { flex: 1 }
+.comp-empty { padding: 10px 0 }
+.comp-bases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px }
+.comp-bases .btn { display: grid; gap: 2px; text-align: left; padding: 12px 14px; height: auto; white-space: normal }
+.comp-bases small { color: var(--muted); font-weight: 400 }
+.comp-t { width: 100%; border-collapse: collapse; font-size: 13px }
+.comp-t th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 5px 6px; border-bottom: 1.5px solid var(--ink); white-space: nowrap }
+.comp-t td { padding: 3px 6px; border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); vertical-align: middle }
+.comp-t tr.ck-section td { background: color-mix(in srgb, var(--accent) 4%, transparent) }
+.comp-t tr.ck-section .comp-title { font-weight: 700 }
+.comp-t tr.vol .comp-k { color: var(--accent) }
+.comp-t tr.off td { opacity: .45 }
+.comp-t tr.off td:nth-last-child(2) { opacity: 1 }
+.comp-name { display: flex; align-items: center; gap: 6px; padding-left: calc(var(--d) * 18px); min-width: 260px }
+.comp-k { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); width: 74px }
+.comp-title { line-height: 1.25 }
+.comp-t .code-in { font: italic 600 12.5px var(--f-mark) !important; min-width: 130px }
+.comp-t select { max-width: 150px }
+.comp-foot { display: flex; gap: 10px; align-items: center; padding: 8px 0 }
+.chk input { margin: 0 4px 0 0; vertical-align: -2px }
+.cust-alert { appearance: none; width: 100%; display: flex; justify-content: space-between; gap: 10px; text-align: left; border: 0; border-top: 1px solid var(--line); background: none; padding: 8px 12px; cursor: pointer; color: inherit; font: inherit; font-size: 13px }
+.cust-alert:hover { background: color-mix(in srgb, var(--accent) 6%, transparent) }
+
+/* =================== 3.2: customer cabinet =================== */
+.sub.cab { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; background: var(--sunk) }
+.sub.cab h4 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted) }
+.cab-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.cab-add { gap: 6px; margin-top: 6px }
+.cab-add input, .cab-add select { flex: 1; min-width: 0 }
+.cab-pw { margin: 10px 0; padding: 10px 12px; border: 1px dashed var(--accent); border-radius: 6px; background: var(--glass); display: grid; gap: 4px }
+.cab-pw code { font-size: 14px; user-select: all; background: var(--accent-soft); padding: 1px 5px; border-radius: 3px }
+.cab-msg { border-left: 3px solid var(--accent); background: var(--glass); padding: 6px 10px; margin: 6px 0; border-radius: 0 4px 4px 0; display: grid; gap: 3px }
+.cab-msg.read { border-left-color: var(--line); opacity: .8 }
+.cab-msg.urgent, .cust-alert.urgent { border-left: 3px solid var(--bad) }
+.cab-text { white-space: pre-wrap; overflow-wrap: anywhere }
+/* Drawer content never wider than the drawer: wide tables scroll inside their own block */
+.drawer-b, .dpanel { grid-template-columns: minmax(0, 1fr) }
+.sub { grid-template-columns: minmax(0, 1fr) }
+.dpanel[data-panel="cust"] .sub:not(.cab) { overflow-x: auto }
+.cust-top { flex-wrap: wrap }
+.cab-add input { min-width: 0; width: auto }
+.cab-person { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 0; border-bottom: 1px solid var(--line) }
+.cab-person .grow { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere }
+.cab-person .acts { display: flex; flex-wrap: wrap; gap: 4px }
+
+/* =================== 3.3: composition generator — project and working documentation =================== */
+.comp-part { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); margin-top: 6px }
+.comp-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-bottom: 2px solid var(--accent); padding-bottom: 6px }
+.comp-h h3 { font-size: 14px; margin: 0 }
+.rd-groups { display: grid; gap: 6px }
+.rd-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 8px; background: var(--sunk); border-radius: 6px }
+.rd-pd { min-width: 240px; flex: 0 1 340px; font-size: 13px }
+.rd-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 }
+.rd-chip { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--line); background: var(--glass); color: var(--muted); border-radius: 999px; padding: 2px 10px; cursor: pointer }
+.rd-chip:hover { border-color: var(--accent) }
+.rd-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
+.rd-chip.else { border-style: dashed }
+.rd-chip.own { border-style: dashed; font-weight: 400 }
+.rd-t .mark-in { width: 76px; font-weight: 600 }
+.rd-t .note-in { width: 110px }
+.src { display: inline-block; margin-left: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; vertical-align: middle }
+.src.gost { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent) }
+.gen-chk { align-items: flex-start }
+.comp-t.rd-t input.mark-in { width: 70px; font-weight: 600 }
+.comp-t.rd-t input[data-k="title"] { min-width: 300px; width: 100% }
+.comp-t.rd-t input.note-in { width: 120px }
+.comp-t.rd-t input.sm-in { width: 52px }
+.comp-t.rd-t select { max-width: 150px }
+.comp-t.rd-t td:nth-child(3) { text-align: left; white-space: nowrap }
+.comp-t.rd-t .src { width: 62px; text-align: center }
+
+/* =================== 3.4: project page =================== */
+.pcard .panel-h { flex-wrap: wrap }
+.pcard-open { all: unset; cursor: pointer }
+.pcard-open:hover h3, .pcard-open:focus-visible h3 { color: var(--accent); text-decoration: underline }
+.pcard-body { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; width: 100%; padding: 4px 14px 12px }
+.pcard-body:hover { background: var(--sunk) }
+.pt-agg { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted) }
+.pt-agg .rd-bar { width: 90px }
+.pt-page { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) }
+.pt-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px }
+.pt-top h2 { margin: 0; font-size: 20px }
+.pt-sum { padding: 12px 14px; display: grid; gap: 10px }
+.pt-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px }
+.pt-kpi { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: grid; gap: 2px; background: var(--glass) }
+.pt-kpi b { font-size: 20px; line-height: 1.1 }
+.pt-kpi span { font-size: 12px; color: var(--muted) }
+.pt-kpi.bad b { color: var(--bad) }
+.pt-kpi.warn b { color: var(--warn) }
+.pt-people { padding-bottom: 10px }
+.pt-members { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 14px }
+.pt-member { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 6px 3px 3px; background: var(--glass); font-size: 13px; line-height: 1.2 }
+.pt-ava { width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; font-size: 12px; flex: none }
+.pt-add { padding: 6px 14px 0; flex-wrap: wrap; gap: 6px; align-items: center }
+.pt-add select { max-width: 320px }
+.pt-t { width: 100%; border-collapse: collapse }
+.pt-t th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line) }
+.pt-t td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: 13px }
+.pt-name { padding-left: calc(var(--d, 0) * 22px); display: flex; gap: 8px; align-items: baseline }
+.pt-head td { background: var(--sunk); font-weight: 600 }
+.pt-head.lvl1 td, .pt-head.lvl2 td { background: color-mix(in srgb, var(--sunk) 50%, transparent) }
+.pt-task { cursor: pointer }
+.pt-asg-sum td { padding-top: 2px; padding-bottom: 4px; border-top: 0 }
+.pt-asg td { font-size: 12.5px }
+.asg-dir { font-size: 11px; padding: 0 6px; flex: none }
+.pt-task:hover td { background: var(--accent-soft) }
+.pt-block .tablewrap { padding: 0 6px 8px }
+.empty-in { padding: 14px; display: grid; gap: 10px; justify-items: start }
+.pt-name .comp-k { white-space: nowrap; flex: none }
+

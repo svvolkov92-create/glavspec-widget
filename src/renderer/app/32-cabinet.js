@@ -130,16 +130,12 @@ async function cabRemark(mid) {
 }
 // Connection: a separate small dialog (the settings window re-renders on every click and would lose typed text).
 function openCabinetSettings() {
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="ctitle" novalidate><h2 id="ctitle">Кабинет заказчика</h2>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="ctitle" novalidate><h2 id="ctitle">Кабинет заказчика</h2>
     <p class="hint">Адрес и ключ команды показывает сервер кабинета при запуске. Ключ хранится на этом компьютере в зашифрованном виде.</p>
     <div class="f"><label for="c-url">Адрес сервера</label><input id="c-url" value="${esc(cab?.url || '')}" placeholder="https://cabinet.example.ru или http://192.168.1.10:8080" maxlength="300"></div>
     <div class="f"><label for="c-key">Ключ команды</label><input id="c-key" type="password" autocomplete="off" placeholder="${cab?.hasKey ? 'сохранён — оставьте пустым, чтобы не менять' : 'длинная строка из окна сервера'}" maxlength="200"></div>
     ${cab?.lastSync ? `<p class="hint">Последняя связь: ${cabTime(cab.lastSync)}</p>` : ''}<p class="neg" id="c-err">${cab?.keyLost ? 'Ключ команды, сохранённый прошлой версией Пульта, не читается — введите его заново.' : ''}</p>
-    <div class="modal-f"><button class="btn primary" type="submit">Проверить и сохранить</button>${cab?.configured ? '<button class="btn" type="button" data-m="off">Отключить</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Проверить и сохранить</button>${cab?.configured ? '<button class="btn" type="button" data-m="off">Отключить</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
   root.querySelector('#c-url').focus();
   const save = async (url, key) => {
     const btn = root.querySelector('button[type=submit]');
@@ -153,10 +149,8 @@ function openCabinetSettings() {
     renderCabinetBox();
   };
   root.addEventListener('click', e => {
-    if (e.target === root || e.target.dataset.m === 'cancel') close();
     if (e.target.dataset.m === 'off') save('', '');
   });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); save(root.querySelector('#c-url').value.trim(), root.querySelector('#c-key').value.trim()); });
 }
 

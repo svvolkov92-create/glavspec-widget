@@ -299,16 +299,12 @@ const partyStamp = inn => (partySeen && partySeen.inn === inn ? { regCheckedAt: 
 // The team's key — the GIP enters it once, it stays on the server.
 function openPartyKey() {
   const has = partyOn();
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="pk-title" novalidate><h2 id="pk-title">Реквизиты по ИНН</h2>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="pk-title" novalidate><h2 id="pk-title">Реквизиты по ИНН</h2>
     <p class="hint">Название, полное наименование, КПП, ОГРН, адрес и руководитель подтягиваются из ЕГРЮЛ и ЕГРИП через сервис DaData. Зарегистрируйтесь на dadata.ru (бесплатный тариф — до 10 000 запросов в день), в личном кабинете скопируйте «API-ключ» и вставьте сюда.</p>
     <p class="hint">Ключ хранится только на Сервере Пульта — на компьютеры и телефоны сотрудников он не попадает; в DaData уходит только ИНН. Работает у всех, кому открыты контрагенты.</p>
     <div class="f"><label for="pk-key">API-ключ DaData</label><input id="pk-key" type="password" autocomplete="off" maxlength="80" placeholder="${has ? 'сохранён — оставьте пустым, чтобы не менять' : '40 латинских букв и цифр'}"></div>
     <p class="neg" id="pk-err"></p>
-    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button>${api.openDadata ? '<button class="btn ghostbtn" type="button" data-m="site">Открыть dadata.ru</button>' : ''}${has ? '<button class="btn" type="button" data-m="off">Удалить ключ</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button>${api.openDadata ? '<button class="btn ghostbtn" type="button" data-m="site">Открыть dadata.ru</button>' : ''}${has ? '<button class="btn" type="button" data-m="off">Удалить ключ</button>' : ''}<button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
   root.querySelector('#pk-key').focus();
   const save = async k => {
     const r = await api.serverCall('partyKeySet', k);
@@ -320,11 +316,9 @@ function openPartyKey() {
     if (state.tab === 'orgs') renderNow();
   };
   root.addEventListener('click', e => {
-    if (e.target === root || e.target.dataset.m === 'cancel') close();
     if (e.target.dataset.m === 'off') save('');
     if (e.target.dataset.m === 'site') api.openDadata();
   });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('form').addEventListener('submit', e => { e.preventDefault(); e.stopPropagation(); const k = root.querySelector('#pk-key').value.trim(); if (!k && has) return close(); if (!k) { root.querySelector('#pk-err').textContent = 'Вставьте ключ.'; return; } save(k); });
 }
 

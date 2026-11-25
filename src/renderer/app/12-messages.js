@@ -27,7 +27,6 @@ function chatPeople(c) {
 }
 const msgUnread = c => { const me = state.me?.id, seen = c.seen?.[me] || ''; return (c.messages || []).filter(m => m.userId !== me && m.ts > seen); };
 const msgMentions = c => msgUnread(c).filter(m => (m.mentions || []).includes(state.me?.id));
-const lastTs = c => (c.messages || []).at(-1)?.ts || '';
 function msgTotals() {
   let n = 0, at = 0;
   for (const th of msgThreads()) { n += th.unread; at += th.at; }

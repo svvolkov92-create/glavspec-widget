@@ -1,5 +1,4 @@
 /* ---------- 4.1.1: «Мой день» (item 48) — what is mine today, per role; every row is a button ---------- */
-const inScope = t => A.isGip(state.me) || hasOwner(t, state.me?.id) || executorOf(t)?.u?.id === state.me?.id || A.isChief(state.me);
 function myCards() { const me = state.me?.id; return tasksArr().filter(t => ACTIVE.has(t.status) && (t.ownerId === me || executorOf(t)?.u?.id === me || hasOwner(t, me))); }
 function dayDocs() {
   const out = [];

@@ -63,17 +63,12 @@ function expertiseBlock(p) {
 
 function askCycle(p) {
   const ex = exOf(p), no = ex.cycles.length + 1;
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="exc-t" novalidate><h2 id="exc-t">Цикл экспертизы ${no}</h2>
+  const { root, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="exc-t" novalidate><h2 id="exc-t">Цикл экспертизы ${no}</h2>
     <div class="fgrid"><div class="f"><label for="exc-date">Замечания получены</label><input id="exc-date" type="date" value="${esc(state.today)}"></div>
       <div class="f"><label for="exc-due">Ответить экспертизе до</label><input id="exc-due" type="date" value="${esc(addDays(state.today, 10))}"></div></div>
     <p class="hint">Срок ответа станет сроком новых замечаний — у каждого его можно поменять.</p>
-    <div class="modal-f"><button class="btn primary" type="submit">Завести цикл</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
+    <div class="modal-f"><button class="btn primary" type="submit">Завести цикл</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+  const q = s => root.querySelector(s);
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const id = newId();
@@ -92,10 +87,8 @@ function askRemark(p, rid = '') {
   const marks = projectMarks(p.id);
   const rvis = rviRows(p).filter(x => x.r.rvi);
   const people = liveUsers().slice().sort(byName);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
   const dis = edit ? '' : ' disabled';
-  root.innerHTML = `<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exr-t" novalidate><h2 id="exr-t">${was ? `Замечание ${esc(r.n)}` : 'Новое замечание'} <span class="hint">цикл ${esc(c.no)}</span></h2>
+  const { root, close } = openModal(`<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exr-t" novalidate><h2 id="exr-t">${was ? `Замечание ${esc(r.n)}` : 'Новое замечание'} <span class="hint">цикл ${esc(c.no)}</span></h2>
     <div class="fgrid"><div class="f"><label for="exr-n">№ у экспертизы</label><input id="exr-n" value="${esc(r.n)}" maxlength="12"${dis}></div>
       <div class="f"><label for="exr-mark">Раздел</label><input id="exr-mark" value="${esc(r.mark)}" list="exr-marks" maxlength="20" placeholder="КЖ"${dis}><datalist id="exr-marks">${marks.map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>
       <div class="f wide"><label class="req" for="exr-text">Замечание</label><textarea id="exr-text" rows="3" maxlength="4000"${dis}>${esc(r.text)}</textarea></div>
@@ -105,16 +98,13 @@ function askRemark(p, rid = '') {
       <div class="f"><label for="exr-rvi">Изменение (РВИ)</label><select id="exr-rvi"${dis}><option value="">—</option>${rvis.map(({ t, r: x }) => `<option value="${x.rvi}"${Number(r.rvi) === x.rvi ? ' selected' : ''}>${rviNo(x.rvi)} · ${esc(marksText(t))}</option>`).join('')}</select></div>
       <div class="f wide"><label for="exr-ans">Ответ</label><textarea id="exr-ans" rows="3" maxlength="4000" placeholder="Что исправлено и где: том, листы"${dis}>${esc(r.answer || '')}</textarea></div></div>
     <div class="err" id="exr-err" hidden></div>
-    <div class="modal-f">${edit ? `<button class="btn primary" type="submit">Сохранить</button>` : ''}<button class="btn" type="button" data-m="cancel">${edit ? 'Отмена' : 'Закрыть'}</button>${was && edit ? '<span class="spacer"></span><button class="btn ghostbtn" type="button" data-m="del">Удалить</button>' : ''}</div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
+    <div class="modal-f">${edit ? `<button class="btn primary" type="submit">Сохранить</button>` : ''}<button class="btn" type="button" data-m="cancel">${edit ? 'Отмена' : 'Закрыть'}</button>${was && edit ? '<span class="spacer"></span><button class="btn ghostbtn" type="button" data-m="del">Удалить</button>' : ''}</div></form>`);
+  const q = s => root.querySelector(s);
   // A mark typed: the owner of that section's card answers by default.
   q('#exr-mark').addEventListener('change', () => { if (!q('#exr-owner').value) { const o = exOwnerFor(p.id, q('#exr-mark').value); if (o) q('#exr-owner').value = o; } });
   (was ? q('#exr-ans') : q('#exr-text')).focus();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.addEventListener('click', async e => {
     const m = e.target.dataset.m;
-    if (e.target === root || m === 'cancel') close();
     if (m === 'del' && await exSave(p, x => { const cc = x.cycles.find(y => y.id === c.id); cc.remarks = cc.remarks.filter(y => y.id !== r.id); }, `Замечание ${r.n} удалено`)) close();
   });
   q('form').addEventListener('submit', async e => {
@@ -147,20 +137,15 @@ function askPaste(p) {
   const c = exCycleOf(p);
   if (!c) return;
   const marks = projectMarks(p.id), startN = c.remarks.reduce((m, r) => Math.max(m, parseInt(r.n, 10) || 0), 0) + 1;
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exp-t" novalidate><h2 id="exp-t">Замечания списком · цикл ${esc(c.no)}</h2>
+  const { root, close } = openModal(`<form class="modal ex-modal" role="dialog" aria-modal="true" aria-labelledby="exp-t" novalidate><h2 id="exp-t">Замечания списком · цикл ${esc(c.no)}</h2>
     <p class="hint">По строке на замечание. В начале строки можно номер и раздел: «14. КЖ: Не представлен расчёт…». Отвечает — ответственный карточки раздела, срок — срок цикла.</p>
     <textarea id="exp-text" rows="10" maxlength="60000" placeholder="1. АР: Уточнить отметку входа\n2. КЖ: Не представлен расчёт плиты на продавливание"></textarea>
     <p class="hint" id="exp-sum"></p>
-    <div class="modal-f"><button class="btn primary" type="submit">Добавить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
-  document.body.append(root);
-  const q = s => root.querySelector(s), close = () => root.remove();
+    <div class="modal-f"><button class="btn primary" type="submit">Добавить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+  const q = s => root.querySelector(s);
   const rows = () => parseRemarks(q('#exp-text').value, marks, startN);
   q('#exp-text').addEventListener('input', () => { const r = rows(); q('#exp-sum').textContent = r.length ? `Замечаний: ${r.length}${r.some(x => x.mark) ? `, с разделом: ${r.filter(x => x.mark).length}` : ''}` : ''; });
   q('#exp-text').focus();
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
   q('form').addEventListener('submit', async e => {
     e.preventDefault(); e.stopPropagation();
     const list = rows();

@@ -285,10 +285,9 @@ document.addEventListener('input', e => {
   if (t.id === 'jr-q') { state.journal.q = t.value; const pos = t.selectionStart; renderJournal(); const n = $('#jr-q'); n.focus(); n.setSelectionRange(pos, pos); return; }
   if (t.id === 'msg-text') { msg.drafts[msg.chatId] = t.value; msgAutocomplete(t); return; }
   if (t.id === 'mc-title') { msg.newTitle = t.value; return; }
-  if (t.name === 'mark' || t.id === 't-marks-extra') { onMarksChanged(); return; }
-  if (t.id === 't-owner') { execPickersRefresh(); applyMarksFilter(); return; }
+  if (t.id === 't-marks-extra') { onMarksChanged(); return; }
+  if (t.id === 't-owner') { execPickersRefresh(); return; }
   if (t.id === 'exec-fit') { saveLocal('execFit', t.checked); for (const box of $$('#dform .exec-pick')) if (!box.querySelector('.ep-list').hidden) epRender(box, true); return; }
-  if (t.id === 'mk-search') { applyMarksFilter(); return; }
   if (t.id === 't-ready-r') { $('#t-ready').value = t.value; return; }
   if (t.id === 't-ready') { $('#t-ready-r').value = t.value; return; }
   if (t.id === 'gq-project' || t.id === 'gq-mark') { state.ganttFilter[t.id === 'gq-project' ? 'project' : 'mark'] = t.value; renderNow(); return; }

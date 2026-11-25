@@ -1,0 +1,223 @@
+/* =================== 3.0: new header, stamp, direction marks, people =================== */
+.drag { -webkit-app-region: drag }
+.drag-fill { flex: 1; align-self: stretch; min-width: 12px }
+.kico { width: 13px; height: 13px; flex: none; vertical-align: -2px }
+.kico.big { width: 18px; height: 18px }
+.kicons { display: inline-flex; gap: 2px; margin-right: 4px; vertical-align: -2px }
+.code[class*=" k-"] { border-left-width: 3px }
+.code.k-el { border-left-color: #E8820C }
+.code.k-ss { border-left-color: #2E8B57 }
+.code.k-water { border-left-color: #1D6FD1 }
+.code.k-sewer { border-left-color: #8B5A2B }
+.code.k-ov { border-left-color: #D23C2C }
+.code.k-ar { border-left-color: #7A4FB0 }
+.code.k-kr { border-left-color: #4A5A68 }
+.code.k-pos { border-left-color: #B07A00 }
+.code .kico { width: 11px; height: 11px }
+
+/* header: attention button, «Окно» menu, create menu */
+.att-wrap { flex: none }
+.att-btn { appearance: none; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; cursor: pointer; background: var(--glass); color: var(--ink) }
+.att-btn b { font-weight: 700 }
+.att-btn.tone-bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); color: var(--bad); background: var(--bad-soft) }
+.att-btn.tone-warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); color: var(--warn); background: var(--warn-soft) }
+.att-btn.tone-ok { color: var(--ok); background: var(--ok-soft); border-color: transparent }
+.att-btn .caret, .win-btn .caret, #btn-file .caret, #btn-create .caret { width: 12px; height: 12px; flex: none }
+.att-menu { left: 0; right: auto; width: 300px }
+.att-menu .ccount { font: inherit; border-radius: 6px; padding: 7px 8px; gap: 10px; align-items: center }
+.att-n { min-width: 30px; text-align: center; border-radius: 999px; padding: 3px 6px; font-size: 12px; font-weight: 600 }
+.win-btn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; color: var(--muted); font-size: 12.5px }
+.view-menu { right: 0 }
+.vm-toggles { gap: 2px }
+.vm-tg { appearance: none; display: flex; align-items: center; gap: 8px; border: 1px solid transparent; background: none; border-radius: 6px; padding: 6px 8px; cursor: pointer; text-align: left; color: var(--ink); font-size: 13px }
+.vm-tg svg { width: 16px; height: 16px; flex: none; color: var(--muted) }
+.vm-tg:hover { background: color-mix(in srgb, var(--accent) 8%, transparent) }
+.vm-tg[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent) }
+.vm-tg[aria-pressed="true"] svg { color: var(--accent) }
+.vm-tg kbd { font: 11px var(--f-mono); color: var(--muted); margin-left: 4px }
+.view-menu .alpha { padding: 0 }
+.view-menu .alpha input { width: 100% }
+.compact .att-wrap, .compact .win-btn .lbl { display: none }
+.file-menu, .create-menu { right: 0 }
+.file-menu { max-height: min(80vh, 640px); overflow-y: auto }
+.menu .menu-h { padding: 10px 8px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em }
+.menu button.dim { opacity: .55 }
+.fmt-p { background: #b42318 }
+/* 4.12.1: moving a menu item — it rides under the pointer, the others slide aside */
+body.tab-moving, body.tab-moving * { cursor: grabbing !important; user-select: none }
+body.tab-moving #tabs .tab { transition: transform .16s cubic-bezier(.2, .7, .3, 1) }
+#tabs .tab.dragging { transition: none !important; position: relative; z-index: 3; background: var(--surface); box-shadow: 0 6px 18px rgba(20, 24, 33, .22); border-radius: 8px; opacity: .97 }
+th[data-col] { cursor: grab }
+th.dragging { opacity: .45 }
+th.drop-ok { box-shadow: inset 3px 0 0 var(--accent) }
+.cols-wrap .cols-menu { width: 300px; padding: 8px 10px; gap: 2px }
+.cols-menu .cols-row { padding: 2px 0 }
+.nav-left #btn-create > svg.caret { margin-left: auto; transform: rotate(-90deg) }
+.nav-mini #btn-create > svg.caret { display: none }
+.nav-left .adds .btn#btn-create > .ico { display: block }
+
+/* closable hints and «?» */
+.tip { display: flex; gap: 8px; align-items: flex-start; color: var(--muted); font-size: 12.5px; background: color-mix(in srgb, var(--accent) 5%, transparent); border: 1px dashed color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 8px; padding: 6px 8px 6px 10px }
+.tip > span { flex: 1 }
+.tip.inline { display: inline-flex; padding: 2px 4px 2px 8px; background: none; border: 0 }
+.tip-x { appearance: none; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 12px; line-height: 1.4 }
+.tip-x:hover { color: var(--ink) }
+.panel > .tip { margin: 8px 12px 0 }
+.help-dot { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 600; cursor: help; flex: none }
+
+/* one-row filter bars */
+.filters.one-row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px }
+.filters.one-row select { flex: 0 1 auto; min-width: 110px; max-width: 200px }
+.filters.one-row input[type="search"] { min-width: 180px }
+.gantt-bar.one-row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin }
+.gantt-bar.one-row .sm-sel { max-width: 160px }
+.preset-sel { font-weight: 500 }
+.proj-top { display: flex; align-items: center; gap: 8px; justify-content: space-between }
+.stage-bar .btn.on, .g-mode .btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); text-shadow: none }
+
+/* drawer «Дополнительно» */
+details.more { border: 1px solid var(--line); border-radius: 8px; padding: 0 10px }
+details.more > summary { cursor: pointer; padding: 7px 0; color: var(--muted); font-size: 12.5px; list-style: none }
+details.more > summary::before { content: "▸ "; }
+details.more[open] > summary::before { content: "▾ "; }
+details.more[open] { padding-bottom: 10px }
+.status-ro { display: flex; align-items: center; min-height: 30px }
+.f.grow { flex: 1 }
+
+/* the card header as a drawing title block */
+.stamp { border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 96%, var(--accent)); }
+.st-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); margin: 10px 16px 0; border: 1.5px solid var(--ink) }
+.st-c { display: grid; gap: 2px; align-content: start; padding: 4px 8px 5px; border-right: 1px solid color-mix(in srgb, var(--ink) 35%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--ink) 35%, transparent); min-width: 0 }
+.st-k { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted) }
+.st-v { font-size: 12.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis }
+.st-obj { grid-column: span 3 }
+.st-obj .st-v { font-weight: 600; white-space: nowrap }
+.st-mark { grid-column: span 3 }
+.st-mark .code { font-size: 15px; padding: 3px 7px }
+.st-mark .marks { max-width: none }
+.st-stage { grid-column: span 2; border-right: 0 }
+.st-owner, .st-contr, .st-status { grid-column: span 2 }
+.st-rev { border-right: 0 }
+.st-v .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis }
+.st-grid > .st-c:nth-last-child(-n+5) { border-bottom: 0 }
+.st-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 16px }
+.st-acts .qa-in { flex: 1; min-width: 200px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--glass) }
+.st-acts .spacer { margin-left: auto }
+
+
+/* revisions */
+.rev-list { display: grid; gap: 6px; margin-bottom: 6px }
+.rev-row { display: grid; grid-template-columns: auto auto 150px 80px 1fr auto; gap: 8px; align-items: center }
+.rev-row input { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--glass); min-width: 0 }
+.rev-no { display: inline-flex; align-items: center; gap: 4px; font-weight: 600 }
+.rev-no input { width: 46px; text-align: center }
+
+/* project stage and goal */
+.chip.stage::before { border-radius: 1px }
+.pcode { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px }
+.goal { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px }
+.goal-bar { width: 64px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--line) 80%, transparent); overflow: hidden }
+.goal-bar i { display: block; height: 100%; background: var(--accent) }
+.goal.done .goal-bar i { background: var(--ok) }
+.goal.done b { color: var(--ok) }
+.goal-flag { color: var(--ok); font-size: 13px }
+
+/* thanks */
+.thanks-row { margin-top: 4px }
+.thanks-btn { appearance: none; border: 1px solid var(--line); background: none; border-radius: 999px; padding: 1px 9px; font-size: 11.5px; color: var(--muted); cursor: pointer }
+.thanks-btn:hover { border-color: #d0457a; color: #d0457a }
+.thanks-btn.on { border-color: #d0457a; background: color-mix(in srgb, #d0457a 12%, transparent); color: #b83266 }
+.thanks-n { font-size: 11.5px; color: #b83266 }
+.stat.game .v { color: var(--ok) }
+
+/* people: tighter cards (пометка 3), list mode, contractor groups (пометка 7) */
+.card-h { padding: 8px 10px; gap: 2px }
+.card-h h3 { font-size: 14px }
+.card-h .row1 { align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 4px 6px }
+.card-h .row1 h3 { margin-right: auto; min-width: 0 }
+.game-line { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 4px 10px; font-size: 12px; border-bottom: 1px solid var(--line); color: var(--ok) }
+.game-line b { font-weight: 700 }
+.people-h { flex-wrap: wrap }
+.people-h .tip.inline { flex: 1 1 260px; min-width: 0 }
+.vac .tl-name { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; min-width: 0 }
+.vac .tl-name b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.vac .tl-name .btn { flex: none; padding: 0 6px }
+.contacts { gap: 0; margin-top: 2px }
+.contact { font-size: 12.5px; line-height: 1.3 }
+.contact .btn.sm { padding: 1px 6px; font-size: 11px }
+.stats { grid-template-columns: 1fr 1fr 1fr 1.4fr }
+.stat { padding: 5px 8px; gap: 0 }
+.stat .v { font-size: 14px }
+.ctask { padding: 5px 10px; gap: 1px 10px }
+.cards { gap: 10px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) }
+.staff-t td { padding-top: 5px; padding-bottom: 5px }
+.staff-t td b { font-weight: 600 }
+.co-groups { display: grid; gap: 8px }
+.co-group .co-gh { appearance: none; width: 100%; background: none; border: 0; border-bottom: 1px solid var(--line); cursor: pointer; text-align: left; color: inherit; font: inherit }
+.co-group.folded .co-gh { border-bottom: 0 }
+.co-list { display: grid }
+.co-row { border-bottom: 1px solid var(--line) }
+.co-row:last-child { border-bottom: 0 }
+.co-line { appearance: none; width: 100%; display: grid; grid-template-columns: 18px auto minmax(140px, 1.2fr) minmax(80px, 1fr) 90px 90px 140px 110px; gap: 8px; align-items: center; padding: 5px 12px; border: 0; background: none; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px }
+.co-line:hover { background: color-mix(in srgb, var(--accent) 6%, transparent) }
+.co-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600 }
+.co-spec { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.co-n { font-size: 12px; white-space: nowrap }
+.co-n.r { text-align: right }
+.co-body { padding: 0 12px 10px 34px }
+.co-body .card { max-width: 640px }
+.co-body .fold { display: none }
+.co-row.drop-ok, .co-row:has(.drop-ok) { outline: 2px dashed var(--accent); outline-offset: -2px }
+@media (max-width: 1000px) { .co-line { grid-template-columns: 18px auto 1fr auto auto } .co-spec, .co-rel, .co-n.r { display: none } }
+
+/* vacation chart */
+.vac-bar { position: absolute; top: 5px; height: 18px; border-radius: 4px; font-size: 10.5px; line-height: 18px; padding: 0 5px; overflow: hidden; white-space: nowrap; color: #5C3D00;
+  background: repeating-linear-gradient(135deg, #F5EBD3, #F5EBD3 5px, #EFDDB4 5px, #EFDDB4 10px); border: 1px solid #C9A24A }
+.vac-bar.k-sick { color: #7a1d14; background: repeating-linear-gradient(135deg, #F7E3E0, #F7E3E0 5px, #F0CFCA 5px, #F0CFCA 10px); border-color: #D78F86 }
+.vac-bar.k-other { color: var(--idle); background: var(--idle-soft); border-color: var(--line) }
+.vac-hit { position: absolute; top: 2px; bottom: 2px; width: 3px; margin-left: -1px; background: var(--bad); border-radius: 2px }
+.vac-hit.legend { position: static; display: inline-block; height: 12px; vertical-align: middle }
+.vac-cell { position: absolute; top: 4px; height: 16px; font: 600 10px/16px var(--f-mono); text-align: center; color: #5C3D00; border-radius: 2px }
+.vac-cell.v1 { background: #F5EBD3 } .vac-cell.v2 { background: #EFD9A8 } .vac-cell.v3 { background: #E7C47A; color: #3d2900 } .vac-cell.v4 { background: #D99A1E; color: #fff }
+.vac-key { display: inline-block; width: 18px; height: 10px; border-radius: 2px; vertical-align: middle; border: 1px solid #C9A24A; background: #F5EBD3 }
+.vac-key.k-sick { background: #F7E3E0; border-color: #D78F86 } .vac-key.k-other { background: var(--idle-soft); border-color: var(--line) }
+.vac-sum .tl-name b { font-size: 12px }
+.tl-name .kicons { margin-right: 2px }
+
+.ol, .fl { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle }
+.fl { border-radius: 2px; width: 14px }
+.op-list { display: grid; gap: 4px; margin: 8px 0; max-height: 50vh; overflow: auto }
+.op-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: none; text-align: left; font: inherit; color: inherit }
+.op-row .linkbtn { display: inline-flex; gap: 6px; align-items: center; flex: 1; min-width: 0 }
+.modal h2 .kicons { vertical-align: 0 }
+
+/* compact widget */
+.cw { display: grid; gap: 8px }
+.cw-head { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 2px 0 }
+.cw-head b { font-size: 14px }
+.cw-g { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--surface) calc(var(--alpha) * 100%), transparent) }
+.cw-g h4 { margin: 0; display: flex; justify-content: space-between; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; padding: 5px 10px; border-bottom: 1px solid var(--line); background: none; font-weight: 600 }
+.cw-g h4:not([class]) { color: var(--muted) }
+.cw-row { appearance: none; width: 100%; display: flex; align-items: center; gap: 6px; padding: 5px 10px; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); background: none; cursor: pointer; text-align: left; color: inherit; font: inherit; font-size: 12.5px }
+.cw-row:last-child { border-bottom: 0 }
+.cw-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent) }
+.cw-row .marks { flex: none; max-width: 130px; flex-wrap: nowrap; overflow: hidden }
+.cw-p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted) }
+.cw-goal .cw-p { color: var(--ink) }
+.cw-d { flex: none; font-size: 11.5px }
+.cw-more { padding: 4px 10px }
+
+/* «Графит»: the third style — dark graphite paper with blueprint accents */
+:root[data-theme="graphite"] {
+  --bg: #1b1f22; --surface: #23282c; --sunk: #2a3035; --ink: #e9ece6; --muted: #a3aca7; --line: #3a4247;
+  --accent: #7fb0ff; --accent-ink: #12161a; --accent-soft: #23324a;
+  --ok: #6fd3a0; --ok-soft: #1c3329; --warn: #f2bd5a; --warn-soft: #3a2f17;
+  --bad: #ff7d6e; --bad-soft: #42221f; --review: #c3a8ff; --review-soft: #2f2742; --idle: #a3aca7; --idle-soft: #2c3236;
+  --halo: rgba(0, 0, 0, .65); --shadow: 0 12px 40px rgba(0, 0, 0, .6);
+  color-scheme: dark;
+}
+:root[data-theme="graphite"] .shell { background-image: linear-gradient(color-mix(in srgb, var(--line) 35%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--line) 35%, transparent) 1px, transparent 1px); background-size: 24px 24px }
+:root[data-theme="graphite"] .code { border-color: #c9d1cc; color: #f1f3ef }
+:root[data-theme="graphite"] .stamp { background: color-mix(in srgb, var(--surface) 90%, var(--accent)) }
+:root[data-theme="graphite"] .st-grid { border-color: #c9d1cc }
+

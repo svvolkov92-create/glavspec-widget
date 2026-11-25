@@ -157,10 +157,8 @@ function askTimeline(p) {
   let phases = L.defaultPhases().map(d => { const was = (p.phases || []).find(x => x.key === d.key); return { ...d, ...(was || {}), ...(!was?.start && was?.chain === undefined && ['expertise', 'r'].includes(d.key) ? { chain: true } : {}) }; });
   const shown = () => phases.map((ph, i) => ({ ph, i })).filter(x => gip || x.ph.key !== 'contract');
   return new Promise(resolve => {
-    const root = document.createElement('div');
-    root.className = 'modal-back';
     const msRow = (m, i) => `<div class="tq-ms" data-i="${i}"><input class="tq-ms-t" value="${esc(m.title || '')}" placeholder="Например: выдача ТУ, оплата аванса, сдача сметы" maxlength="120"><input class="tq-ms-d" type="date" value="${esc(m.date || '')}"><button class="btn ghostbtn sm" type="button" data-m="ms-del" aria-label="Убрать">✕</button></div>`;
-    root.innerHTML = `<form class="modal tq-modal" role="dialog" aria-modal="true" aria-labelledby="tltitle" novalidate><h2 id="tltitle">Сроки по договору · ${esc(p.name || '')}</h2>
+    const { root, close } = openModal(`<form class="modal tq-modal" role="dialog" aria-modal="true" aria-labelledby="tltitle" novalidate><h2 id="tltitle">Сроки по договору · ${esc(p.name || '')}</h2>
       <p class="hint">По этим срокам программа расставит предварительные даты разделов по волнам техкарты и сроки заданий смежникам. Можно заполнить потом: кнопка «Сроки» на странице проекта.</p>
       <div id="tq-phases"></div>
       <div class="tq-mode"><span class="lbl">Рабочая документация</span>
@@ -169,8 +167,7 @@ function askTimeline(p) {
         <span class="hint" id="tq-hint"></span></div>
       <div class="tq-ms-box"><span class="lbl">Иные сроки по договору</span><div id="tq-ms">${ms.map(msRow).join('')}</div><button class="btn sm" type="button" data-m="ms-add">+ срок</button></div>
       <div class="err" id="tq-err" hidden></div>
-      <div class="modal-f"><button class="btn primary" type="submit">Сохранить сроки</button><button class="btn" type="button" data-m="cancel">Заполню потом</button></div></form>`;
-    document.body.append(root);
+      <div class="modal-f"><button class="btn primary" type="submit">Сохранить сроки</button><button class="btn" type="button" data-m="cancel">Заполню потом</button></div></form>`, { onClose: resolve, dismissed: false });
     const q = sel => root.querySelector(sel);
     const draw = () => {
       const list = shown();
@@ -187,7 +184,6 @@ function askTimeline(p) {
       phases = L.planPhases(phases);
       q('#tq-hint').textContent = m === 'parallel' ? 'Р стартует сразу после П; замечания экспертизы правятся в обоих.' : 'Р стартует после положительного заключения.';
     };
-    const close = r => { root.remove(); resolve(r); };
     root.addEventListener('input', e => { const k = e.target.dataset.ph?.split('.'); if (k) { const x = phases[Number(k[0])]; x[k[1]] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; } });
     root.addEventListener('change', e => {
       const k = e.target.dataset.ph?.split('.');
@@ -196,11 +192,9 @@ function askTimeline(p) {
     });
     root.addEventListener('click', e => {
       const m = e.target.dataset.m;
-      if (e.target === root || m === 'cancel') close(false);
       if (m === 'ms-add') { q('#tq-ms').insertAdjacentHTML('beforeend', msRow({}, Date.now())); q('#tq-ms .tq-ms:last-child .tq-ms-t').focus(); }
       if (m === 'ms-del') e.target.closest('.tq-ms').remove();
     });
-    root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } });
     mode(); draw();
     q('[data-ph$=".start"]')?.focus();
     q('form').addEventListener('submit', async e => {
