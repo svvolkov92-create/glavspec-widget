@@ -513,6 +513,27 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await js(([id]) => window.__emit('toast:action', 'open|task:' + id), [tid]); await wait(500);
     check('4.4: «Открыть» from the notification opens the card', await js(([id]) => window.AppBridge.state.drawer?.kind === 'task' && window.AppBridge.state.drawer.id === id, [tid]));
     await js(() => document.querySelector('#dform [data-act="discard"]')?.click()); await wait(200);
+    // 4.12.2: a personal message and an @ mention reach Windows notifications (window not in front); «Открыть» → the chat.
+    {
+      const me = await js(() => window.AppBridge.state.me.id);
+      const other = await js(m => [...window.AppBridge.state.users.values()].find(u => u.id !== m && u.role !== 'specialist')?.id, me);
+      await js(() => { window.__win.focused = false; });
+      const n0 = sysCalls.length;
+      await js(o => window.api.switchUser(o), other); await wait(400);
+      const dm = await js(m => window.api.chatDirect(m), me);
+      const dmId = dm.id || dm.chatId || dm.chat?.id;
+      await js(([id]) => window.api.chatSend(id, 'Глянь чертёж КР-3, пожалуйста'), [dmId]); await wait(200);
+      const meSurname = await js(m => window.AppBridge.state.users.get(m).name.replace(/^Пример:\s*/, '').split(/\s+/)[0], me);
+      const grp = await js(([m, o]) => window.api.chatCreate({ title: 'Проверка упоминаний', members: [m, o] }), [me, other]);
+      await js(([id, t]) => window.api.chatSend(id, t), [grp.id, `@${meSurname} нужен ответ по сроку`]); await wait(200);
+      await js(m => window.api.switchUser(m), me); await wait(800);
+      const got = sysCalls.slice(n0).filter(c => c.startsWith('toast:'));
+      check('4.12.2: personal and @ messages → a Windows notification with «Открыть»', got.some(c => c.startsWith('toast:msgs:') && c.includes('Глянь чертёж') && c.includes('@') && c.includes('Проверка упоминаний')), got.join(' | ') + ' ' + JSON.stringify(dm));
+      await js(() => { window.__win.focused = true; });
+      await js(([id]) => window.__emit('toast:action', 'open|chat:' + id), [dmId]); await wait(500);
+      check('4.12.2: «Открыть» from the notification opens the chat', await js(([id]) => !!document.querySelector('.msg-panel') && (document.querySelector('.msg-panel')?.textContent || '').includes('Глянь чертёж'), [dmId]));
+      await js(() => document.querySelector('.msg-panel [data-act="msg-close"]')?.click()); await wait(300);
+    }
     // 41: Ctrl+Alt+N from another program
     const pr = await js(() => { const p = [...window.AppBridge.state.projects.values()].find(x => !x.archived && x.code); return p && { id: p.id, code: p.code }; });
     const hidesBefore = await js(() => window.__win.calls.filter(c => c === 'hide').length);

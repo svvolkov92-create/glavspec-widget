@@ -66,7 +66,7 @@ function renderNow() {
   const active = document.activeElement?.id, caret = document.activeElement?.selectionStart;
   if (SOLO?.kind === 'tray') { app.innerHTML = viewTrayPanel(); return; }
   if (!SOLO && state.me) api.setBadge?.(badgeCount()); // 4.1.1 (34): the number over the taskbar icon
-  if (!SOLO && state.me) needsMeNotify();
+  if (!SOLO && state.me) { needsMeNotify(); chatToastNotify(); }
   if (!SOLO && state.me && !tour) maybeStartTour();
   if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
   if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5

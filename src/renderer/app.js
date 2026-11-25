@@ -434,7 +434,7 @@ function renderNow() {
   const active = document.activeElement?.id, caret = document.activeElement?.selectionStart;
   if (SOLO?.kind === 'tray') { app.innerHTML = viewTrayPanel(); return; }
   if (!SOLO && state.me) api.setBadge?.(badgeCount()); // 4.1.1 (34): the number over the taskbar icon
-  if (!SOLO && state.me) needsMeNotify();
+  if (!SOLO && state.me) { needsMeNotify(); chatToastNotify(); }
   if (!SOLO && state.me && !tour) maybeStartTour();
   if (state.win.compact) { app.innerHTML = viewCompact(); renderMsg(); renderFocus(); return; }
   if (state.tab === 'team') { state.tab = 'people'; peopleMode = 'tree'; } // «Команда» merged into «Исполнители» in 2.5
@@ -2691,6 +2691,22 @@ function msgAcPick(i) {
 }
 // A fresh mention of me since the last data: a toast that opens that chat.
 let mentionSeenTs = null;
+// 4.12.2: personal messages and those where I was tagged (@) go to Windows notifications too — when the window is
+// not in front (notifyMe decides), with «Открыть» leading to the chat. The first run only takes the mark.
+function chatToastNotify() {
+  const me = state.me?.id;
+  if (!me || SOLO) return;
+  const key = 'chatToast.' + me, mark = loadLocal(key, '');
+  const hits = chatsAll().flatMap(c => msgUnread(c).filter(m => m.ts > mark && (c.kind === 'direct' || (m.mentions || []).includes(me))).map(m => ({ c, m })))
+    .sort((a, b) => a.m.ts.localeCompare(b.m.ts));
+  const top = hits.at(-1)?.m.ts || '';
+  if (!mark) { saveLocal(key, top || new Date().toISOString()); return; }
+  if (!hits.length) return;
+  saveLocal(key, top);
+  const one = ({ c, m }) => (c.kind === 'direct' ? `${m.user || chatTitle(c)}: ${m.text}` : `@ ${m.user || ''} в «${chatTitle(c)}»: ${m.text}`).replace(/\s+/g, ' ').slice(0, 160);
+  const chats = [...new Set(hits.map(h => h.c.id))];
+  api.notifyMe?.(hits.length === 1 ? one(hits[0]) : `Сообщения (${hits.length}): ${hits.slice(-3).map(one).join('; ')}`.slice(0, 240), chats.length === 1 ? `chat:${chats[0]}` : 'msgs');
+}
 function msgNotify() {
   const me = state.me?.id;
   if (!me) return;
@@ -8295,8 +8311,12 @@ function quickEntry(o = {}) {
 }
 // 36: «Открыть» in a Windows notification: «task:<id>», «day» (several things), «chat:<id>».
 function openTarget(target) {
-  const [kind, id] = String(target || '').split(':');
+  const s = String(target || ''), i = s.indexOf(':'), kind = i < 0 ? s : s.slice(0, i), id = i < 0 ? '' : s.slice(i + 1);
   if (state.win.compact) { api.setCompact(false); state.win.compact = false; }
+  // 4.12.2: a chat, a customer's messages, the messenger.
+  if (kind === 'chat') return msgOpen(chatById(id) ? id : '');
+  if (kind === 'cust') return msgOpen(custMsgs(id).length ? 'c:' + id : '');
+  if (kind === 'msgs') return msgOpen('');
   if (kind === 'task' && state.tasks.has(id)) return openTask(id);
   if (kind === 'project' && state.projects.has(id)) return openProjectPage(id);
   state.tab = 'day'; saveLocal('tab', 'day'); renderNow();

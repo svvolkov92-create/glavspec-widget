@@ -79,7 +79,8 @@
       if (mine.length && !quiet) {
         const urgent = mine.find(m => m.kind === 'urgent');
         const m = urgent || mine[0];
-        deps.notify(mine.length === 1 ? `${KINDS[m.kind]} — ${m.projectName}: ${m.text.slice(0, 120)}` : `От заказчиков: ${mine.length} новых сообщения${urgent ? ', есть горящий вопрос' : ''}.`);
+        deps.notify(mine.length === 1 ? `${KINDS[m.kind]} — ${m.projectName}: ${m.text.slice(0, 120)}` : `От заказчиков: ${mine.length} новых сообщения${urgent ? ', есть горящий вопрос' : ''}.`,
+          new Set(mine.map(x => x.projectId)).size === 1 ? `cust:${m.projectId}` : 'msgs'); // «Открыть» → the customer's messages
       }
       return { ok: true, fresh: mine.length };
     } catch (e) {

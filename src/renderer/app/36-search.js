@@ -175,8 +175,12 @@ function quickEntry(o = {}) {
 }
 // 36: «Открыть» in a Windows notification: «task:<id>», «day» (several things), «chat:<id>».
 function openTarget(target) {
-  const [kind, id] = String(target || '').split(':');
+  const s = String(target || ''), i = s.indexOf(':'), kind = i < 0 ? s : s.slice(0, i), id = i < 0 ? '' : s.slice(i + 1);
   if (state.win.compact) { api.setCompact(false); state.win.compact = false; }
+  // 4.12.2: a chat, a customer's messages, the messenger.
+  if (kind === 'chat') return msgOpen(chatById(id) ? id : '');
+  if (kind === 'cust') return msgOpen(custMsgs(id).length ? 'c:' + id : '');
+  if (kind === 'msgs') return msgOpen('');
   if (kind === 'task' && state.tasks.has(id)) return openTask(id);
   if (kind === 'project' && state.projects.has(id)) return openProjectPage(id);
   state.tab = 'day'; saveLocal('tab', 'day'); renderNow();

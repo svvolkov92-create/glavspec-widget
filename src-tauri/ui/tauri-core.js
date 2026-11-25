@@ -164,7 +164,7 @@
       store, settings, A: window.Access, L: window.Logic, cabinet, files, keyStore, local,
       R: { pageModel, normalizeUrl, isLocalHost, KINDS },
       currentUser: () => core.currentUser(), userView: () => core.userView(),
-      notify: text => window.PultQuiet.send(text), openExternal: url => invoke('open_url', { url }).catch(e => console.error(e)),
+      notify: (text, target = '') => window.PultQuiet.send(text, target), openExternal: url => invoke('open_url', { url }).catch(e => console.error(e)),
       changed: () => onCabinet(),
     });
     const view = rules.view;
@@ -326,7 +326,7 @@
           const ids = new Set(v.messages.map(m => m.id));
           if (seenMsgs) {
             const fresh = v.messages.filter(m => !seenMsgs.has(m.id) && !m.read);
-            if (fresh.length) window.PultQuiet.send(fresh.length === 1 ? `${fresh[0].projectName}: ${String(fresh[0].text || '').slice(0, 120)}` : `От заказчиков: ${fresh.length} новых сообщения`);
+            if (fresh.length) window.PultQuiet.send(fresh.length === 1 ? `Заказчик — ${fresh[0].projectName}: ${String(fresh[0].text || '').slice(0, 120)}` : `От заказчиков: ${fresh.length} новых сообщения`, new Set(fresh.map(x => x.projectId)).size === 1 ? `cust:${fresh[0].projectId}` : 'msgs');
           }
           seenMsgs = ids;
         }
@@ -349,7 +349,7 @@
     };
     return ctx;
   }
-  const APP_VERSION = '4.12.1';
+  const APP_VERSION = '4.12.2';
   // Sign in / join / move the base (no ctx yet, or switching from the local file).
   const server = {
     async signIn({ url, login, password, code }) {

@@ -409,6 +409,22 @@ function msgAcPick(i) {
 }
 // A fresh mention of me since the last data: a toast that opens that chat.
 let mentionSeenTs = null;
+// 4.12.2: personal messages and those where I was tagged (@) go to Windows notifications too — when the window is
+// not in front (notifyMe decides), with «Открыть» leading to the chat. The first run only takes the mark.
+function chatToastNotify() {
+  const me = state.me?.id;
+  if (!me || SOLO) return;
+  const key = 'chatToast.' + me, mark = loadLocal(key, '');
+  const hits = chatsAll().flatMap(c => msgUnread(c).filter(m => m.ts > mark && (c.kind === 'direct' || (m.mentions || []).includes(me))).map(m => ({ c, m })))
+    .sort((a, b) => a.m.ts.localeCompare(b.m.ts));
+  const top = hits.at(-1)?.m.ts || '';
+  if (!mark) { saveLocal(key, top || new Date().toISOString()); return; }
+  if (!hits.length) return;
+  saveLocal(key, top);
+  const one = ({ c, m }) => (c.kind === 'direct' ? `${m.user || chatTitle(c)}: ${m.text}` : `@ ${m.user || ''} в «${chatTitle(c)}»: ${m.text}`).replace(/\s+/g, ' ').slice(0, 160);
+  const chats = [...new Set(hits.map(h => h.c.id))];
+  api.notifyMe?.(hits.length === 1 ? one(hits[0]) : `Сообщения (${hits.length}): ${hits.slice(-3).map(one).join('; ')}`.slice(0, 240), chats.length === 1 ? `chat:${chats[0]}` : 'msgs');
+}
 function msgNotify() {
   const me = state.me?.id;
   if (!me) return;
