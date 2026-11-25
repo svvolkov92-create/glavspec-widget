@@ -134,21 +134,32 @@ function renderMilestones() {
   if (isSpec()) $$('#ms-box input:not([data-k="done"])').forEach(el => { el.disabled = true; });
 }
 
+// 4.14: РВИ — every change of a section (a revision of its card) gets a through number in the project.
+function nextRvi(pid, extra = []) {
+  let max = 0;
+  for (const t of state.tasks.values()) if (t.projectId === pid && !t.deletedAt) for (const r of t.revisions || []) max = Math.max(max, Number(r.rvi) || 0);
+  for (const r of extra) max = Math.max(max, Number(r.rvi) || 0);
+  return max + 1;
+}
+const rviNo = n => `РВИ-${String(n).padStart(2, '0')}`;
 function renderRevisions() {
   const box = $('#rev-box');
   if (!box || !state.draft) return;
   const list = state.draft.revisions;
   box.innerHTML = list.length ? `<div class="rev-list">${list.map((r, i) => `<div class="rev-row">
       <span class="rev-no">Изм.&nbsp;<input data-rev="${i}" data-k="no" value="${esc(r.no)}" maxlength="6" aria-label="Номер изменения" inputmode="numeric"></span>
+      <span class="chip ${r.rvi ? 'tone-work' : 'tone-idle'} rev-rvi" title="Номер РВИ — сквозной по проекту, выдаётся сам">${r.rvi ? `РВИ-${String(r.rvi).padStart(2, '0')}` : 'без РВИ'}</span>
       <input type="date" data-rev="${i}" data-k="date" value="${esc(r.date || '')}" aria-label="Дата изменения">
-      <input data-rev="${i}" data-k="note" value="${esc(r.note || '')}" placeholder="Что изменено и почему" maxlength="200" aria-label="Содержание изменения">
+      <input class="rev-sheets" data-rev="${i}" data-k="sheets" value="${esc(r.sheets || '')}" placeholder="листы" maxlength="60" aria-label="Листы">
+      <input data-rev="${i}" data-k="note" value="${esc(r.note || '')}" placeholder="Что изменено и почему (основание)" maxlength="200" aria-label="Содержание изменения">
       <button class="btn ghostbtn sm" data-act="rev-del" data-i="${i}" type="button" aria-label="Удалить">✕</button></div>`).join('')}</div>`
     : '<div class="hint">Изменений не было — выпуск первоначальный.</div>';
 }
 function addRevision() {
   const list = state.draft.revisions;
   const next = list.reduce((m, r) => Math.max(m, parseInt(r.no, 10) || 0), 0) + 1;
-  list.push({ id: newId(), no: String(next), date: todayStr(), note: '' });
+  const t = state.tasks.get(state.drawer?.id), pid = $('#dform [name="projectId"]')?.value || t?.projectId || '';
+  list.push({ id: newId(), no: String(next), rvi: nextRvi(pid, list), date: todayStr(), note: '', by: state.me?.id || '' });
   renderRevisions();
   $$('#rev-box [data-k="note"]').at(-1)?.focus();
 }
@@ -159,7 +170,7 @@ function cleanRevisions() {
     if (!no && !note) continue;
     if (!no) return { error: 'Укажите номер изменения.' };
     if (r.date && !isDate(r.date)) return { error: 'Проверьте даты изменений.' };
-    out.push({ id: r.id || newId(), no, date: r.date || todayStr(), note });
+    out.push({ id: r.id || newId(), no, date: r.date || todayStr(), note, ...(r.rvi ? { rvi: Number(r.rvi) } : {}), ...(String(r.sheets || '').trim() ? { sheets: String(r.sheets).trim().slice(0, 60) } : {}), ...(r.by ? { by: r.by } : {}) });
   }
   return { list: out };
 }

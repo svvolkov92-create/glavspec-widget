@@ -1961,7 +1961,7 @@ function viewProjectPage(p) {
     <button class="btn ghostbtn sm" type="button" data-act="techcard" title="Этапы, волны, задания смежникам">Техкарта</button>
     ${canEdit ? `<button class="btn sm" type="button" data-act="project-timeline" data-id="${esc(p.id)}">Сроки</button><button class="btn sm" type="button" data-act="assign-board" data-id="${esc(p.id)}">Назначить исполнителей</button><button class="btn sm" type="button" data-act="ask-customer" data-id="${esc(p.id)}" title="ТУ, письма, согласования, решения — заказчик увидит в «Нужно от вас»">Запросить у заказчика</button>${A.canChat(state.me, p) ? (() => { const c = chatById(projectChatId(p.id)), n = c ? msgUnread(c).length : 0; return `<button class="btn sm" type="button" data-act="msg-project" data-id="${esc(p.id)}">Чат проекта${n ? ` <span class="cnt bad">${n}</span>` : ''}</button>`; })() : ''}<button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="comp">Состав проекта</button><button class="btn sm" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="cust">Для заказчика</button><button class="btn sm" type="button" data-act="open-project" data-id="${esc(p.id)}">Изменить</button>` : ''}</div>`;
   const noComp = !comp ? `<section class="panel"><div class="empty-in"><p>Состав проекта ещё не сформирован. Генератор предложит разделы по ПП РФ № 87 и рабочую документацию к ним; каждый раздел станет задачей.</p>${canEdit ? `<button class="btn primary" type="button" data-act="open-project-tab" data-id="${esc(p.id)}" data-tab="comp">Открыть генератор состава</button>` : ''}</div></section>` : '';
-  return `<div class="pt-page">${head}${summary}${people}${noComp}${pdHtml}${rdHtml}${otherHtml}${irdBlock(p)}${surveysBlock(p)}${lettersBlock(p)}</div>`;
+  return `<div class="pt-page">${head}${summary}${people}${noComp}${pdHtml}${rdHtml}${otherHtml}${irdBlock(p)}${surveysBlock(p)}${rviBlock(p)}${lettersBlock(p)}</div>`;
 }
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
@@ -2956,10 +2956,68 @@ async function mailLetter(l) {
   else if ((l.files || []).length) toast('Вложения добавьте в письме вручную: почтовая ссылка не умеет прикладывать файлы.');
 }
 
+/* ---------- 4.14: РВИ — the project's changes in one list; numbers are given by the program ---------- */
+const rviRows = p => [...state.tasks.values()].filter(t => t.projectId === p.id && !t.deletedAt)
+  .flatMap(t => (t.revisions || []).map(r => ({ t, r }))).sort((a, b) => (Number(b.r.rvi) || 0) - (Number(a.r.rvi) || 0) || String(b.r.date).localeCompare(String(a.r.date)));
+let rviFilter = {};
+function rviBlock(p) {
+  const all = rviRows(p), edit = A.canEditTaskFields(state.me) && !p.archived;
+  if (!all.length && !edit) return '';
+  const marks = [...new Set(all.flatMap(x => sectionsOf(x.t)))].sort();
+  const f = rviFilter[p.id] || '', list = f ? all.filter(x => sectionsOf(x.t).includes(f)) : all;
+  const by = r => state.users.get(r.by)?.name || '';
+  const body = `<div class="let"><div class="let-bar">${marks.length > 1 ? `<select class="rvi-f" data-rvi-filter="${esc(p.id)}" aria-label="Раздел"><option value="">Все разделы</option>${marks.map(m => `<option value="${esc(m)}"${m === f ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}<span class="spacer"></span>
+      ${all.length ? `<button class="btn ghostbtn sm" type="button" data-act="rvi-copy" data-id="${esc(p.id)}" title="Скопировать таблицу — вставьте в Excel">Скопировать для Excel</button>` : ''}${edit ? `<button class="btn primary sm" type="button" data-act="rvi-new" data-id="${esc(p.id)}">＋ Новое изменение</button>` : ''}</div>
+    ${list.length ? `<table class="let-t rvi-t"><thead><tr><th>№ РВИ</th><th>Раздел</th><th>Изм.</th><th>Листы</th><th>Что изменено и почему</th><th>Кто</th><th>Дата</th></tr></thead><tbody>${list.map(({ t, r }) => `<tr>
+      <td class="num"><b>${r.rvi ? rviNo(r.rvi) : '<span class="hint">без №</span>'}</b></td><td>${marksHtml(t)}</td><td class="num">${esc(r.no)}</td><td class="num">${esc(r.sheets || '—')}</td>
+      <td>${esc(r.note || '')}</td><td>${esc(by(r))}</td><td class="num">${fmtDate(r.date)}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="hint let-empty">Изменений пока нет. «Новое изменение» выдаст номер РВИ и запишет изменение в карточку раздела (поле «Изм.»).</p>'}</div>`;
+  return auxBlock('rv:' + p.id, 'Изменения (РВИ)', `<span class="meta">${all.length}</span>`, body);
+}
+function rviTsv(p) {
+  const rows = rviRows(p).map(({ t, r }) => [r.rvi ? rviNo(r.rvi) : '', marksText(t), r.no, r.sheets || '', r.note || '', state.users.get(r.by)?.name || '', fmtDate(r.date)]);
+  return [['№ РВИ', 'Раздел', 'Изм.', 'Листы', 'Что изменено и почему', 'Кто', 'Дата'], ...rows].map(r => r.map(c => String(c).replace(/[\t\n]+/g, ' ')).join('\t')).join('\n');
+}
+// «Новое изменение»: pick the section's card, the sheets and the reason — the number of the change in the card and the
+// through РВИ number are given here.
+function askRvi(p) {
+  const cards = [...state.tasks.values()].filter(t => t.projectId === p.id && !t.deletedAt && sectionsOf(t).length).sort((a, b) => marksText(a).localeCompare(marksText(b), 'ru'));
+  if (!cards.length) return toast('В проекте нет карточек разделов — изменение не к чему привязать.', true);
+  const n = nextRvi(p.id);
+  const root = document.createElement('div');
+  root.className = 'modal-back';
+  root.innerHTML = `<form class="modal" role="dialog" aria-modal="true" aria-labelledby="rvi-t" novalidate><h2 id="rvi-t">Новое изменение <span class="rvi-big">${rviNo(n)}</span></h2>
+    <div class="fgrid"><div class="f wide"><label for="rvi-card">Раздел</label><select id="rvi-card">${cards.map(t => `<option value="${esc(t.id)}">${esc(marksText(t))}${t.title ? ' · ' + esc(t.title) : ''}</option>`).join('')}</select></div>
+      <div class="f"><label for="rvi-sheets">Листы</label><input id="rvi-sheets" maxlength="60" placeholder="3, 5, 12"></div>
+      <div class="f"><label for="rvi-date">Дата</label><input id="rvi-date" type="date" value="${esc(state.today)}"></div>
+      <div class="f wide"><label class="req" for="rvi-note">Что изменено и почему</label><input id="rvi-note" maxlength="200" placeholder="Замечание экспертизы № 14: армирование плиты"></div></div>
+    <p class="hint" id="rvi-hint"></p><div class="err" id="rvi-err" hidden></div>
+    <div class="modal-f"><button class="btn primary" type="submit">Выдать номер</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
+  document.body.append(root);
+  const q = s => root.querySelector(s);
+  const hint = () => { const t = state.tasks.get(q('#rvi-card').value), next = (t.revisions || []).reduce((m, r) => Math.max(m, parseInt(r.no, 10) || 0), 0) + 1; q('#rvi-hint').textContent = `В карточке «${marksText(t)}» будет «Изм. ${next}».`; return next; };
+  hint();
+  q('#rvi-card').addEventListener('change', hint);
+  q('#rvi-note').focus();
+  const close = () => root.remove();
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
+  q('form').addEventListener('submit', async e => {
+    e.preventDefault(); e.stopPropagation();
+    const note = q('#rvi-note').value.trim(), date = isDate(q('#rvi-date').value) ? q('#rvi-date').value : state.today;
+    if (!note) { q('#rvi-err').textContent = 'Напишите, что изменено и почему.'; q('#rvi-err').hidden = false; q('#rvi-note').classList.add('field-bad'); return q('#rvi-note').focus(); }
+    const t = state.tasks.get(q('#rvi-card').value), no = hint(), rvi = nextRvi(p.id);
+    const rev = { id: newId(), no: String(no), rvi, date, note, by: state.me?.id || '', ...(q('#rvi-sheets').value.trim() ? { sheets: q('#rvi-sheets').value.trim() } : {}) };
+    if (await write(op.update('tasks', t.id, { revisions: [...(t.revisions || []), rev] }), `${rviNo(rvi)}: ${marksText(t)}, изм. ${no}`)) close();
+  });
+}
+
 const initials = name => String(name || '').replace(/^Пример:\s*/, '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
+  'rvi-new': ({ id }) => { const p = state.projects.get(id); if (p) askRvi(p); },
+  'rvi-copy': ({ id }) => { const p = state.projects.get(id); if (p) navigator.clipboard.writeText(rviTsv(p)).then(() => toast('Таблица изменений скопирована — вставьте в Excel (Ctrl+V).'), () => toast('Не удалось скопировать.', true)); },
   'ird-folder': ({ el }) => { irdOpen[el.dataset.id] = el.dataset.v; renderNow(); },
   'ird-upload': ({ el }) => { const pid = el.dataset.id, folder = el.closest('.ird')?.querySelector('[data-ird-folder]')?.dataset.irdFolder || 'other'; api.attachAdd(pid).then(r => irdAdd(pid, [r], folder)); },
   'sv-upload': ({ el }) => { const pid = el.dataset.id, folder = el.dataset.folder; api.attachAdd(pid).then(r => irdAdd(pid, [r], folder)); },
@@ -6183,21 +6241,32 @@ function renderMilestones() {
   if (isSpec()) $$('#ms-box input:not([data-k="done"])').forEach(el => { el.disabled = true; });
 }
 
+// 4.14: РВИ — every change of a section (a revision of its card) gets a through number in the project.
+function nextRvi(pid, extra = []) {
+  let max = 0;
+  for (const t of state.tasks.values()) if (t.projectId === pid && !t.deletedAt) for (const r of t.revisions || []) max = Math.max(max, Number(r.rvi) || 0);
+  for (const r of extra) max = Math.max(max, Number(r.rvi) || 0);
+  return max + 1;
+}
+const rviNo = n => `РВИ-${String(n).padStart(2, '0')}`;
 function renderRevisions() {
   const box = $('#rev-box');
   if (!box || !state.draft) return;
   const list = state.draft.revisions;
   box.innerHTML = list.length ? `<div class="rev-list">${list.map((r, i) => `<div class="rev-row">
       <span class="rev-no">Изм.&nbsp;<input data-rev="${i}" data-k="no" value="${esc(r.no)}" maxlength="6" aria-label="Номер изменения" inputmode="numeric"></span>
+      <span class="chip ${r.rvi ? 'tone-work' : 'tone-idle'} rev-rvi" title="Номер РВИ — сквозной по проекту, выдаётся сам">${r.rvi ? `РВИ-${String(r.rvi).padStart(2, '0')}` : 'без РВИ'}</span>
       <input type="date" data-rev="${i}" data-k="date" value="${esc(r.date || '')}" aria-label="Дата изменения">
-      <input data-rev="${i}" data-k="note" value="${esc(r.note || '')}" placeholder="Что изменено и почему" maxlength="200" aria-label="Содержание изменения">
+      <input class="rev-sheets" data-rev="${i}" data-k="sheets" value="${esc(r.sheets || '')}" placeholder="листы" maxlength="60" aria-label="Листы">
+      <input data-rev="${i}" data-k="note" value="${esc(r.note || '')}" placeholder="Что изменено и почему (основание)" maxlength="200" aria-label="Содержание изменения">
       <button class="btn ghostbtn sm" data-act="rev-del" data-i="${i}" type="button" aria-label="Удалить">✕</button></div>`).join('')}</div>`
     : '<div class="hint">Изменений не было — выпуск первоначальный.</div>';
 }
 function addRevision() {
   const list = state.draft.revisions;
   const next = list.reduce((m, r) => Math.max(m, parseInt(r.no, 10) || 0), 0) + 1;
-  list.push({ id: newId(), no: String(next), date: todayStr(), note: '' });
+  const t = state.tasks.get(state.drawer?.id), pid = $('#dform [name="projectId"]')?.value || t?.projectId || '';
+  list.push({ id: newId(), no: String(next), rvi: nextRvi(pid, list), date: todayStr(), note: '', by: state.me?.id || '' });
   renderRevisions();
   $$('#rev-box [data-k="note"]').at(-1)?.focus();
 }
@@ -6208,7 +6277,7 @@ function cleanRevisions() {
     if (!no && !note) continue;
     if (!no) return { error: 'Укажите номер изменения.' };
     if (r.date && !isDate(r.date)) return { error: 'Проверьте даты изменений.' };
-    out.push({ id: r.id || newId(), no, date: r.date || todayStr(), note });
+    out.push({ id: r.id || newId(), no, date: r.date || todayStr(), note, ...(r.rvi ? { rvi: Number(r.rvi) } : {}), ...(String(r.sheets || '').trim() ? { sheets: String(r.sheets).trim().slice(0, 60) } : {}), ...(r.by ? { by: r.by } : {}) });
   }
   return { list: out };
 }
@@ -8738,6 +8807,7 @@ document.addEventListener('change', e => {
     if (['mark', 'on', 'tom', 'code', 'pdId'].includes(k)) { const y = $('#dform .drawer-b')?.scrollTop; renderComposition(); if (y != null) $('#dform .drawer-b').scrollTop = y; }
     return;
   }
+  if (t.dataset.rviFilter !== undefined) { rviFilter[t.dataset.rviFilter] = t.value; renderNow(); return; }
   if (t.dataset.ird) { irdPatch(t.dataset.pid, t.dataset.fid, { [t.dataset.ird]: t.value }); return; }
   if (t.dataset.sv) { surveyPatch(t.dataset.pid, t.dataset.k, { [t.dataset.sv]: t.dataset.sv === 'on' ? t.checked : t.value.trim() }); return; }
   if (t.dataset.pd && /^docs\.\d+\.(kind|issued)$/.test(t.dataset.pd)) {

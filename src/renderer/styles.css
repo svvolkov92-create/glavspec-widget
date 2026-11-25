@@ -1017,7 +1017,7 @@ details.more[open] { padding-bottom: 10px }
 
 /* revisions */
 .rev-list { display: grid; gap: 6px; margin-bottom: 6px }
-.rev-row { display: grid; grid-template-columns: auto 150px 1fr auto; gap: 8px; align-items: center }
+.rev-row { display: grid; grid-template-columns: auto auto 150px 80px 1fr auto; gap: 8px; align-items: center }
 .rev-row input { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--glass); min-width: 0 }
 .rev-no { display: inline-flex; align-items: center; gap: 4px; font-weight: 600 }
 .rev-no input { width: 46px; text-align: center }
@@ -2005,3 +2005,8 @@ html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
 .sub[data-cs="ird"] .pd-t select[data-pd$=".status"] { min-width: 132px }
 .sub[data-cs="ird"] .pd-t select[data-pd$=".kind"] { min-width: 96px }
 .sub[data-cs="ird"] .pd-t td.grow input { min-width: 190px }
+/* 4.14: РВИ */
+.rev-rvi { white-space: nowrap; font-size: 11px }
+.rev-sheets { width: 80px }
+.rvi-big { color: var(--accent); margin-left: 6px }
+.rvi-f { max-width: 180px }
