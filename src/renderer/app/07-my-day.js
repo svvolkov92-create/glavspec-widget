@@ -34,7 +34,7 @@ function viewDay() {
     ...overdue.slice(0, 6).map(t => row(isDate(t.finish) ? `сорван ${dayNum(state.today) - dayNum(t.finish)} дн.` : 'срок сорван', 'bad', t)),
     ...(review.length ? [`<div class="day-row"><span class="chip tone-review">на проверке</span><span>${review.length} ${plural(review.length, 'карточка ждёт', 'карточки ждут', 'карточек ждут')} вашего решения</span><span class="spacer"></span><button class="btn primary sm" type="button" data-act="review-queue">Проверить ${review.length > 1 ? 'все ' + review.length : ''}</button></div>`] : []),
     ...week.slice(0, 6).map(t => row(`срок ${fmtDate(t.finish).slice(0, 5)}`, 'warn', t)),
-    ...docs.slice(0, 4).map(({ p, d, left }) => `<div class="day-row"><span class="chip tone-${left < 0 ? 'bad' : 'warn'}">${left < 0 ? 'документ истёк' : `истекает через ${left} дн.`}</span><button class="linkbtn day-t" type="button" data-act="goto-project" data-id="${esc(p.id)}">${esc(d.title)}<span class="hint"> — ${esc(p.name)}</span></button></div>`),
+    ...docs.slice(0, 4).map(({ p, d, left }) => `<div class="day-row"><span class="chip tone-${left < 0 ? 'bad' : 'warn'}">${left < 0 ? 'документ истёк' : `истекает через ${left} дн.`}</span><button class="linkbtn day-t" type="button" data-act="goto-project" data-id="${esc(p.id)}">${esc(d.title)}<span class="hint"> — ${esc(p.name)}</span></button>${A.canManageCatalog(state.me) && d.id ? (docLetter(p, d.id) ? `<span class="chip tone-work">${esc(letterNo(docLetter(p, d.id)))}</span>` : `<button class="btn ghostbtn sm" type="button" data-act="doc-renew-day" data-id="${esc(p.id)}" data-doc="${esc(d.id)}" title="Письмо на продление по шаблону">✉ Запросить</button>`) : ''}</div>`),
   ];
   const todo = [
     ...working.map(t => row(STATUSES[t.status].label.toLowerCase(), 'work', t, `<button class="btn sm${focus?.taskId === t.id ? ' on' : ''}" type="button" data-act="${focus?.taskId === t.id ? 'focus-stop' : 'focus-start'}" data-id="${esc(t.id)}">${focus?.taskId === t.id ? 'Пауза' : '▶ Фокус'}</button>`)),
@@ -133,6 +133,7 @@ document.addEventListener('keydown', e => {
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
+  'doc-renew-day': ({ el, id }) => { const p = state.projects.get(id); docRenew(p, (p?.docs || []).find(x => x.id === el.dataset.doc)); },
   'review-queue': () => { openReviewQueue(); },
   'tp-task': ({ el, id }) => { api.windowMain?.({ kind: 'task', id: el.dataset.id }); api.hide?.(); },
   'tp-main': ({ el, id }) => { const c = [...state.chats.values()].find(x => msgUnread(x).length); api.windowMain?.(el.dataset.v === 'msg' && c ? { kind: 'chat', id: c.id } : { kind: 'main', id: el.dataset.v === 'day' ? 'day' : 'open' }); api.hide?.(); },

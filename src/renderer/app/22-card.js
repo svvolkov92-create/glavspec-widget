@@ -202,6 +202,7 @@ function taskStrip(t) {
       ${cell('Статус', `${statusChip(t)} <span class="num hint" title="Готовность">${L.readiness(t)}%</span>`, 'st-status')}
       ${cell('Изм.', rev ? `<b class="num" title="от ${fmtDate(rev.date)}${rev.note ? ': ' + esc(rev.note) : ''}">${esc(rev.no)}</b><br><span class="hint num">${fmtDate(rev.date).slice(0, 5)}</span>` : '<span class="hint">—</span>', 'st-rev')}
     </div>
+    ${(w => (w.length ? `<div class="st-wait"><span class="chip tone-bad">ждёт исходные данные</span> ${esc(irdWaitText(w))} <button class="linkbtn" type="button" data-act="goto-ird" data-id="${esc(t.projectId)}">к списку ИД</button></div>` : ''))(irdWaitOf(t))}
     <div class="st-acts" data-transient>
       ${keys.map(k => `<button class="btn sm ${k === 'accept' ? 'okbtn' : k === 'remarks' ? 'warnbtn' : k === 'submit' || k === 'start' ? 'primary' : ''}" data-act="quick" data-q="${k}" type="button">${QUICK[k].label}</button>`).join('')}
       ${keys.length ? `<input id="qa-note" class="qa-in" placeholder="${note}" maxlength="500" aria-label="Комментарий к действию">` : ''}

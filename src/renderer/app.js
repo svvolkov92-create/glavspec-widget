@@ -968,6 +968,9 @@ async function commitDates(id, patch, followers = null) {
   return write(op.update('tasks', id, { ...next, history }), `${marksText(t)}: ${fmtDate(next.start)} → ${fmtDate(next.finish)}`);
 }
 
+// 4.13: the source data a card's sections still wait for (project.ird with «нужно для разделов»).
+const irdWaitOf = t => L.irdWaiting(projectOf(t), sectionsOf(t), t.status);
+const irdWaitText = list => list.map(r => r.title).join(', ');
 /* ---------- 4.1: right click on a card (Kanban, Gantt, lists): the usual actions without opening it ---------- */
 const nextWorkDay = iso => { let d = addDays(iso, 1); for (let i = 0; i < 20 && L.Cal.dayInfo(d).off; i++) d = addDays(d, 1); return d; };
 function cardMenuHtml(t) {
@@ -1336,7 +1339,7 @@ function viewDay() {
     ...overdue.slice(0, 6).map(t => row(isDate(t.finish) ? `сорван ${dayNum(state.today) - dayNum(t.finish)} дн.` : 'срок сорван', 'bad', t)),
     ...(review.length ? [`<div class="day-row"><span class="chip tone-review">на проверке</span><span>${review.length} ${plural(review.length, 'карточка ждёт', 'карточки ждут', 'карточек ждут')} вашего решения</span><span class="spacer"></span><button class="btn primary sm" type="button" data-act="review-queue">Проверить ${review.length > 1 ? 'все ' + review.length : ''}</button></div>`] : []),
     ...week.slice(0, 6).map(t => row(`срок ${fmtDate(t.finish).slice(0, 5)}`, 'warn', t)),
-    ...docs.slice(0, 4).map(({ p, d, left }) => `<div class="day-row"><span class="chip tone-${left < 0 ? 'bad' : 'warn'}">${left < 0 ? 'документ истёк' : `истекает через ${left} дн.`}</span><button class="linkbtn day-t" type="button" data-act="goto-project" data-id="${esc(p.id)}">${esc(d.title)}<span class="hint"> — ${esc(p.name)}</span></button></div>`),
+    ...docs.slice(0, 4).map(({ p, d, left }) => `<div class="day-row"><span class="chip tone-${left < 0 ? 'bad' : 'warn'}">${left < 0 ? 'документ истёк' : `истекает через ${left} дн.`}</span><button class="linkbtn day-t" type="button" data-act="goto-project" data-id="${esc(p.id)}">${esc(d.title)}<span class="hint"> — ${esc(p.name)}</span></button>${A.canManageCatalog(state.me) && d.id ? (docLetter(p, d.id) ? `<span class="chip tone-work">${esc(letterNo(docLetter(p, d.id)))}</span>` : `<button class="btn ghostbtn sm" type="button" data-act="doc-renew-day" data-id="${esc(p.id)}" data-doc="${esc(d.id)}" title="Письмо на продление по шаблону">✉ Запросить</button>`) : ''}</div>`),
   ];
   const todo = [
     ...working.map(t => row(STATUSES[t.status].label.toLowerCase(), 'work', t, `<button class="btn sm${focus?.taskId === t.id ? ' on' : ''}" type="button" data-act="${focus?.taskId === t.id ? 'focus-stop' : 'focus-start'}" data-id="${esc(t.id)}">${focus?.taskId === t.id ? 'Пауза' : '▶ Фокус'}</button>`)),
@@ -1435,6 +1438,7 @@ document.addEventListener('keydown', e => {
 
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
+  'doc-renew-day': ({ el, id }) => { const p = state.projects.get(id); docRenew(p, (p?.docs || []).find(x => x.id === el.dataset.doc)); },
   'review-queue': () => { openReviewQueue(); },
   'tp-task': ({ el, id }) => { api.windowMain?.({ kind: 'task', id: el.dataset.id }); api.hide?.(); },
   'tp-main': ({ el, id }) => { const c = [...state.chats.values()].find(x => msgUnread(x).length); api.windowMain?.(el.dataset.v === 'msg' && c ? { kind: 'chat', id: c.id } : { kind: 'main', id: el.dataset.v === 'day' ? 'day' : 'open' }); api.hide?.(); },
@@ -2855,6 +2859,8 @@ const LETTER_TPL = {
   cover: { label: 'Сопроводительное к выдаче документации', subject: 'О направлении документации по объекту «{project}»', body: 'Направляем Вам документацию по объекту «{project}» (шифр {code}) в составе:\n1. \n\nПросим подтвердить получение.' },
   tu: { label: 'Запрос технических условий', subject: 'Запрос технических условий — «{project}»', body: 'Просим выдать технические условия на подключение объекта «{project}» ({address}) к сетям инженерно-технического обеспечения.\nНагрузки: \n\nПриложение: ' },
   ird: { label: 'Запрос исходных данных', subject: 'Запрос исходных данных — «{project}»', body: 'Для выполнения проектных работ по объекту «{project}» просим предоставить:\n1. \n\nСрок предоставления: ' },
+  // 4.13: a document runs out — ask its issuer to extend it (from «Сроки документов»).
+  renew: { label: 'Продление / актуализация документа', subject: 'О продлении срока действия: {doc}', body: 'ООО ПМ «Тандем» выполняет проектирование объекта «{project}» (шифр {code}). Срок действия документа «{doc}»{docno} истекает {until}.\n\nПросим продлить срок его действия либо выдать актуализированный документ. Без действующего документа проектная документация не может быть передана в экспертизу.' },
   remarks: { label: 'Ответ на замечания', subject: 'Ответ на замечания по объекту «{project}»', body: 'На Ваше письмо № ___ от ___ сообщаем:\n1. Замечание: \n   Ответ: \n\nИсправленная документация прилагается.' },
 };
 const LETTER_STATUS = { in: { new: ['work', 'зарегистрировано'], answer: ['warn', 'нужен ответ'], done: ['ok', 'отработано'] }, out: { draft: ['idle', 'черновик'], sent: ['ok', 'отправлено'] } };
@@ -2881,13 +2887,19 @@ function lettersBlock(p) {
       : `<p class="hint let-empty">${v === 'in' ? 'Входящих пока нет.' : v === 'out' ? 'Исходящих пока нет.' : 'Писем по проекту пока нет. Номера присваиваются сами, сквозные за год.'}</p>`}</div>`;
   return auxBlock('pl:' + p.id, 'Письма', `<span class="meta">${all.length}${waiting ? ` · <span class="neg">ждут ответа ${waiting}</span>` : ''}</span>`, body);
 }
-function fillTpl(text, p) {
-  return String(text || '').replace(/\{project\}/g, p.name || '').replace(/\{code\}/g, p.code || '—').replace(/\{address\}/g, p.address || p.client || '');
+function fillTpl(text, p, x = {}) {
+  return String(text || '').replace(/\{project\}/g, p.name || '').replace(/\{code\}/g, p.code || '—').replace(/\{address\}/g, p.address || p.client || '')
+    .replace(/\{doc\}/g, x.doc || '').replace(/\{docno\}/g, x.docno || '').replace(/\{until\}/g, x.until || '');
 }
-function askLetter(p, letter = null, dir = 'out') {
+// `preset` (4.13): { tpl, corr, docId, vars } — a new letter filled from a template (e.g. «Запросить актуализацию»).
+function askLetter(p, letter = null, dir = 'out', preset = null) {
   const isNew = !letter;
   const l = letter ? clone(letter) : { id: newId(), dir, seq: nextLetterNo(dir), date: state.today, corr: dir === 'out' ? (p.client || '') : '', email: '', subject: '', body: '', status: dir === 'in' ? 'answer' : 'draft', due: dir === 'in' ? addDays(state.today, 10) : '', files: [], tpl: 'free' };
   const sig = `\n\n${A.isGip(state.me) ? 'Главный инженер проекта' : A.ROLES[state.me?.role]?.label || ''}\n${(state.me?.name || '').replace(/^Пример:\s*/, '')}`;
+  if (isNew && preset?.tpl && LETTER_TPL[preset.tpl]) {
+    const t = LETTER_TPL[preset.tpl];
+    Object.assign(l, { tpl: preset.tpl, subject: fillTpl(t.subject, p, preset.vars), body: fillTpl(t.body, p, preset.vars) + sig, ...(preset.corr !== undefined ? { corr: preset.corr } : {}), ...(preset.docId ? { docId: preset.docId } : {}) });
+  }
   const root = document.createElement('div');
   root.className = 'modal-back';
   const st = LETTER_STATUS[l.dir];
@@ -2909,7 +2921,7 @@ function askLetter(p, letter = null, dir = 'out') {
   const drawFiles = () => { const el = q('#let-flist'); if (el) el.innerHTML = (l.files || []).map((f, i) => `<span class="aq-file">${icon('file')}${esc(f.name)} <span class="hint">${fileSize(f.size)}</span><button class="btn ghostbtn sm" type="button" data-m="unf" data-i="${i}">×</button></span>`).join(''); };
   drawFiles();
   q('#let-subj').focus();
-  q('#let-tpl')?.addEventListener('change', e => { const t = LETTER_TPL[e.target.value]; l.tpl = e.target.value; if (!t) return; if (t.subject) q('#let-subj').value = fillTpl(t.subject, p); if (t.body) q('#let-body').value = fillTpl(t.body, p) + sig; });
+  q('#let-tpl')?.addEventListener('change', e => { const t = LETTER_TPL[e.target.value]; l.tpl = e.target.value; if (!t) return; if (t.subject) q('#let-subj').value = fillTpl(t.subject, p, preset?.vars); if (t.body) q('#let-body').value = fillTpl(t.body, p, preset?.vars) + sig; });
   root.addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); e.stopPropagation(); } }, true);
   root.addEventListener('drop', async e => {
     const files = [...(e.dataTransfer?.files || [])]; if (!files.length) return;
@@ -4321,13 +4333,13 @@ function viewGantt() {
       const ms = L.milestonesOf(t, state.today).list.filter(m => isDate(m.date) && inRange(m.date))
         .map(m => `<span class="tq-ms ${m.done ? 'done' : m.date < state.today ? 'bad' : ''}" style="left:${pos(m.date) + dayW / 2}%;top:${lane * 26 + 8}px" title="КТ «${esc(m.title)}» ${fmtDate(m.date)}${m.done ? ' — выполнена' : ''}"></span>`).join('');
       const blocked = L.dependencyIssues(t, state.tasks, state.today).length > 0;
-      const noexec = !executorOf(t);
+      const noexec = !executorOf(t), wait = irdWaitOf(t);
       const awayHit = absHits(t).some(h => h.onFinish);
       const cp = crit ? cpOf(t.projectId) : null, isCrit = cp?.critical.has(t.id), fl = cp?.float.get(t.id);
-      const bar = right > left ? `<button class="tl-bar tone-${tone} ${isCrit ? 'crit' : ''} ${pos(s) < 0 ? 'cut-l' : ''} ${pos(planEnd) + dayW > 100 ? 'cut-r' : ''} ${blocked ? 'blocked' : ''} ${noexec ? 'noexec' : ''} ${awayHit ? 'away' : ''}" type="button"
+      const bar = right > left ? `<button class="tl-bar tone-${tone} ${isCrit ? 'crit' : ''} ${pos(s) < 0 ? 'cut-l' : ''} ${pos(planEnd) + dayW > 100 ? 'cut-r' : ''} ${blocked ? 'blocked' : ''} ${noexec ? 'noexec' : ''} ${wait.length ? 'waitid' : ''} ${awayHit ? 'away' : ''}" type="button"
         data-act="open-task" data-id="${esc(t.id)}" data-bar="${esc(t.id)}"
         style="left:${left}%;width:${Math.max(0.5, right - left)}%;top:${lane * 26 + 3}px"
-        title="${esc(label)}\n${fmtDate(t.start)} → ${fmtDate(t.finish)} · ${esc(tm.text)}${awayHit ? '\nФиниш приходится на отсутствие: ' + esc(absHits(t).filter(h => h.onFinish).map(A.absenceText).join('; ')) : ''}\nТяните — сдвинуть работу, края — изменить старт или финиш">${isCrit ? '<span class="tl-cp" title="Критический путь: задержка сдвинет сдачу проекта">КП</span>' : ''}${noexec ? NOEXEC_ICON : ''}${esc(label)}${crit && !isCrit && fl > 0 ? `<span class="tl-float">запас ${fl} дн.</span>` : ''}</button>` : '';
+        title="${esc(label)}\n${fmtDate(t.start)} → ${fmtDate(t.finish)} · ${esc(tm.text)}${wait.length ? '\nЖдёт исходные данные: ' + esc(irdWaitText(wait)) : ''}${awayHit ? '\nФиниш приходится на отсутствие: ' + esc(absHits(t).filter(h => h.onFinish).map(A.absenceText).join('; ')) : ''}\nТяните — сдвинуть работу, края — изменить старт или финиш">${isCrit ? '<span class="tl-cp" title="Критический путь: задержка сдвинет сдачу проекта">КП</span>' : ''}${noexec ? NOEXEC_ICON : ''}${esc(label)}${crit && !isCrit && fl > 0 ? `<span class="tl-float">запас ${fl} дн.</span>` : ''}</button>` : '';
       return bar + ext + ms;
     }).join('');
     // Staff rows: vacation / sick leave as a hatched band over the row.
@@ -4640,9 +4652,10 @@ function kanbanCard(t) {
   const due = L.paymentPlan(t, state.today).dueNow;
   const msLate = L.milestonesOf(t, state.today).overdue.length;
   const flags = v.flags && ((due > 0 && canMoney()) || msLate);
+  const wait = irdWaitOf(t);
   return `<article class="kb-card ${c ? '' : 'noexec'} ${tm.overdue ? 'late' : ''}" draggable="true" data-kb-id="${esc(t.id)}" data-act="open-task" data-id="${esc(t.id)}" role="button" tabindex="0"
       title="${esc(p?.name || '')}${t.title ? ' · ' + esc(t.title) : ''}\n${c ? '' : 'Исполнитель не назначен. '}Перетащите карточку в другую колонку, чтобы сменить статус">
-    <div class="kb-top">${marksHtml(t)}${tm.overdue ? '<span class="chip tone-bad">срок сорван</span>' : ''}</div>
+    <div class="kb-top">${marksHtml(t)}${tm.overdue ? '<span class="chip tone-bad">срок сорван</span>' : ''}${wait.length ? `<span class="chip tone-warn kb-wait" title="Ждёт исходные данные: ${esc(irdWaitText(wait))}">ждёт ИД</span>` : ''}</div>
     ${v.proj ? `<div class="kb-proj">${esc(p?.name || '—')}${t.title ? ` · ${esc(t.title)}` : ''}</div>` : ''}
     ${v.who ? `<div class="kb-who">${c ? execLine(t) : '<b class="kb-noexec">нет исполнителя</b>'}</div>` : ''}
     ${v.due ? `<div class="kb-foot"><span class="due ${tm.cls}">${esc(tm.text)}</span><span class="num hint">${fmtDate(t.finish)}</span></div>` : ''}
@@ -5251,6 +5264,7 @@ function taskStrip(t) {
       ${cell('Статус', `${statusChip(t)} <span class="num hint" title="Готовность">${L.readiness(t)}%</span>`, 'st-status')}
       ${cell('Изм.', rev ? `<b class="num" title="от ${fmtDate(rev.date)}${rev.note ? ': ' + esc(rev.note) : ''}">${esc(rev.no)}</b><br><span class="hint num">${fmtDate(rev.date).slice(0, 5)}</span>` : '<span class="hint">—</span>', 'st-rev')}
     </div>
+    ${(w => (w.length ? `<div class="st-wait"><span class="chip tone-bad">ждёт исходные данные</span> ${esc(irdWaitText(w))} <button class="linkbtn" type="button" data-act="goto-ird" data-id="${esc(t.projectId)}">к списку ИД</button></div>` : ''))(irdWaitOf(t))}
     <div class="st-acts" data-transient>
       ${keys.map(k => `<button class="btn sm ${k === 'accept' ? 'okbtn' : k === 'remarks' ? 'warnbtn' : k === 'submit' || k === 'start' ? 'primary' : ''}" data-act="quick" data-q="${k}" type="button">${QUICK[k].label}</button>`).join('')}
       ${keys.length ? `<input id="qa-note" class="qa-in" placeholder="${note}" maxlength="500" aria-label="Комментарий к действию">` : ''}
@@ -6787,7 +6801,7 @@ function projectDraftData() {
     docs: keep(d.docs, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), kind: x.kind || L.docKindOf(x.title), no: String(x.no || '').trim(), issued: x.issued || '', until: x.until || '', remind: Math.max(0, Math.min(730, parseInt(x.remind, 10) || 60)) })),
     protocol: { no: String(d.protocol.no || '').trim(), date: d.protocol.date || '', items: keep(d.protocol.items, 'text').map(i => ({ id: i.id || newId(), text: i.text.trim(), who: i.who === 'customer' ? 'customer' : 'us', status: PROTO_STATUS.some(s => s[0] === i.status) ? i.status : 'work', pct: Math.max(0, Math.min(100, parseInt(i.pct, 10) || 0)), due: i.due || '' })) },
     advice: { title: (d.advice.title || '').trim(), text: (d.advice.text || '').trim() }, show: d.show, contactId: d.contactId, composition: d.composition,
-    ird: keep(d.ird, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), kind: IRD_KINDS.some(k => k[0] === x.kind) ? x.kind : irdKindOf(x.title), who: String(x.who || '').trim(), status: IRD_STATUS.some(s => s[0] === x.status) ? x.status : 'plan', due: x.due || '', note: String(x.note || '').trim() })),
+    ird: keep(d.ird, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), kind: IRD_KINDS.some(k => k[0] === x.kind) ? x.kind : irdKindOf(x.title), who: String(x.who || '').trim(), status: IRD_STATUS.some(s => s[0] === x.status) ? x.status : 'plan', due: x.due || '', note: String(x.note || '').trim(), for: L.irdForList(x.for) })),
     meetings: d.meetings.filter(x => String(x.title || '').trim() || isDate(x.date)).map(x => ({ id: x.id || newId(), date: x.date || '', from: tm(x.from), to: tm(x.to), title: String(x.title || '').trim(), place: String(x.place || '').trim(), protocolNo: String(x.protocolNo || '').trim() })),
     // The customer's contract and payments: kept only from the GIP (others do not see them, so they never overwrite).
     ...(projMoney() ? {
@@ -6889,11 +6903,14 @@ function renderCustomer() {
     <div class="sub" data-cs="req"><h3>Нужно от заказчика</h3>${list('requests', (x, i) => `<td class="grow">${pdIn(`requests.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}
         <div class="req-files">${(x.files || []).map((f, k) => `<span class="aq-file"><button class="linkbtn" type="button" data-act="att-open" data-fid="${esc(f.id)}" title="Открыть">${icon('file')}${esc(f.name)}</button><button class="linkbtn" type="button" data-act="req-unattach" data-i="${i}" data-k="${k}" aria-label="Убрать файл">✕</button></span>`).join('')}<button class="linkbtn" type="button" data-act="req-attach" data-i="${i}">+ файл для согласования</button></div></td><td>${pdDate(`requests.${i}.due`, x.due)}</td><td class="grow">${pdIn(`requests.${i}.why`, x.why, 'placeholder="Зачем: без них экспертиза не примет ИОС1" maxlength="200"')}</td><td>${pdChk(`requests.${i}.done`, x.done, ' получено')}</td>`, ['Что', 'Срок', 'Зачем', ''], 'Исходные данные, решения и ответы, которые ждём от заказчика. «Получено» убирает строку со страницы.')}</div>
     <div class="sub" data-cs="ird"><h3>Исходные данные</h3><p class="hint">Что нужно для проектирования и в каком оно состоянии — вкладка «Исходные данные» у заказчика. «Запросить» ставит строку в «Нужно от вас»: заказчик отвечает прямо со страницы, ответ приходит сюда — его можно принять или вернуть с замечанием.</p>${list('ird', (x, i) => { const rq = irdRequest(x);
+        const sug = L.irdSuggestFor(x.title).join(', ');
         return `<td>${pdSel(`ird.${i}.kind`, IRD_KINDS, x.kind || irdKindOf(x.title))}</td><td class="grow">${pdIn(`ird.${i}.title`, x.title, 'placeholder="ТУ на электроснабжение 630 кВт" maxlength="160"')}</td><td>${pdIn(`ird.${i}.who`, x.who, 'placeholder="Заказчик" maxlength="60" list="ird-who"')}</td>
+        <td>${pdIn(`ird.${i}.for`, Array.isArray(x.for) ? x.for.join(', ') : (x.for || ''), `class="ird-for" placeholder="${esc(sug || 'КР, ОВ')}" maxlength="80" title="Каким разделам нужен документ: пока он не принят, карточки этих разделов помечены «ждёт ИД»"`)}</td>
         <td>${pdSel(`ird.${i}.status`, IRD_STATUS, x.status)}</td><td>${pdDate(`ird.${i}.due`, x.due)}</td><td class="grow">${pdIn(`ird.${i}.note`, x.note, 'placeholder="Примечание для заказчика" maxlength="200"')}</td>
-        <td class="nowrap">${rq ? `<span class="chip tone-work" title="${esc(rq.title)}">запрошено${rq.due ? ' до ' + fmtDate(rq.due).slice(0, 5) : ''}</span>` : ['accepted', 'done'].includes(x.status) ? '' : `<button class="btn sm" type="button" data-act="ird-request" data-i="${i}">Запросить</button>`}</td>`; }, ['Тип', 'Что нужно', 'Кто готовит', 'Статус', 'Срок', 'Примечание', ''], 'Задание на проектирование, ГПЗУ, ТУ, письма, согласования…')}
+        <td class="nowrap">${rq ? `<span class="chip tone-work" title="${esc(rq.title)}">запрошено${rq.due ? ' до ' + fmtDate(rq.due).slice(0, 5) : ''}</span>` : ['accepted', 'done'].includes(x.status) ? '' : `<button class="btn sm" type="button" data-act="ird-request" data-i="${i}">Запросить</button>`}</td>`; }, ['Тип', 'Что нужно', 'Кто готовит', 'Нужно для разделов', 'Статус', 'Срок', 'Примечание', ''], 'Задание на проектирование, ГПЗУ, ТУ, письма, согласования…')}
       <div class="row-in">${irdAskable().length ? `<button class="btn sm" type="button" data-act="ird-request-all">Запросить у заказчика всё недостающее (${irdAskable().length})</button>` : ''}${(d.requests || []).some(r => !r.done && r.title) ? '<button class="btn ghostbtn sm" type="button" data-act="ird-letter">Текст письма-запроса</button>' : ''}</div>
       <datalist id="ird-who"><option value="Заказчик"><option value="«Тандем»"><option value="Изыскатели"><option value="«Тандем» по доверенности"><option value="Заказчик и «Тандем»"></datalist>
+      ${d.ird.some(x => x.title && !L.irdForList(x.for).length && L.irdSuggestFor(x.title).length) ? '<button class="btn ghostbtn sm" type="button" data-act="ird-for-fill" title="Где «Нужно для разделов» пусто — подставить обычные разделы по названию документа">Подставить разделы</button>' : ''}
       ${Techcard.SOURCE_DATA.some(([t]) => !d.ird.some(x => x.title.trim().toLowerCase() === t.toLowerCase())) ? `<button class="btn sm" type="button" data-act="ird-techcard">${d.ird.length ? 'Дополнить по техкарте' : 'Заполнить по техкарте'}</button>` : ''}</div>
     <div class="sub" data-cs="meet"><h3>Последняя договорённость</h3><div class="row-in">Протокол № ${pdIn('protocol.no', d.protocol.no, 'class="sm-in" maxlength="20"')} от ${pdDate('protocol.date', d.protocol.date)}</div>
       <table class="pd-t"><thead><tr><th>Пункт</th><th>Кто</th><th>Срок</th><th>Статус</th><th>%</th><th></th></tr></thead><tbody>
@@ -6909,7 +6926,7 @@ function renderCustomer() {
     <div class="sub" data-cs="docs"><h3>Сроки документов</h3>${list('docs', (x, i) => { const kind = x.kind || L.docKindOf(x.title), rule = L.docRule(kind), auto = L.docUntil(kind, x.issued), left = isDate(x.until) ? dayNum(x.until) - dayNum(state.today) : null;
         return `<td>${pdSel(`docs.${i}.kind`, L.DOC_KINDS.map(([k, l]) => [k, l]), kind)}</td><td class="grow">${pdIn(`docs.${i}.title`, x.title, 'placeholder="ТУ на водоснабжение и водоотведение" maxlength="160"')}</td>
           <td>${pdIn(`docs.${i}.no`, x.no, 'class="sm-in" placeholder="№" maxlength="40"')}</td><td>${pdDate(`docs.${i}.issued`, x.issued)}</td>
-          <td>${pdDate(`docs.${i}.until`, x.until)}<div class="hint doc-rule">${rule ? (x.until && x.until !== auto && auto ? `вручную · по правилу: ${fmtDate(auto)}` : esc(rule.basis)) : 'по тексту документа'}${left !== null ? ` · ${left < 0 ? `<span class="neg">истёк</span>` : left <= (x.remind ?? 60) ? `<span class="warnv">истекает через ${left} дн.</span>` : `ещё ${left} дн.`}` : ''}</div></td>
+          <td>${pdDate(`docs.${i}.until`, x.until)}<div class="hint doc-rule">${rule ? (x.until && x.until !== auto && auto ? `вручную · по правилу: ${fmtDate(auto)}` : esc(rule.basis)) : 'по тексту документа'}${left !== null ? ` · ${left < 0 ? `<span class="neg">истёк</span>` : left <= (x.remind ?? 60) ? `<span class="warnv">истекает через ${left} дн.</span>` : `ещё ${left} дн.`}` : ''}</div>${left !== null && left <= (x.remind ?? 60) ? docRenewHtml(x, i) : ''}</td>
           <td>за ${pdIn(`docs.${i}.remind`, x.remind ?? 60, 'class="sm-in" inputmode="numeric"')} дн.</td>`; }, ['Тип', 'Документ', '№', 'Дата выпуска', 'Действует до', 'Напомнить в сводке'], 'ГПЗУ, изыскания, ТУ — когда истекают. Для ГПЗУ и топосъёмки срок считается от даты выпуска сам; ТУ, СТУ и прочее — по тексту документа. Напоминание появится в сводке.')}</div>
     ${projMoney() ? `<div class="sub" data-cs="money"><h3>Договор и финансы <span class="chip tone-idle">только ГИП</span></h3><p class="hint">Договор заказчика с «Тандемом» — не путать с бюджетами подрядчиков. Пока номер договора пуст, вкладки «Договор и финансы» у заказчика нет.</p>
       <div class="fgrid"><div class="f"><label>Номер договора</label>${pdIn('contract.no', d.contract.no, 'placeholder="26/07-12" maxlength="40"')}</div><div class="f"><label>Дата</label>${pdDate('contract.date', d.contract.date)}</div>
@@ -6925,6 +6942,18 @@ function renderCustomer() {
       <p class="hint">Подрядчики, бюджеты подрядчиков и внутренние замечания на странице не показываются никогда; договор заказчика — только если ГИП его заполнил и включил.</p></div>`;
 }
 // Source data and requests: a row is «asked» when an open request points to it.
+// 4.13: a document that runs out — «Запросить актуализацию» makes an outgoing letter by the template, tied to the document.
+const docLetter = (p, docId) => (p?.letters || []).filter(l => l.docId === docId).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || null;
+function docRenewHtml(x, i) {
+  const p = state.projects.get(state.drawer?.id), l = x.id && docLetter(p, x.id);
+  if (l) return `<div class="doc-renew"><span class="chip tone-work" title="${esc(l.subject || '')}">${esc(letterNo(l))} от ${fmtDate(l.date)}</span></div>`;
+  return A.canManageCatalog(state.me) ? `<div class="doc-renew"><button class="btn sm" type="button" data-act="doc-renew" data-i="${i}">Запросить актуализацию</button></div>` : '';
+}
+function docRenew(p, x) {
+  if (!p || !x) return;
+  const vars = { doc: x.title, docno: [x.no ? ` № ${x.no}` : '', isDate(x.issued) ? ` от ${fmtDate(x.issued)}` : ''].join(''), until: isDate(x.until) ? fmtDate(x.until) : '' };
+  askLetter(p, null, 'out', { tpl: 'renew', corr: '', docId: x.id, vars });
+}
 const irdRequest = x => (state.draft?.requests || []).find(r => !r.done && r.irdId === x.id);
 // Everything not made by «Тандем» or the surveyors is the customer's to provide (ТУ from utilities too — the customer obtains them).
 const irdAskable = () => (state.draft?.ird || []).filter(x => x.title && !irdRequest(x) && !/тандем|изыскател/i.test(x.who || '') && ['plan', 'wait', 'clarify', 'remark'].includes(x.status));
@@ -6971,7 +7000,10 @@ onAct({
   'ird-request': ({ el }) => { const x = state.draft.ird[Number(el.dataset.i)]; if (x?.title) { irdAsk(x); renderCustomer(); toast('Запрос добавлен в «Нужно от заказчика». Сохраните проект — заказчик увидит его на странице.'); } },
   'ird-request-all': () => { const list = irdAskable(); list.forEach(irdAsk); renderCustomer(); toast(`Запрошено: ${list.length}. Сохраните проект — заказчик увидит запросы на странице.`); },
   'ird-letter': () => { navigator.clipboard.writeText(irdLetterText()).then(() => toast('Текст письма-запроса скопирован — вставьте в письмо или на бланк.'), () => toast('Не удалось скопировать.', true)); },
-  'ird-techcard': ({ id }) => { state.draft.ird.push(...Techcard.SOURCE_DATA.filter(([t]) => !state.draft.ird.some(x => x.title.trim().toLowerCase() === t.toLowerCase())).map(([title, who]) => ({ id: newId(), title, kind: irdKindOf(title), who: who === 'Изыскатели' ? '«Тандем»' : who.replace('Заказчик / технолог', 'Заказчик'), status: 'plan', due: '', note: '' }))); renderCustomer(); },
+  'ird-techcard': ({ id }) => { state.draft.ird.push(...Techcard.SOURCE_DATA.filter(([t]) => !state.draft.ird.some(x => x.title.trim().toLowerCase() === t.toLowerCase())).map(([title, who]) => ({ id: newId(), title, kind: irdKindOf(title), who: who === 'Изыскатели' ? '«Тандем»' : who.replace('Заказчик / технолог', 'Заказчик'), status: 'plan', due: '', note: '', for: L.irdSuggestFor(title) }))); renderCustomer(); },
+  'doc-renew': ({ el }) => { const x = state.draft?.docs[Number(el.dataset.i)]; if (!x?.title) return; x.id ||= newId(); docRenew(state.projects.get(state.drawer.id), x); },
+  'goto-ird': ({ id }) => { custSec = 'ird'; saveLocal('custSec', 'ird'); openProject(id, 'cust'); },
+  'ird-for-fill': () => { let n = 0; for (const x of state.draft.ird) if (x.title && !L.irdForList(x.for).length) { const f = L.irdSuggestFor(x.title); if (f.length) { x.for = f; n++; } } renderCustomer(); toast(n ? `Разделы подставлены у ${n} ${plural(n, 'документа', 'документов', 'документов')} — проверьте и сохраните проект.` : 'Подставлять нечего.'); },
   'pd-add': ({ el }) => { draftList(el.dataset.list).push(PD_NEW[el.dataset.list]()); renderCustomer(); },
   'pd-del': ({ el }) => { draftList(el.dataset.list).splice(Number(el.dataset.i), 1); renderCustomer(); },
   'cust-page': ({ el }) => { customerPage(el.dataset.format); },
@@ -7564,6 +7596,22 @@ function openContractor(id) {
   if (!id) $('#c-name').focus();
 }
 
+// 4.13: source data accepted → a word in the discussion of each open card of the sections that waited for it
+// (its people get the usual «новое сообщение»).
+async function irdReceivedNotify(pid, before, after) {
+  const was = new Map(before.map(r => [r.id, r]));
+  const got = after.filter(r => L.IRD_RECEIVED.includes(r.status) && L.irdForList(r.for).length && !L.IRD_RECEIVED.includes(was.get(r.id)?.status));
+  if (!got.length) return;
+  let n = 0;
+  for (const t of state.tasks.values()) {
+    if (t.projectId !== pid || t.deletedAt || t.status === 'done') continue;
+    const hit = got.filter(r => L.irdWaiting({ ird: [{ ...r, status: 'plan' }] }, sectionsOf(t)).length);
+    if (!hit.length) continue;
+    const r = await api.addComment(t.id, `Исходные данные получены: ${hit.map(x => `«${x.title}»`).join(', ')}. Можно работать.`).catch(() => null);
+    if (r?.ok !== false) n++;
+  }
+  if (n) toast(`Исходные данные получены — сообщили в ${n} ${plural(n, 'карточку', 'карточки', 'карточек')}.`);
+}
 async function submitSimple(keepOpen = false) {
   const { kind, id } = state.drawer;
   if (kind === 'org') return submitOrg(keepOpen);
@@ -7580,7 +7628,9 @@ async function submitSimple(keepOpen = false) {
       const extra = projectDraftData();
       const parts = [made.created ? `задач по разделам: ${made.created}` : '', made.linked ? `привязано карточек: ${made.linked}` : '', made.assigns ? `заданий смежникам: ${made.assigns}` : ''].filter(Boolean);
       const wasCustomer = state.projects.get(id)?.customerId || '';
+      const irdBefore = clone(state.projects.get(id)?.ird || []);
       ok = await write([...made.ops, op.update('projects', id, { ...data, ...extra.data })], parts.length ? `Проект сохранён: ${parts.join(', ')}` : 'Проект сохранён');
+      if (ok) irdReceivedNotify(id, irdBefore, extra.data.ird || []);
       // A project moved to another customer: the logins of both customers' contact people follow.
       if (ok && wasCustomer !== data.customerId) for (const oid of [wasCustomer, data.customerId]) if (oid) syncOrgCabinet(oid);
     }

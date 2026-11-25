@@ -93,6 +93,22 @@ function openContractor(id) {
   if (!id) $('#c-name').focus();
 }
 
+// 4.13: source data accepted → a word in the discussion of each open card of the sections that waited for it
+// (its people get the usual «новое сообщение»).
+async function irdReceivedNotify(pid, before, after) {
+  const was = new Map(before.map(r => [r.id, r]));
+  const got = after.filter(r => L.IRD_RECEIVED.includes(r.status) && L.irdForList(r.for).length && !L.IRD_RECEIVED.includes(was.get(r.id)?.status));
+  if (!got.length) return;
+  let n = 0;
+  for (const t of state.tasks.values()) {
+    if (t.projectId !== pid || t.deletedAt || t.status === 'done') continue;
+    const hit = got.filter(r => L.irdWaiting({ ird: [{ ...r, status: 'plan' }] }, sectionsOf(t)).length);
+    if (!hit.length) continue;
+    const r = await api.addComment(t.id, `Исходные данные получены: ${hit.map(x => `«${x.title}»`).join(', ')}. Можно работать.`).catch(() => null);
+    if (r?.ok !== false) n++;
+  }
+  if (n) toast(`Исходные данные получены — сообщили в ${n} ${plural(n, 'карточку', 'карточки', 'карточек')}.`);
+}
 async function submitSimple(keepOpen = false) {
   const { kind, id } = state.drawer;
   if (kind === 'org') return submitOrg(keepOpen);
@@ -109,7 +125,9 @@ async function submitSimple(keepOpen = false) {
       const extra = projectDraftData();
       const parts = [made.created ? `задач по разделам: ${made.created}` : '', made.linked ? `привязано карточек: ${made.linked}` : '', made.assigns ? `заданий смежникам: ${made.assigns}` : ''].filter(Boolean);
       const wasCustomer = state.projects.get(id)?.customerId || '';
+      const irdBefore = clone(state.projects.get(id)?.ird || []);
       ok = await write([...made.ops, op.update('projects', id, { ...data, ...extra.data })], parts.length ? `Проект сохранён: ${parts.join(', ')}` : 'Проект сохранён');
+      if (ok) irdReceivedNotify(id, irdBefore, extra.data.ird || []);
       // A project moved to another customer: the logins of both customers' contact people follow.
       if (ok && wasCustomer !== data.customerId) for (const oid of [wasCustomer, data.customerId]) if (oid) syncOrgCabinet(oid);
     }

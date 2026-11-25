@@ -127,13 +127,13 @@ function viewGantt() {
       const ms = L.milestonesOf(t, state.today).list.filter(m => isDate(m.date) && inRange(m.date))
         .map(m => `<span class="tq-ms ${m.done ? 'done' : m.date < state.today ? 'bad' : ''}" style="left:${pos(m.date) + dayW / 2}%;top:${lane * 26 + 8}px" title="КТ «${esc(m.title)}» ${fmtDate(m.date)}${m.done ? ' — выполнена' : ''}"></span>`).join('');
       const blocked = L.dependencyIssues(t, state.tasks, state.today).length > 0;
-      const noexec = !executorOf(t);
+      const noexec = !executorOf(t), wait = irdWaitOf(t);
       const awayHit = absHits(t).some(h => h.onFinish);
       const cp = crit ? cpOf(t.projectId) : null, isCrit = cp?.critical.has(t.id), fl = cp?.float.get(t.id);
-      const bar = right > left ? `<button class="tl-bar tone-${tone} ${isCrit ? 'crit' : ''} ${pos(s) < 0 ? 'cut-l' : ''} ${pos(planEnd) + dayW > 100 ? 'cut-r' : ''} ${blocked ? 'blocked' : ''} ${noexec ? 'noexec' : ''} ${awayHit ? 'away' : ''}" type="button"
+      const bar = right > left ? `<button class="tl-bar tone-${tone} ${isCrit ? 'crit' : ''} ${pos(s) < 0 ? 'cut-l' : ''} ${pos(planEnd) + dayW > 100 ? 'cut-r' : ''} ${blocked ? 'blocked' : ''} ${noexec ? 'noexec' : ''} ${wait.length ? 'waitid' : ''} ${awayHit ? 'away' : ''}" type="button"
         data-act="open-task" data-id="${esc(t.id)}" data-bar="${esc(t.id)}"
         style="left:${left}%;width:${Math.max(0.5, right - left)}%;top:${lane * 26 + 3}px"
-        title="${esc(label)}\n${fmtDate(t.start)} → ${fmtDate(t.finish)} · ${esc(tm.text)}${awayHit ? '\nФиниш приходится на отсутствие: ' + esc(absHits(t).filter(h => h.onFinish).map(A.absenceText).join('; ')) : ''}\nТяните — сдвинуть работу, края — изменить старт или финиш">${isCrit ? '<span class="tl-cp" title="Критический путь: задержка сдвинет сдачу проекта">КП</span>' : ''}${noexec ? NOEXEC_ICON : ''}${esc(label)}${crit && !isCrit && fl > 0 ? `<span class="tl-float">запас ${fl} дн.</span>` : ''}</button>` : '';
+        title="${esc(label)}\n${fmtDate(t.start)} → ${fmtDate(t.finish)} · ${esc(tm.text)}${wait.length ? '\nЖдёт исходные данные: ' + esc(irdWaitText(wait)) : ''}${awayHit ? '\nФиниш приходится на отсутствие: ' + esc(absHits(t).filter(h => h.onFinish).map(A.absenceText).join('; ')) : ''}\nТяните — сдвинуть работу, края — изменить старт или финиш">${isCrit ? '<span class="tl-cp" title="Критический путь: задержка сдвинет сдачу проекта">КП</span>' : ''}${noexec ? NOEXEC_ICON : ''}${esc(label)}${crit && !isCrit && fl > 0 ? `<span class="tl-float">запас ${fl} дн.</span>` : ''}</button>` : '';
       return bar + ext + ms;
     }).join('');
     // Staff rows: vacation / sick leave as a hatched band over the row.

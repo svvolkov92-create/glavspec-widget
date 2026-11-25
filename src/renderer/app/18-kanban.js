@@ -14,9 +14,10 @@ function kanbanCard(t) {
   const due = L.paymentPlan(t, state.today).dueNow;
   const msLate = L.milestonesOf(t, state.today).overdue.length;
   const flags = v.flags && ((due > 0 && canMoney()) || msLate);
+  const wait = irdWaitOf(t);
   return `<article class="kb-card ${c ? '' : 'noexec'} ${tm.overdue ? 'late' : ''}" draggable="true" data-kb-id="${esc(t.id)}" data-act="open-task" data-id="${esc(t.id)}" role="button" tabindex="0"
       title="${esc(p?.name || '')}${t.title ? ' · ' + esc(t.title) : ''}\n${c ? '' : 'Исполнитель не назначен. '}Перетащите карточку в другую колонку, чтобы сменить статус">
-    <div class="kb-top">${marksHtml(t)}${tm.overdue ? '<span class="chip tone-bad">срок сорван</span>' : ''}</div>
+    <div class="kb-top">${marksHtml(t)}${tm.overdue ? '<span class="chip tone-bad">срок сорван</span>' : ''}${wait.length ? `<span class="chip tone-warn kb-wait" title="Ждёт исходные данные: ${esc(irdWaitText(wait))}">ждёт ИД</span>` : ''}</div>
     ${v.proj ? `<div class="kb-proj">${esc(p?.name || '—')}${t.title ? ` · ${esc(t.title)}` : ''}</div>` : ''}
     ${v.who ? `<div class="kb-who">${c ? execLine(t) : '<b class="kb-noexec">нет исполнителя</b>'}</div>` : ''}
     ${v.due ? `<div class="kb-foot"><span class="due ${tm.cls}">${esc(tm.text)}</span><span class="num hint">${fmtDate(t.finish)}</span></div>` : ''}

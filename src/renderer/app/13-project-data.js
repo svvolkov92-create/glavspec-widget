@@ -96,6 +96,8 @@ const LETTER_TPL = {
   cover: { label: 'Сопроводительное к выдаче документации', subject: 'О направлении документации по объекту «{project}»', body: 'Направляем Вам документацию по объекту «{project}» (шифр {code}) в составе:\n1. \n\nПросим подтвердить получение.' },
   tu: { label: 'Запрос технических условий', subject: 'Запрос технических условий — «{project}»', body: 'Просим выдать технические условия на подключение объекта «{project}» ({address}) к сетям инженерно-технического обеспечения.\nНагрузки: \n\nПриложение: ' },
   ird: { label: 'Запрос исходных данных', subject: 'Запрос исходных данных — «{project}»', body: 'Для выполнения проектных работ по объекту «{project}» просим предоставить:\n1. \n\nСрок предоставления: ' },
+  // 4.13: a document runs out — ask its issuer to extend it (from «Сроки документов»).
+  renew: { label: 'Продление / актуализация документа', subject: 'О продлении срока действия: {doc}', body: 'ООО ПМ «Тандем» выполняет проектирование объекта «{project}» (шифр {code}). Срок действия документа «{doc}»{docno} истекает {until}.\n\nПросим продлить срок его действия либо выдать актуализированный документ. Без действующего документа проектная документация не может быть передана в экспертизу.' },
   remarks: { label: 'Ответ на замечания', subject: 'Ответ на замечания по объекту «{project}»', body: 'На Ваше письмо № ___ от ___ сообщаем:\n1. Замечание: \n   Ответ: \n\nИсправленная документация прилагается.' },
 };
 const LETTER_STATUS = { in: { new: ['work', 'зарегистрировано'], answer: ['warn', 'нужен ответ'], done: ['ok', 'отработано'] }, out: { draft: ['idle', 'черновик'], sent: ['ok', 'отправлено'] } };
@@ -122,13 +124,19 @@ function lettersBlock(p) {
       : `<p class="hint let-empty">${v === 'in' ? 'Входящих пока нет.' : v === 'out' ? 'Исходящих пока нет.' : 'Писем по проекту пока нет. Номера присваиваются сами, сквозные за год.'}</p>`}</div>`;
   return auxBlock('pl:' + p.id, 'Письма', `<span class="meta">${all.length}${waiting ? ` · <span class="neg">ждут ответа ${waiting}</span>` : ''}</span>`, body);
 }
-function fillTpl(text, p) {
-  return String(text || '').replace(/\{project\}/g, p.name || '').replace(/\{code\}/g, p.code || '—').replace(/\{address\}/g, p.address || p.client || '');
+function fillTpl(text, p, x = {}) {
+  return String(text || '').replace(/\{project\}/g, p.name || '').replace(/\{code\}/g, p.code || '—').replace(/\{address\}/g, p.address || p.client || '')
+    .replace(/\{doc\}/g, x.doc || '').replace(/\{docno\}/g, x.docno || '').replace(/\{until\}/g, x.until || '');
 }
-function askLetter(p, letter = null, dir = 'out') {
+// `preset` (4.13): { tpl, corr, docId, vars } — a new letter filled from a template (e.g. «Запросить актуализацию»).
+function askLetter(p, letter = null, dir = 'out', preset = null) {
   const isNew = !letter;
   const l = letter ? clone(letter) : { id: newId(), dir, seq: nextLetterNo(dir), date: state.today, corr: dir === 'out' ? (p.client || '') : '', email: '', subject: '', body: '', status: dir === 'in' ? 'answer' : 'draft', due: dir === 'in' ? addDays(state.today, 10) : '', files: [], tpl: 'free' };
   const sig = `\n\n${A.isGip(state.me) ? 'Главный инженер проекта' : A.ROLES[state.me?.role]?.label || ''}\n${(state.me?.name || '').replace(/^Пример:\s*/, '')}`;
+  if (isNew && preset?.tpl && LETTER_TPL[preset.tpl]) {
+    const t = LETTER_TPL[preset.tpl];
+    Object.assign(l, { tpl: preset.tpl, subject: fillTpl(t.subject, p, preset.vars), body: fillTpl(t.body, p, preset.vars) + sig, ...(preset.corr !== undefined ? { corr: preset.corr } : {}), ...(preset.docId ? { docId: preset.docId } : {}) });
+  }
   const root = document.createElement('div');
   root.className = 'modal-back';
   const st = LETTER_STATUS[l.dir];
@@ -150,7 +158,7 @@ function askLetter(p, letter = null, dir = 'out') {
   const drawFiles = () => { const el = q('#let-flist'); if (el) el.innerHTML = (l.files || []).map((f, i) => `<span class="aq-file">${icon('file')}${esc(f.name)} <span class="hint">${fileSize(f.size)}</span><button class="btn ghostbtn sm" type="button" data-m="unf" data-i="${i}">×</button></span>`).join(''); };
   drawFiles();
   q('#let-subj').focus();
-  q('#let-tpl')?.addEventListener('change', e => { const t = LETTER_TPL[e.target.value]; l.tpl = e.target.value; if (!t) return; if (t.subject) q('#let-subj').value = fillTpl(t.subject, p); if (t.body) q('#let-body').value = fillTpl(t.body, p) + sig; });
+  q('#let-tpl')?.addEventListener('change', e => { const t = LETTER_TPL[e.target.value]; l.tpl = e.target.value; if (!t) return; if (t.subject) q('#let-subj').value = fillTpl(t.subject, p, preset?.vars); if (t.body) q('#let-body').value = fillTpl(t.body, p, preset?.vars) + sig; });
   root.addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); e.stopPropagation(); } }, true);
   root.addEventListener('drop', async e => {
     const files = [...(e.dataTransfer?.files || [])]; if (!files.length) return;

@@ -599,10 +599,48 @@
   const paymentPlan = memo(paymentPlanRaw), milestonesOf = memo(milestonesOfRaw);
   const shiftsOf = memo(t => shiftsOfRaw(t));
 
+  // 4.13: source data a section needs (project.ird[].for — marks). «ИОС n» of ПП 87 counts as its usual marks and back.
+  const IOS_MARKS = { 1: ['ЭС', 'ЭОМ', 'ЭН', 'ЭМ', 'ЭО'], 2: ['ВК', 'НВ', 'В', 'НВК'], 3: ['ВК', 'НК', 'К', 'НВК'], 4: ['ОВ', 'ТС', 'ИТП', 'ТМ'], 5: ['СС', 'СКС'], 6: ['ГСН', 'ГСВ', 'ГС'] };
+  function markKey(m) {
+    const s = String(m || '').trim().toUpperCase().replace(/\s+/g, '');
+    const ios = s.match(/^ИОС(\d)/);
+    return ios ? 'ИОС' + ios[1] : s.replace(/[.\-]*\d+$/, '');
+  }
+  function markSet(list) {
+    const out = new Set();
+    for (const m of list || []) {
+      const k = markKey(m);
+      if (!k) continue;
+      out.add(k);
+      const ios = k.match(/^ИОС(\d)$/);
+      if (ios) (IOS_MARKS[ios[1]] || []).forEach(x => out.add(x));
+      else for (const [n, ms] of Object.entries(IOS_MARKS)) if (ms.includes(k)) out.add('ИОС' + n);
+    }
+    return out;
+  }
+  const IRD_FOR = [[/тепл/i, ['ОВ', 'ТС', 'ИТП']], [/электр/i, ['ЭС', 'ЭОМ']], [/водо|канализ/i, ['ВК', 'НВК']], [/газ/i, ['ГСН', 'ГСВ']],
+    [/связ|диспетч|радиоф/i, ['СС']], [/гпзу|градостроит/i, ['ПЗУ', 'АР']], [/геодез|топо/i, ['ПЗУ', 'НВК']], [/геолог/i, ['КР', 'КЖ']],
+    [/дорог|примыкан/i, ['ПЗУ']], [/технолог/i, ['ТХ', 'АР']], [/эколог|гидромет/i, ['ООС']], [/обмер|обследован/i, ['АР', 'КР']]];
+  // Which sections usually need a document, by its name (a suggestion; the GIP ticks it).
+  function irdSuggestFor(title) {
+    for (const [re, ms] of IRD_FOR) if (re.test(String(title || ''))) return ms.slice();
+    return [];
+  }
+  const IRD_RECEIVED = ['accepted', 'done'];
+  const irdForList = v => [...new Set((Array.isArray(v) ? v : String(v || '').split(/[,;\s]+/)).map(x => String(x).trim().toUpperCase()).filter(x => x && x.length <= 12))].slice(0, 20);
+  // Rows of the project's source data that a card with these marks still waits for.
+  function irdWaiting(project, marks, status = '') {
+    if (!project || status === 'done') return [];
+    const mine = markSet(marks);
+    if (!mine.size) return [];
+    return (project.ird || []).filter(r => r && r.title && !IRD_RECEIVED.includes(r.status) && irdForList(r.for).some(m => [...markSet([m])].some(k => mine.has(k))));
+  }
+
   return {
     STATUSES, ACTIVE, PROJECT_STATUSES, PHASES, phaseLabel, defaultPhases, phaseState, projectNow, phaseDays, planPhases, criticalPath, shiftFollowers, DOC_KINDS, docRule, docUntil, docKindOf, TRANSITIONS, firstTime, projectGoal, thanksFor, MARK_GROUPS, SHIFT_REASONS, PAY_TRIGGERS, progress, readiness, readinessManual, READY_MIN, READY_MAX,
     normalizeMarks, splitMarks, sectionsOf, todayStr, isDate, dayNum, addDays, fmtDate, parseMoney, cents,
     budgetOf, paidOf, restOf, timing, totals, sortByDeadline,
     visible, historyOf, shiftsOf, depsOf, dependencyIssues, wouldCycle, Cal, reviewStats, lateness, reliability, paymentPlan, milestonesOf, matchCount, attention, digestText, innError, orgKey,
+    markSet, irdSuggestFor, irdForList, irdWaiting, IRD_RECEIVED,
   };
 });

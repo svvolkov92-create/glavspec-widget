@@ -162,6 +162,9 @@ async function commitDates(id, patch, followers = null) {
   return write(op.update('tasks', id, { ...next, history }), `${marksText(t)}: ${fmtDate(next.start)} → ${fmtDate(next.finish)}`);
 }
 
+// 4.13: the source data a card's sections still wait for (project.ird with «нужно для разделов»).
+const irdWaitOf = t => L.irdWaiting(projectOf(t), sectionsOf(t), t.status);
+const irdWaitText = list => list.map(r => r.title).join(', ');
 /* ---------- 4.1: right click on a card (Kanban, Gantt, lists): the usual actions without opening it ---------- */
 const nextWorkDay = iso => { let d = addDays(iso, 1); for (let i = 0; i < 20 && L.Cal.dayInfo(d).off; i++) d = addDays(d, 1); return d; };
 function cardMenuHtml(t) {

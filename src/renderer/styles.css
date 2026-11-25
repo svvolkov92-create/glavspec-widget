@@ -1993,3 +1993,15 @@ html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
 .about-head h2 { margin: 0 }
 .about-row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-top: 1px solid var(--line) }
 .about-row b { text-align: right; overflow-wrap: anywhere }
+/* 4.13: a card waits for source data */
+.st-wait { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; font-size: 13px; border-top: 1px dashed var(--line) }
+#gantt .tl-bar.waitid { outline: 2px dashed var(--bad); outline-offset: -2px }
+.kb-wait { font-size: 10.5px; padding: 1px 6px }
+.ird-for { width: 104px }
+.doc-renew { margin-top: 4px }
+/* 4.13: «Исходные данные» got a column — the table scrolls sideways in a narrow window instead of squeezing the fields */
+.sub[data-cs="ird"] { overflow-x: auto }
+.sub[data-cs="ird"] .pd-t { min-width: 940px }
+.sub[data-cs="ird"] .pd-t select[data-pd$=".status"] { min-width: 132px }
+.sub[data-cs="ird"] .pd-t select[data-pd$=".kind"] { min-width: 96px }
+.sub[data-cs="ird"] .pd-t td.grow input { min-width: 190px }

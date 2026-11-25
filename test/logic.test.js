@@ -152,3 +152,19 @@ test('INN check digits and company name keys (4.9)', () => {
   assert.equal(L.orgKey('АО «Дальтрансуголь»'), L.orgKey('Дальтрансуголь АО'));
   assert.notEqual(L.orgKey('ООО «Ёлка»'), L.orgKey('ООО «Белка»'));
 });
+
+test('4.13: source data for sections — waiting, ИОС equivalents, suggestions', () => {
+  const p = { ird: [
+    { title: 'ТУ на теплоснабжение', status: 'wait', for: ['ОВ', 'ТС'] },
+    { title: 'ГПЗУ', status: 'accepted', for: ['АР'] },
+    { title: 'ТУ на электроснабжение', status: 'plan', for: 'ЭОМ, ЭС' },
+    { title: 'Без разделов', status: 'plan' },
+  ] };
+  assert.deepEqual(L.irdWaiting(p, ['ИОС4']).map(r => r.title), ['ТУ на теплоснабжение']);
+  assert.deepEqual(L.irdWaiting(p, ['ОВ1']).map(r => r.title), ['ТУ на теплоснабжение']);
+  assert.deepEqual(L.irdWaiting(p, ['ЭОМ', 'ЭО']).map(r => r.title), ['ТУ на электроснабжение']);
+  assert.equal(L.irdWaiting(p, ['АР']).length, 0, 'received ГПЗУ does not hold АР');
+  assert.equal(L.irdWaiting(p, ['ОВ'], 'done').length, 0, 'a finished card waits for nothing');
+  assert.deepEqual(L.irdSuggestFor('ТУ на водоснабжение и водоотведение'), ['ВК', 'НВК']);
+  assert.deepEqual(L.irdForList('кр; ов  кр'), ['КР', 'ОВ']);
+});
