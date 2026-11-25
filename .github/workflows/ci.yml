@@ -76,6 +76,7 @@ jobs:
           npm install --no-save --no-package-lock playwright@1.48.2
           npx playwright install --with-deps chromium
           node test/web-check.js
+          node test/phone-check.js
       - name: Security check (≈90 attacks on a live server) and stored XSS in the web version
         run: |
           node test/security-check.js

@@ -17,6 +17,7 @@ function setUserMenu(open) {
     if (state.remote) {
       menu.innerHTML = `<div class="menu-h">${esc(state.me?.name || '')}</div><p class="role-hint">${esc(userTag(state.me || {}))} · общая база ${esc(state.remote.url || '')}, вход «${esc(state.remote.login || '')}»</p>
         <button role="menuitem" type="button" data-act="my-profile"><b>Моя анкета</b><small>Фото, о себе, контакты, программы</small></button>
+        ${PHONE_MQ?.matches && document.documentElement.classList.contains('web') && loadLocal('phoneOff', false) ? '<button role="menuitem" type="button" data-act="ph-phone"><b>Версия для телефона</b><small>Свои экраны: Мой день, проверка, карточки, проекты</small></button>' : ''}
         <button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Связь, пароль${A.isGip(state.me) ? ', кто может входить' : ''}</small></button>`;
       menu.hidden = !open; $('#btn-user').setAttribute('aria-expanded', String(open)); return;
     }

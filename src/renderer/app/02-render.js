@@ -50,6 +50,17 @@ function render() {
 }
 function renderNow() {
   state.today = todayStr();
+  // 4.23: the web version on a phone has its own screens (37-phone.js).
+  const phone = phoneOn();
+  document.documentElement.classList.toggle('phone', phone);
+  if (phone) {
+    renderPhone();
+    if (state.loaded && state.me) { needsMeNotify(); chatToastNotify(); }
+    renderMsg(); msgNotify(); renderFocus();
+    if (state.drawer?.kind === 'task' && state.drawer.id) { renderPayments(); renderPlanPreview(); renderTalk(); if (state.drawer.tab === 'log') loadTaskLog(state.drawer.id); }
+    return;
+  }
+  $('#phone')?.remove();
   $('#att-wrap').innerHTML = counters();
   const overdueCount = state.loaded ? attention().overdue.length : 0;
   const title = !SOLO ? A.titleFor(state.me) : SOLO.kind === 'project' ? (state.projects.get(SOLO.id)?.name || 'Проект') : threadTitle(SOLO.id);
