@@ -249,6 +249,15 @@
     for (const r of p.requests || []) if (r.files !== undefined && (!Array.isArray(r.files) || r.files.length > 20 || r.files.some(f => !f || typeof f.id !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(f.id) || typeof f.name !== 'string' || f.name.length > 200 || !(Number(f.size) >= 0)))) return 'Файлы запроса повреждены.';
     for (const d of p.docs || []) if (!d || typeof d.title !== 'string' || !isDateStr(d.until)) return 'Проверьте сроки документов.';
     if (p.protocol !== undefined && p.protocol !== null && (typeof p.protocol !== 'object' || !list(p.protocol.items, 60))) return 'Протокол повреждён.';
+    // 4.15: the expertise's remarks by cycles.
+    if (p.expertise !== undefined && p.expertise !== null) {
+      const ex = p.expertise;
+      if (typeof ex !== 'object' || !list(ex.cycles, 30) || String(ex.org ?? '').length > 160) return 'Данные экспертизы повреждены.';
+      for (const c of ex.cycles || []) {
+        if (!c || typeof c.id !== 'string' || !list(c.remarks, 1000) || !isDateStr(c.date) || !isDateStr(c.due)) return 'Проверьте циклы экспертизы.';
+        for (const r of c.remarks || []) if (!r || typeof r.id !== 'string' || typeof r.text !== 'string' || r.text.length > 4000 || String(r.answer ?? '').length > 4000 || !isDateStr(r.due)) return 'Проверьте замечания экспертизы.';
+      }
+    }
     return null;
   }
 

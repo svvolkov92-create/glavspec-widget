@@ -102,6 +102,24 @@
     catch (e) { return writeError(e, 'файл'); }
   }
 
+  // 4.15: the answers to the expertise's remarks of one cycle — a Word table to send with the corrected documentation.
+  async function expertiseAnswers(projectId, cycleId) {
+    const me = currentUser();
+    if (!me || A.isSpecialist(me)) return { ok: false, message: 'Ответы экспертизе выгружают ГИП и главспецы.' };
+    const view = userView(), p = view.projects.find(x => x.id === projectId);
+    const c = p && (p.expertise?.cycles || []).find(x => x.id === cycleId);
+    if (!c || !(c.remarks || []).length) return { ok: false, message: 'В цикле нет замечаний.' };
+    const code = String(p.code || '').trim();
+    const target = await saveAs({ title: 'Сохранить ответы экспертизе', name: `${code ? safeName(code) + ' ' : ''}Ответы на замечания, цикл ${safeName(String(c.no))} — ${safeName(p.name)}.docx`, ext: 'docx', filter: REPORT_FORMATS.docx });
+    if (!target) return { ok: false, canceled: true };
+    const rvi = n => (n ? `РВИ-${String(n).padStart(2, '0')}` : '');
+    const rows = c.remarks.map(r => ({ n: r.n || '', mark: r.mark || '', text: r.text || '', answer: r.answer || '', change: rvi(r.rvi) }));
+    const out = R.buildRemarksDocx(rows, { title: 'Ответы на замечания экспертизы', project: p.name || '', code, org: p.expertise?.org || '',
+      cycle: `цикл ${c.no}${L.isDate(c.date) ? ` от ${L.fmtDate(c.date)}` : ''}`, signer: `Главный инженер проекта ____________ ${me.name || ''}` });
+    try { await io.writeFile(target, out); return saved(target); }
+    catch (e) { return writeError(e, 'файл'); }
+  }
+
   // The customer's page of one project: one HTML file (logo and font inside) or the same page as PDF.
   // Built from the full project record (the plan incl. «Договор»), cards as the user sees them; no money, no contractors.
   async function customerPage(projectId, opts = {}) {
@@ -402,6 +420,6 @@
     }
   }
 
-  return { exportReport, msProject, customerPage, composition, docDefaults, openTemplates, openLast, openProjectFolder, openTaskFolder, pickFolder, contactOpen, mailOpen,
+  return { exportReport, msProject, expertiseAnswers, customerPage, composition, docDefaults, openTemplates, openLast, openProjectFolder, openTaskFolder, pickFolder, contactOpen, mailOpen,
     backupSave, backupRestore, autoBackup, autoBackupGet, autoBackupSet, importPick, safeName, customerTeam, customerContact, attachAdd, attachBytes, attachOpen, attachmentBytes };
 });

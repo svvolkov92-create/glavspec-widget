@@ -137,7 +137,7 @@
       return true;
     },
     setQuiet: () => [],
-    exportReport: desktopOnly('Отчёты Excel и Word'), exportComposition: desktopOnly('Состав в Excel и Word'), customerPage: desktopOnly('Страница заказчика файлом'),
+    exportReport: desktopOnly('Отчёты Excel и Word'), exportComposition: desktopOnly('Состав в Excel и Word'), exportExpertise: desktopOnly('Ответы экспертизе в Word'), customerPage: desktopOnly('Страница заказчика файлом'),
     openTemplates: desktopOnly('Шаблоны Word'), openProjectFolder: desktopOnly('Папка проекта'), openTaskFolder: desktopOnly('Папка карточки'), pickFolder: desktopOnly('Выбор папки'),
     openDataFolder: desktopOnly('Папка с данными'), importPick: desktopOnly('Импорт из Excel'), autoBackupGet: async () => ({ dir: '', web: true }), autoBackupSet: desktopOnly('Автокопия в папку'),
     openLastReport: desktopOnly('Последний отчёт'), docDefaults: async () => ({}), mailOpen: async req => { if (req?.mailto) location.href = req.mailto; return { ok: !!req?.mailto }; },

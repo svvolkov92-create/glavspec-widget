@@ -237,6 +237,18 @@ function buildCompositionDocx(rows, meta, now = new Date()) {
   return packDocx(bodyXml, sectPr, `${meta.code ? meta.code + ' · ' : ''}Состав проектной документации`, meta.title, now);
 }
 
+// 4.15: «Ответы на замечания экспертизы», landscape A4: №, раздел, замечание, ответ, изменение (РВИ).
+function buildRemarksDocx(rows, meta, now = new Date()) {
+  const sectPr = '<w:sectPr><w:footerReference w:type="default" r:id="rId2"/><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>'
+    + '<w:pgMar w:top="850" w:right="850" w:bottom="850" w:left="850" w:header="425" w:footer="425" w:gutter="0"/></w:sectPr>';
+  const cols = [{ title: '№', width: 700, align: 'center' }, { title: 'Раздел', width: 1100, align: 'center' }, { title: 'Замечание', width: 5900 }, { title: 'Ответ', width: 5900 }, { title: 'Изменение', width: 1500, align: 'center' }];
+  const head = h1(meta.title) + text(`${meta.project}${meta.code ? ` · шифр ${meta.code}` : ''}`)
+    + text([meta.org, meta.cycle].filter(Boolean).join(' · '));
+  const bodyXml = head + table(cols, rows.map(r => [r.n, r.mark, r.text, r.answer || '', r.change || '']))
+    + (meta.signer ? text(`\n${meta.signer}`) : '');
+  return packDocx(bodyXml, sectPr, `${meta.code ? meta.code + ' · ' : ''}Ответы на замечания экспертизы`, meta.title, now);
+}
+
 function packDocx(bodyXml, sectPr, footerText, title, now) {
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="${W}" xmlns:r="${R}"><w:body>${bodyXml}${sectPr}</w:body></w:document>`;
@@ -258,4 +270,4 @@ function packDocx(bodyXml, sectPr, footerText, title, now) {
   ], now);
 }
 
-module.exports = { buildDocx, buildCompositionDocx };
+module.exports = { buildDocx, buildCompositionDocx, buildRemarksDocx };

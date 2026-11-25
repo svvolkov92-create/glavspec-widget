@@ -36,6 +36,9 @@ function viewDay() {
     ...week.slice(0, 6).map(t => row(`срок ${fmtDate(t.finish).slice(0, 5)}`, 'warn', t)),
     ...docs.slice(0, 4).map(({ p, d, left }) => `<div class="day-row"><span class="chip tone-${left < 0 ? 'bad' : 'warn'}">${left < 0 ? 'документ истёк' : `истекает через ${left} дн.`}</span><button class="linkbtn day-t" type="button" data-act="goto-project" data-id="${esc(p.id)}">${esc(d.title)}<span class="hint"> — ${esc(p.name)}</span></button>${A.canManageCatalog(state.me) && d.id ? (docLetter(p, d.id) ? `<span class="chip tone-work">${esc(letterNo(docLetter(p, d.id)))}</span>` : `<button class="btn ghostbtn sm" type="button" data-act="doc-renew-day" data-id="${esc(p.id)}" data-doc="${esc(d.id)}" title="Письмо на продление по шаблону">✉ Запросить</button>`) : ''}</div>`),
   ];
+  // 4.15: remarks of the expertise this user answers.
+  const rems = myRemarks().slice(0, 6).map(({ p, r }) => `<div class="day-row"><span class="chip tone-${exLate(r) ? 'bad' : 'warn'}">${exLate(r) ? 'замечание просрочено' : `замечание${isDate(r.due) ? ' до ' + fmtDate(r.due).slice(0, 5) : ''}`}</span><button class="linkbtn day-t" type="button" data-act="ex-open" data-id="${esc(p.id)}" data-v="${esc(r.id)}">№ ${esc(r.n)}${r.mark ? ' · ' + esc(r.mark) : ''} · ${esc(String(r.text).slice(0, 70))}<span class="hint"> — ${esc(p.name)}</span></button></div>`);
+  first.push(...rems);
   const todo = [
     ...working.map(t => row(STATUSES[t.status].label.toLowerCase(), 'work', t, `<button class="btn sm${focus?.taskId === t.id ? ' on' : ''}" type="button" data-act="${focus?.taskId === t.id ? 'focus-stop' : 'focus-start'}" data-id="${esc(t.id)}">${focus?.taskId === t.id ? 'Пауза' : '▶ Фокус'}</button>`)),
     ...notStarted.map(t => row('не начат', 'idle', t, `<button class="btn primary sm" type="button" data-act="cm-quick" data-q="start" data-id="${esc(t.id)}">▶ Начать</button>`)),

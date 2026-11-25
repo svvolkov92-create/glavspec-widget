@@ -2010,3 +2010,15 @@ html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
 .rev-sheets { width: 80px }
 .rvi-big { color: var(--accent); margin-left: 6px }
 .rvi-f { max-width: 180px }
+/* 4.15: expertise */
+.ex-org { min-width: 220px; max-width: 300px }
+.ex-kpis { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 }
+.ex-kpi { border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px; background: var(--surface) }
+.ex-kpi b { font-size: 16px }
+.ex-row { cursor: pointer }
+.ex-row:hover td { background: color-mix(in srgb, var(--accent) 5%, transparent) }
+.ex-text { max-width: 520px }
+.ex-ans { margin-top: 3px }
+.ex-mark { display: inline-block; border: 1.5px solid var(--idle); border-radius: 4px; padding: 0 5px; font-size: 11.5px }
+.ex-modal { width: min(720px, 94vw) }
+.ex-modal textarea { width: 100% }

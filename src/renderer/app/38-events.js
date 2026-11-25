@@ -216,6 +216,7 @@ document.addEventListener('change', e => {
     if (['mark', 'on', 'tom', 'code', 'pdId'].includes(k)) { const y = $('#dform .drawer-b')?.scrollTop; renderComposition(); if (y != null) $('#dform .drawer-b').scrollTop = y; }
     return;
   }
+  if (t.dataset.exOrg !== undefined) { const p = state.projects.get(t.dataset.exOrg); if (p) exSave(p, x => { x.org = t.value.trim().slice(0, 160); }, 'Экспертиза: организация сохранена'); return; }
   if (t.dataset.rviFilter !== undefined) { rviFilter[t.dataset.rviFilter] = t.value; renderNow(); return; }
   if (t.dataset.ird) { irdPatch(t.dataset.pid, t.dataset.fid, { [t.dataset.ird]: t.value }); return; }
   if (t.dataset.sv) { surveyPatch(t.dataset.pid, t.dataset.k, { [t.dataset.sv]: t.dataset.sv === 'on' ? t.checked : t.value.trim() }); return; }

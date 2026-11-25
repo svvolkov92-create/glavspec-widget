@@ -456,6 +456,7 @@
     customerPage: async (projectId, opts) => (await ready()).files.customerPage(projectId, opts),
     exportMsProject: async projectId => (await ready()).files.msProject(projectId),
     exportComposition: async (projectId, format, opts) => (await ready()).files.composition(projectId, format, opts),
+    exportExpertise: async (projectId, cycleId) => (await ready()).files.expertiseAnswers(projectId, cycleId),
     docDefaults: async () => (await ready()).files.docDefaults(),
     openTemplates: async () => (await ready()).files.openTemplates(),
     openProjectFolder: async id => (await ready()).files.openProjectFolder(id),
