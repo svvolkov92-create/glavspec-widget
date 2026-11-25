@@ -83,30 +83,19 @@ function taskList(ct, kind = '', holderId = '') {
     </div>`;
   }).join('') + moreBtn(key, all.length, ct.length, 30) : '<div class="none">Карточек не назначено.</div>';
 }
+// 4.19: a short card — who, what state, the numbers; the click opens the person (profile and their work).
+// Assignments do not count as cards: they show as «ждут заданий» (to this person's cards, not yet issued).
 function staffCard(u, list) {
-  const ct = list.filter(t => hasOwner(t, u.id)).sort(sortByDeadline), x = totals(ct);
-  const chief = u.role === 'specialist' && u.chiefId ? state.users.get(u.chiefId) : null;
-  const key = 'u:' + u.id, folded = isFolded(key);
-  return `<article class="card staff${folded ? ' folded' : ''}" data-drop="staff:${esc(u.id)}">
-    <div class="card-h">
-      <div class="row1">${foldBtn(key, folded)}<span class="kicons">${userIcons(u)}</span><h3>${esc(userLabel(u))}</h3><span class="chip tone-work">${esc(A.ROLES[u.role]?.label || '')}</span>
-        ${A.isGip(state.me) ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</div>
-      <div class="spec">${esc(A.directionLabels(u).join(', ') || 'направления не заданы')}${chief ? ' · главспец ' + esc(chief.name) : ''}</div>
-      ${upcomingAbsences(u).length || A.canEditAbsences(state.me, u) ? `<div class="abs-line">${upcomingAbsences(u).map(a => `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[a.kind] || 'нет')} ${fmtDate(a.from)}–${fmtDate(a.to)}</span>`).join('')}
-        ${A.canEditAbsences(state.me, u) ? `<button class="btn ghostbtn sm" type="button" data-act="absences" data-id="${esc(u.id)}">Отпуска и больничные</button>` : ''}</div>` : ''}
-      <div class="contacts">
-        ${contactLine('Телефон', u.phone)}${contactLine('Почта', u.email)}${contactLine('Мессенджер', u.messenger)}
-        ${!u.phone && !u.email && !u.messenger ? '<div class="hint">Контакты не указаны</div>' : ''}
-      </div>
-    </div>
-    <div class="stats">
-      <div class="stat"><span class="k">Карточек</span><span class="v">${x.count}</span></div>
-      <div class="stat"><span class="k">В работе</span><span class="v">${x.active}</span></div>
-      <div class="stat ${x.overdue ? 'bad' : ''}"><span class="k">Сорвано</span><span class="v">${x.overdue}</span></div>
-      <div class="stat"><span class="k">На проверке</span><span class="v">${x.review}</span></div>
-    </div>
-    ${game ? gameStats(u, ct) : ''}
-    <div class="ctasks">${taskList(ct, 'staff', u.id)}</div>
+  const work = list.filter(t => hasOwner(t, u.id) && t.kind !== 'assign'), x = totals(work);
+  const wait = asgWaitingFor(u.id, list).length, give = asgToGive(u.id, list).length, ab = upcomingAbsences(u)[0];
+  const stat = (k, v, cls = '', title = '') => `<div class="stat ${cls}"${title ? ` title="${title}"` : ''}><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  return `<article class="card staff pplcard" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" role="button" tabindex="0" title="Открыть: анкета и чем занят">
+    <div class="card-h"><div class="row1 pplcard-row">${avatarHtml(u)}<div class="pc-name"><h3><span class="kicons">${userIcons(u)}</span>${esc(userLabel(u))}</h3>
+      <span class="hint">${esc(u.position || A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''}</span></div>
+      ${A.isGip(state.me) ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</div>
+      <div class="pc-state">${personStateChip(personState(u))}${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}${give ? `<span class="chip tone-idle" title="Задания смежникам, которые этот человек ещё не выдал">выдать заданий: ${give}</span>` : ''}</div></div>
+    <div class="stats stats5">${stat('Карточек', x.count)}${stat('В работе', x.active)}${stat('Сорвано', x.overdue, x.overdue ? 'bad' : '')}${stat('На проверке', x.review)}${stat('Ждут заданий', wait, wait ? 'waitv' : '', 'Задания от смежников к карточкам этого человека, ещё не выданные')}</div>
+    ${game ? gameStats(u, work) : ''}
   </article>`;
 }
 // «С первого раза» and thanks, counted over all the person's cards (archived projects too: history matters).
@@ -175,12 +164,12 @@ function contractorsGrouped(people, list) {
 }
 // Compact list of staff: one line per person.
 function staffList(staff, list) {
-  return `<div class="tablewrap"><table class="staff-t"><thead><tr><th>Сотрудник</th><th>Роль</th><th class="r">В работе</th><th class="r">Сорвано</th><th class="r">На проверке</th>${game ? '<th class="r">С первого раза</th><th class="r">Спасибо</th>' : ''}<th>Отсутствие</th><th></th></tr></thead><tbody>
+  return `<div class="tablewrap"><table class="staff-t"><thead><tr><th>Сотрудник</th><th>Роль</th><th class="r">В работе</th><th class="r">Сорвано</th><th class="r">На проверке</th><th class="r">Ждут заданий</th>${game ? '<th class="r">С первого раза</th><th class="r">Спасибо</th>' : ''}<th>Отсутствие</th><th></th></tr></thead><tbody>
     ${staff.map(u => {
-      const ct = list.filter(t => hasOwner(t, u.id)), x = totals(ct), all = [...state.tasks.values()].filter(t => hasOwner(t, u.id)), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
+      const ct = list.filter(t => hasOwner(t, u.id) && t.kind !== 'assign'), x = totals(ct), wait = asgWaitingFor(u.id, list).length, all = [...state.tasks.values()].filter(t => hasOwner(t, u.id)), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
       const ab = upcomingAbsences(u)[0];
-      return `<tr class="row" data-act="person-tasks" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" title="Показать карточки сотрудника"><td><span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
-        <td class="r num">${x.active || '—'}</td><td class="r num ${x.overdue ? 'neg' : ''}">${x.overdue || '—'}</td><td class="r num">${x.review || '—'}</td>
+      return `<tr class="row" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" title="Открыть: анкета и чем занят"><td>${avatarHtml(u, 'sm')}<span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
+        <td class="r num">${x.active || '—'}</td><td class="r num ${x.overdue ? 'neg' : ''}">${x.overdue || '—'}</td><td class="r num">${x.review || '—'}</td><td class="r num">${wait || '—'}</td>
         ${game ? `<td class="r num">${ft.pct === null ? '—' : ft.pct + '%'}</td><td class="r num">${th ? '♥ ' + th : '—'}</td>` : ''}
         <td>${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}</td>
         <td class="nowrap">${A.canEditAbsences(state.me, u) ? `<button class="btn ghostbtn sm" type="button" data-act="absences" data-id="${esc(u.id)}">Отпуска</button>` : ''}${A.isGip(state.me) ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</td></tr>`;
@@ -203,13 +192,13 @@ function viewPeople() {
   const gip = A.isGip(state.me);
   const head = (title, hint, btn) => `<div class="people-h"><h2>${title}</h2>${hint}<span class="spacer"></span>${btn}</div>`;
   const mode = ['cards', 'list', 'tree', 'org'].includes(peopleMode) && !(peopleMode === 'tree' && isSpec()) ? peopleMode : 'cards';
-  const modeSeg = `<span class="seg"><button class="btn sm ${mode === 'cards' ? 'on' : ''}" type="button" data-act="people-mode" data-v="cards" title="Карточки с контактами и задачами">Карточки</button><button class="btn sm ${mode === 'list' ? 'on' : ''}" type="button" data-act="people-mode" data-v="list" title="Одна строка на человека">Список</button><button class="btn sm ${mode === 'tree' ? 'on' : ''}" type="button" data-act="people-mode" data-v="tree" title="Структура: ГИП → главспецы → специалисты, цифры по группам, доступ к бюджету"${isSpec() ? ' hidden' : ''}>Структура</button><button class="btn sm ${mode === 'org' ? 'on' : ''}" type="button" data-act="people-mode" data-v="org" title="Оргструктура: отделы и группы с руководителями — видна всем штатным">Оргструктура</button></span>`;
+  const modeSeg = `<span class="seg"><button class="btn sm ${mode === 'cards' ? 'on' : ''}" type="button" data-act="people-mode" data-v="cards" title="Коротко: кто чем занят — щелчок по карточке откроет человека">Карточки</button><button class="btn sm ${mode === 'list' ? 'on' : ''}" type="button" data-act="people-mode" data-v="list" title="Одна строка на человека">Список</button><button class="btn sm ${mode === 'tree' ? 'on' : ''}" type="button" data-act="people-mode" data-v="tree" title="Структура: ГИП → главспецы → специалисты, цифры по группам, доступ к бюджету"${isSpec() ? ' hidden' : ''}>Структура</button><button class="btn sm ${mode === 'org' ? 'on' : ''}" type="button" data-act="people-mode" data-v="org" title="Оргструктура: отделы и группы с руководителями — видна всем штатным">Оргструктура</button></span>`;
   return head(`Штатные <span class="cnt">${staff.length}</span>`, tip('people-staff', 'У каждого штатного свой пульт — войти можно, выбрав имя в заголовке.', 'inline'),
       modeSeg + (gip && mode !== 'tree' && mode !== 'org' ? '<button class="btn sm" data-act="new-user" data-role="specialist" type="button">+ Сотрудник</button>' : ''))
     + (mode === 'org' ? viewOrg() : mode === 'tree' ? viewTeam()
       : !staff.length ? `<p class="hint people-empty">${gip ? 'Штатных сотрудников пока нет.' : 'Специалистов в вашей команде пока нет — их добавляет ГИП.'}</p>`
       : mode === 'list' ? staffList(staff, list)
-      : foldAllBar(staff.map(u => 'u:' + u.id)) + `<div class="cards">${staff.map(u => staffCard(u, list)).join('')}</div>`)
+      : `<div class="cards pplcards">${staff.map(u => staffCard(u, list)).join('')}</div>`)
     + (isSpec() ? '' : head(`Подрядчики <span class="cnt">${people.length}</span>`, tip('people-outside', 'Внештатные, без доступа к программе — сроки и оплату по ним ведёт главспец. Сгруппированы по направлениям из специализации.', 'inline'),
       `${people.length ? `<button class="btn ghostbtn sm" type="button" data-act="cg-all" data-on="1">▾ Раскрыть группы</button><button class="btn ghostbtn sm" type="button" data-act="cg-all" data-on="0">▸ Свернуть</button>` : ''}<button class="btn sm" data-act="new-contractor" type="button">+ Подрядчик</button>`)
     + (people.length ? contractorsGrouped(people, list)
@@ -230,6 +219,5 @@ onAct({
   'cg-toggle': ({ id }) => { toggleSet(cgOpen, id, 'cgOpen'); },
   'co-toggle': ({ id }) => { toggleSet(coOpen, id, 'coOpen'); },
   'cg-all': ({ el }) => { if (el.dataset.on === '1') CONTRACTOR_GROUPS.forEach(([k]) => cgOpen.add(k || '-')); else cgOpen.clear(); saveLocal('cgOpen', [...cgOpen]); renderNow(); },
-  'person-tasks': ({ e, id }) => { if (!e.target.closest('button')) { state.filters = { ...EMPTY_FILTERS, owner: id }; state.tab = 'tasks'; saveLocal('tab', 'tasks'); renderNow(); } },
   'move-task': ({ e, el, id }) => { e.stopPropagation(); reassign(id, el.dataset.kind, el.dataset.from); },
 });

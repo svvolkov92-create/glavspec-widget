@@ -4115,30 +4115,19 @@ function taskList(ct, kind = '', holderId = '') {
     </div>`;
   }).join('') + moreBtn(key, all.length, ct.length, 30) : '<div class="none">Карточек не назначено.</div>';
 }
+// 4.19: a short card — who, what state, the numbers; the click opens the person (profile and their work).
+// Assignments do not count as cards: they show as «ждут заданий» (to this person's cards, not yet issued).
 function staffCard(u, list) {
-  const ct = list.filter(t => hasOwner(t, u.id)).sort(sortByDeadline), x = totals(ct);
-  const chief = u.role === 'specialist' && u.chiefId ? state.users.get(u.chiefId) : null;
-  const key = 'u:' + u.id, folded = isFolded(key);
-  return `<article class="card staff${folded ? ' folded' : ''}" data-drop="staff:${esc(u.id)}">
-    <div class="card-h">
-      <div class="row1">${foldBtn(key, folded)}<span class="kicons">${userIcons(u)}</span><h3>${esc(userLabel(u))}</h3><span class="chip tone-work">${esc(A.ROLES[u.role]?.label || '')}</span>
-        ${A.isGip(state.me) ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</div>
-      <div class="spec">${esc(A.directionLabels(u).join(', ') || 'направления не заданы')}${chief ? ' · главспец ' + esc(chief.name) : ''}</div>
-      ${upcomingAbsences(u).length || A.canEditAbsences(state.me, u) ? `<div class="abs-line">${upcomingAbsences(u).map(a => `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[a.kind] || 'нет')} ${fmtDate(a.from)}–${fmtDate(a.to)}</span>`).join('')}
-        ${A.canEditAbsences(state.me, u) ? `<button class="btn ghostbtn sm" type="button" data-act="absences" data-id="${esc(u.id)}">Отпуска и больничные</button>` : ''}</div>` : ''}
-      <div class="contacts">
-        ${contactLine('Телефон', u.phone)}${contactLine('Почта', u.email)}${contactLine('Мессенджер', u.messenger)}
-        ${!u.phone && !u.email && !u.messenger ? '<div class="hint">Контакты не указаны</div>' : ''}
-      </div>
-    </div>
-    <div class="stats">
-      <div class="stat"><span class="k">Карточек</span><span class="v">${x.count}</span></div>
-      <div class="stat"><span class="k">В работе</span><span class="v">${x.active}</span></div>
-      <div class="stat ${x.overdue ? 'bad' : ''}"><span class="k">Сорвано</span><span class="v">${x.overdue}</span></div>
-      <div class="stat"><span class="k">На проверке</span><span class="v">${x.review}</span></div>
-    </div>
-    ${game ? gameStats(u, ct) : ''}
-    <div class="ctasks">${taskList(ct, 'staff', u.id)}</div>
+  const work = list.filter(t => hasOwner(t, u.id) && t.kind !== 'assign'), x = totals(work);
+  const wait = asgWaitingFor(u.id, list).length, give = asgToGive(u.id, list).length, ab = upcomingAbsences(u)[0];
+  const stat = (k, v, cls = '', title = '') => `<div class="stat ${cls}"${title ? ` title="${title}"` : ''}><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  return `<article class="card staff pplcard" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" role="button" tabindex="0" title="Открыть: анкета и чем занят">
+    <div class="card-h"><div class="row1 pplcard-row">${avatarHtml(u)}<div class="pc-name"><h3><span class="kicons">${userIcons(u)}</span>${esc(userLabel(u))}</h3>
+      <span class="hint">${esc(u.position || A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''}</span></div>
+      ${A.isGip(state.me) ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</div>
+      <div class="pc-state">${personStateChip(personState(u))}${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}${give ? `<span class="chip tone-idle" title="Задания смежникам, которые этот человек ещё не выдал">выдать заданий: ${give}</span>` : ''}</div></div>
+    <div class="stats stats5">${stat('Карточек', x.count)}${stat('В работе', x.active)}${stat('Сорвано', x.overdue, x.overdue ? 'bad' : '')}${stat('На проверке', x.review)}${stat('Ждут заданий', wait, wait ? 'waitv' : '', 'Задания от смежников к карточкам этого человека, ещё не выданные')}</div>
+    ${game ? gameStats(u, work) : ''}
   </article>`;
 }
 // «С первого раза» and thanks, counted over all the person's cards (archived projects too: history matters).
@@ -4207,12 +4196,12 @@ function contractorsGrouped(people, list) {
 }
 // Compact list of staff: one line per person.
 function staffList(staff, list) {
-  return `<div class="tablewrap"><table class="staff-t"><thead><tr><th>Сотрудник</th><th>Роль</th><th class="r">В работе</th><th class="r">Сорвано</th><th class="r">На проверке</th>${game ? '<th class="r">С первого раза</th><th class="r">Спасибо</th>' : ''}<th>Отсутствие</th><th></th></tr></thead><tbody>
+  return `<div class="tablewrap"><table class="staff-t"><thead><tr><th>Сотрудник</th><th>Роль</th><th class="r">В работе</th><th class="r">Сорвано</th><th class="r">На проверке</th><th class="r">Ждут заданий</th>${game ? '<th class="r">С первого раза</th><th class="r">Спасибо</th>' : ''}<th>Отсутствие</th><th></th></tr></thead><tbody>
     ${staff.map(u => {
-      const ct = list.filter(t => hasOwner(t, u.id)), x = totals(ct), all = [...state.tasks.values()].filter(t => hasOwner(t, u.id)), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
+      const ct = list.filter(t => hasOwner(t, u.id) && t.kind !== 'assign'), x = totals(ct), wait = asgWaitingFor(u.id, list).length, all = [...state.tasks.values()].filter(t => hasOwner(t, u.id)), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
       const ab = upcomingAbsences(u)[0];
-      return `<tr class="row" data-act="person-tasks" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" title="Показать карточки сотрудника"><td><span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
-        <td class="r num">${x.active || '—'}</td><td class="r num ${x.overdue ? 'neg' : ''}">${x.overdue || '—'}</td><td class="r num">${x.review || '—'}</td>
+      return `<tr class="row" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" title="Открыть: анкета и чем занят"><td>${avatarHtml(u, 'sm')}<span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
+        <td class="r num">${x.active || '—'}</td><td class="r num ${x.overdue ? 'neg' : ''}">${x.overdue || '—'}</td><td class="r num">${x.review || '—'}</td><td class="r num">${wait || '—'}</td>
         ${game ? `<td class="r num">${ft.pct === null ? '—' : ft.pct + '%'}</td><td class="r num">${th ? '♥ ' + th : '—'}</td>` : ''}
         <td>${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}</td>
         <td class="nowrap">${A.canEditAbsences(state.me, u) ? `<button class="btn ghostbtn sm" type="button" data-act="absences" data-id="${esc(u.id)}">Отпуска</button>` : ''}${A.isGip(state.me) ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</td></tr>`;
@@ -4235,13 +4224,13 @@ function viewPeople() {
   const gip = A.isGip(state.me);
   const head = (title, hint, btn) => `<div class="people-h"><h2>${title}</h2>${hint}<span class="spacer"></span>${btn}</div>`;
   const mode = ['cards', 'list', 'tree', 'org'].includes(peopleMode) && !(peopleMode === 'tree' && isSpec()) ? peopleMode : 'cards';
-  const modeSeg = `<span class="seg"><button class="btn sm ${mode === 'cards' ? 'on' : ''}" type="button" data-act="people-mode" data-v="cards" title="Карточки с контактами и задачами">Карточки</button><button class="btn sm ${mode === 'list' ? 'on' : ''}" type="button" data-act="people-mode" data-v="list" title="Одна строка на человека">Список</button><button class="btn sm ${mode === 'tree' ? 'on' : ''}" type="button" data-act="people-mode" data-v="tree" title="Структура: ГИП → главспецы → специалисты, цифры по группам, доступ к бюджету"${isSpec() ? ' hidden' : ''}>Структура</button><button class="btn sm ${mode === 'org' ? 'on' : ''}" type="button" data-act="people-mode" data-v="org" title="Оргструктура: отделы и группы с руководителями — видна всем штатным">Оргструктура</button></span>`;
+  const modeSeg = `<span class="seg"><button class="btn sm ${mode === 'cards' ? 'on' : ''}" type="button" data-act="people-mode" data-v="cards" title="Коротко: кто чем занят — щелчок по карточке откроет человека">Карточки</button><button class="btn sm ${mode === 'list' ? 'on' : ''}" type="button" data-act="people-mode" data-v="list" title="Одна строка на человека">Список</button><button class="btn sm ${mode === 'tree' ? 'on' : ''}" type="button" data-act="people-mode" data-v="tree" title="Структура: ГИП → главспецы → специалисты, цифры по группам, доступ к бюджету"${isSpec() ? ' hidden' : ''}>Структура</button><button class="btn sm ${mode === 'org' ? 'on' : ''}" type="button" data-act="people-mode" data-v="org" title="Оргструктура: отделы и группы с руководителями — видна всем штатным">Оргструктура</button></span>`;
   return head(`Штатные <span class="cnt">${staff.length}</span>`, tip('people-staff', 'У каждого штатного свой пульт — войти можно, выбрав имя в заголовке.', 'inline'),
       modeSeg + (gip && mode !== 'tree' && mode !== 'org' ? '<button class="btn sm" data-act="new-user" data-role="specialist" type="button">+ Сотрудник</button>' : ''))
     + (mode === 'org' ? viewOrg() : mode === 'tree' ? viewTeam()
       : !staff.length ? `<p class="hint people-empty">${gip ? 'Штатных сотрудников пока нет.' : 'Специалистов в вашей команде пока нет — их добавляет ГИП.'}</p>`
       : mode === 'list' ? staffList(staff, list)
-      : foldAllBar(staff.map(u => 'u:' + u.id)) + `<div class="cards">${staff.map(u => staffCard(u, list)).join('')}</div>`)
+      : `<div class="cards pplcards">${staff.map(u => staffCard(u, list)).join('')}</div>`)
     + (isSpec() ? '' : head(`Подрядчики <span class="cnt">${people.length}</span>`, tip('people-outside', 'Внештатные, без доступа к программе — сроки и оплату по ним ведёт главспец. Сгруппированы по направлениям из специализации.', 'inline'),
       `${people.length ? `<button class="btn ghostbtn sm" type="button" data-act="cg-all" data-on="1">▾ Раскрыть группы</button><button class="btn ghostbtn sm" type="button" data-act="cg-all" data-on="0">▸ Свернуть</button>` : ''}<button class="btn sm" data-act="new-contractor" type="button">+ Подрядчик</button>`)
     + (people.length ? contractorsGrouped(people, list)
@@ -4262,7 +4251,6 @@ onAct({
   'cg-toggle': ({ id }) => { toggleSet(cgOpen, id, 'cgOpen'); },
   'co-toggle': ({ id }) => { toggleSet(coOpen, id, 'coOpen'); },
   'cg-all': ({ el }) => { if (el.dataset.on === '1') CONTRACTOR_GROUPS.forEach(([k]) => cgOpen.add(k || '-')); else cgOpen.clear(); saveLocal('cgOpen', [...cgOpen]); renderNow(); },
-  'person-tasks': ({ e, id }) => { if (!e.target.closest('button')) { state.filters = { ...EMPTY_FILTERS, owner: id }; state.tab = 'tasks'; saveLocal('tab', 'tasks'); renderNow(); } },
   'move-task': ({ e, el, id }) => { e.stopPropagation(); reassign(id, el.dataset.kind, el.dataset.from); },
 });
 /* ---------- 4.1: «Оргструктура» — departments and groups top-down, seen by every staff member ----------
@@ -4398,15 +4386,36 @@ async function orgFromGroups() {
   await write(ops, `Создано отделов: ${chiefs.length + 1}`);
 }
 
-/* ---------- a person's work: what they are doing now (the «Офис» view itself was removed in 4.18) ---------- */
+/* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
+onAct({
+  'org-fold': ({ el }) => { const id = el.dataset.id; if (el.dataset.open === 'true') { orgOpen.delete(id); orgOpen.add('x:' + id); } else { orgOpen.add(id); orgOpen.delete('x:' + id); } saveLocal('orgOpen', [...orgOpen]); renderNow(); },
+  'org-people': ({ el }) => { orgToggle('p:' + el.dataset.id); },
+  'org-add': ({ el }) => { askDept(null, el.dataset.parent || ''); },
+  'org-edit': ({ el }) => { const d = state.depts.get(el.dataset.id); if (d) askDept(d); },
+  'org-from-groups': () => { orgFromGroups(); },
+});
+/* ---------- 4.19: a person — the profile («анкета») and what they are doing now ---------- */
+// The person keeps the photo, «о себе», contacts and programs; the birthday is fixed after the first fill;
+// the position and the hire date are set by the GIP (the rules are in access.js: SELF_FIELDS, userDataError).
+function avatarHtml(u, cls = '') {
+  const ph = A.photoOf(u);
+  return ph ? `<img class="ava ${cls}" src="${ph}" alt="">` : `<span class="ava ${cls}" aria-hidden="true">${esc(initials(u?.name))}</span>`;
+}
+const dayMonth = d => (isDate(d) ? fmtDate(d).slice(0, 5) : '');
+// Assignments (kind 'assign') are not work of their own: on a person they read as «ждут заданий» — not yet issued
+// to the person's cards — and «выдать» — not yet issued by the person.
+const ASG_OPEN = t => t.kind === 'assign' && !t.deletedAt && !['review', 'done'].includes(t.status);
+const asgWaitingFor = (uid, list = tasksArr()) => list.filter(t => ASG_OPEN(t) && asgTo(t).some(x => hasOwner(x, uid)));
+const asgToGive = (uid, list = tasksArr()) => list.filter(t => ASG_OPEN(t) && hasOwner(t, uid));
+
 // What the person is doing, from the state of their cards (the most urgent wins).
 function personState(u) {
   const away = A.absencesOf(u).find(a => a.from <= state.today && a.to >= state.today);
   if (away) return { state: 'away', awayText: `${A.ABSENCE_KINDS[away.kind] || 'нет'} до ${fmtDate(away.to).slice(0, 5)}`, cards: [] };
-  const cards = tasksArr().filter(t => hasOwner(t, u.id) && t.status !== 'done').sort(sortByDeadline);
+  const cards = tasksArr().filter(t => hasOwner(t, u.id) && t.kind !== 'assign' && t.status !== 'done').sort(sortByDeadline);
   const toCheck = u.role === 'specialist' ? 0 : tasksArr().filter(t => t.status === 'review' && A.reviewersOf(t, liveUsers(), state.projects).includes(u.id)).length;
   if (cards.some(t => timing(t).overdue)) return { state: 'late', cards };
-  if (toCheck) return { state: 'checking', bubble: [`проверяет ${toCheck}`, '#EDE8F7', '#5A3FA0'], cards };
+  if (toCheck) return { state: 'checking', cards };
   if (cards.some(t => t.status === 'review')) return { state: 'carry', cards };
   if (cards.some(t => t.status === 'revision')) return { state: 'revision', cards };
   if (cards.some(t => t.status === 'in_progress')) return { state: 'work', cards };
@@ -4414,19 +4423,46 @@ function personState(u) {
   return { state: 'free', cards };
 }
 const PERSON_STATE_TEXT = { late: 'срок сорван', checking: 'проверяет работы', carry: 'сдал на проверку', revision: 'на доработке', work: 'в работе', idle: 'работы не начаты', free: 'свободен — можно дать работу', away: 'отсутствует' };
-// Click on a person: their open cards, with «передать» and a link to all their cards.
+const PERSON_STATE_TONE = { late: 'bad', checking: 'review', carry: 'review', revision: 'warn', work: 'work', idle: 'idle', free: 'ok', away: 'warn' };
+const personStateChip = st => `<span class="chip tone-${PERSON_STATE_TONE[st.state]}">${esc(st.awayText || PERSON_STATE_TEXT[st.state])}</span>`;
+
+function profileHtml(u) {
+  const rows = [
+    u.position ? ['Должность', esc(u.position)] : null,
+    isDate(u.hireDate) ? ['В команде с', fmtDate(u.hireDate)] : null,
+    isDate(u.birthday) ? ['День рождения', dayMonth(u.birthday)] : null,
+    u.phone ? ['Телефон', esc(u.phone)] : null, u.email ? ['Почта', esc(u.email)] : null, u.messenger ? ['Мессенджер', esc(u.messenger)] : null,
+  ].filter(Boolean);
+  const progs = Array.isArray(u.programs) ? u.programs : [];
+  return `<div class="pf">${rows.length ? `<div class="pf-kv">${rows.map(([k, v]) => `<span class="hint">${k}</span><span>${v}</span>`).join('')}</div>` : ''}
+    ${u.about ? `<p class="pf-about">${esc(u.about)}</p>` : ''}
+    ${progs.length ? `<div class="pf-progs"><span class="hint">Программы:</span> ${progs.map(x => `<span class="chip tone-idle">${esc(x)}</span>`).join(' ')}</div>` : ''}
+    ${!rows.length && !u.about && !progs.length ? '<p class="hint">Анкета не заполнена.</p>' : ''}</div>`;
+}
+
+// Click on a person: the profile, their open cards with «передать», the assignments they wait for or must issue.
 function personPopup(uid) {
   const u = state.users.get(uid);
   if (!u) return;
-  const st = personState(u);
+  const st = personState(u), wait = asgWaitingFor(uid), give = asgToGive(uid), me = u.id === state.me?.id;
+  const cardRow = t => `<div class="op-row"><button class="linkbtn" type="button" data-op-open="${esc(t.id)}">${marksHtml(t)} <span>${esc(projectOf(t)?.name || '')}</span></button>${statusChip(t)}<span class="due ${timing(t).cls}">${esc(timing(t).text)}</span>
+      ${canEditFields() ? `<button class="btn ghostbtn sm" type="button" data-op-move="${esc(t.id)}" title="Передать другому сотруднику">⇄ Передать</button>` : ''}</div>`;
+  const asgRow = t => `<div class="op-row"><button class="linkbtn" type="button" data-op-open="${esc(t.id)}">${esc(t.note || t.title)} <span>${esc(projectOf(t)?.name || '')}</span></button><span class="hint">${esc(t.title)}</span>
+      <span class="due ${asgLate(t) ? 'bad' : ''}">${isDate(t.finish) ? fmtDate(t.finish) : '—'}</span></div>`;
   const root = document.createElement('div');
   root.className = 'modal-back';
-  root.innerHTML = `<div class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="optitle"><h2 id="optitle"><span class="kicons">${userIcons(u)}</span>${esc(u.name)}</h2>
-    <p class="hint">${esc(A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''} · ${esc(st.awayText || PERSON_STATE_TEXT[st.state])}</p>
-    ${st.cards.length ? `<div class="op-list">${st.cards.map(t => `<div class="op-row"><button class="linkbtn" type="button" data-op-open="${esc(t.id)}">${marksHtml(t)} <span>${esc(projectOf(t)?.name || '')}</span></button>${statusChip(t)}<span class="due ${timing(t).cls}">${esc(timing(t).text)}</span>
-      ${canEditFields() ? `<button class="btn ghostbtn sm" type="button" data-op-move="${esc(t.id)}" title="Передать другому сотруднику">⇄ Передать</button>` : ''}</div>`).join('')}</div>`
+  root.innerHTML = `<div class="modal wide-modal person-modal" role="dialog" aria-modal="true" aria-labelledby="optitle">
+    <div class="pm-head">${avatarHtml(u, 'big')}<div><h2 id="optitle"><span class="kicons">${userIcons(u)}</span>${esc(u.name)}</h2>
+      <p class="hint">${esc(A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''}</p>${personStateChip(st)}</div></div>
+    ${profileHtml(u)}
+    <h3 class="pm-h">Чем занят</h3>
+    ${st.cards.length ? `<div class="op-list">${st.cards.map(cardRow).join('')}</div>`
       : `<div class="none">${st.state === 'away' ? 'Сотрудник отсутствует.' : 'Открытых карточек нет — можно дать работу.'}</div>`}
-    <div class="modal-f"><button class="btn" type="button" data-op-all>Все карточки сотрудника</button>${A.canEditAbsences(state.me, u) ? '<button class="btn ghostbtn" type="button" data-op-abs>Отпуска и больничные</button>' : ''}<span class="spacer"></span><button class="btn primary" type="button" data-m="close">Закрыть</button></div></div>`;
+    ${wait.length ? `<h3 class="pm-h">Ждёт заданий <span class="cnt">${wait.length}</span></h3><div class="op-list">${wait.map(asgRow).join('')}</div>` : ''}
+    ${give.length ? `<h3 class="pm-h">Должен выдать задания <span class="cnt">${give.length}</span></h3><div class="op-list">${give.map(asgRow).join('')}</div>` : ''}
+    <div class="modal-f"><button class="btn" type="button" data-op-all>Все карточки</button>${A.canEditAbsences(state.me, u) ? '<button class="btn ghostbtn" type="button" data-op-abs>Отпуска</button>' : ''}
+      ${me ? '<button class="btn ghostbtn" type="button" data-op-profile>Моя анкета</button>' : ''}${A.isGip(state.me) ? '<button class="btn ghostbtn" type="button" data-op-edit>Изменить</button>' : ''}
+      <span class="spacer"></span><button class="btn primary" type="button" data-m="close">Закрыть</button></div></div>`;
   document.body.append(root);
   const close = () => root.remove();
   root.addEventListener('click', e => {
@@ -4437,18 +4473,87 @@ function personPopup(uid) {
     else if (b.dataset.opMove) { close(); reassign(b.dataset.opMove, 'staff', uid); }
     else if (b.hasAttribute('data-op-all')) { close(); state.filters = { ...EMPTY_FILTERS, owner: uid }; state.tab = 'tasks'; saveLocal('tab', 'tasks'); renderNow(); }
     else if (b.hasAttribute('data-op-abs')) { close(); openAbsences(uid); }
+    else if (b.hasAttribute('data-op-profile')) { close(); openProfile(); }
+    else if (b.hasAttribute('data-op-edit')) { close(); openUser(uid); }
   });
   root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
   root.querySelector('[data-m="close"]').focus();
 }
+
+// A picture from the disk → a square 192×192 JPEG as a data: URL (the page allows data: images only).
+function photoFromFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !/^image\//.test(file.type)) return reject(new Error('Выберите картинку: JPG, PNG или WebP.'));
+    if (file.size > 15 * 1024 * 1024) return reject(new Error('Картинка больше 15 МБ.'));
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error('Не удалось прочитать файл.'));
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Не удалось открыть картинку.'));
+      img.onload = () => {
+        const S = 192, c = document.createElement('canvas'), k = Math.max(S / img.width, S / img.height);
+        c.width = c.height = S;
+        c.getContext('2d').drawImage(img, (S - img.width * k) / 2, (S - img.height * k) / 2, img.width * k, img.height * k);
+        resolve(c.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+const programsFrom = text => [...new Set(String(text || '').split(/[\n,;]+/).map(x => x.trim().slice(0, 80)).filter(Boolean))].slice(0, 40);
+
+// «Моя анкета»: the person fills it in; the GIP-only fields are shown, not edited.
+function openProfile() {
+  const u = state.me && state.users.get(state.me.id);
+  if (!u) return;
+  const gip = A.isGip(state.me), bdayLocked = !gip && isDate(u.birthday);
+  let photo = A.photoOf(u);
+  const root = document.createElement('div');
+  root.className = 'modal-back';
+  root.innerHTML = `<form class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="pf-t" novalidate><h2 id="pf-t">Моя анкета</h2>
+    <div class="pf-photo"><span id="pf-ava">${avatarHtml({ ...u, photo }, 'big')}</span><div><label class="btn sm" for="pf-file">Выбрать фото</label><input id="pf-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+      <button class="btn ghostbtn sm" type="button" id="pf-nophoto"${photo ? '' : ' hidden'}>Убрать фото</button><p class="hint">Фото обрежется до квадрата.</p></div></div>
+    <div class="fgrid">
+      <div class="f wide"><label for="pf-about">О себе</label><textarea id="pf-about" rows="3" maxlength="1500" placeholder="Чем занимаюсь, в чём силён, к кому обращаться">${esc(u.about || '')}</textarea></div>
+      <div class="f"><label for="pf-phone">Телефон</label><input id="pf-phone" type="tel" value="${esc(u.phone || '')}" maxlength="40"></div>
+      <div class="f"><label for="pf-email">Почта</label><input id="pf-email" type="email" value="${esc(u.email || '')}" maxlength="120"></div>
+      <div class="f"><label for="pf-msg">Мессенджер</label><input id="pf-msg" value="${esc(u.messenger || '')}" maxlength="120"></div>
+      <div class="f"><label for="pf-bday">День рождения</label><input id="pf-bday" type="date" value="${esc(u.birthday || '')}"${bdayLocked ? ' disabled' : ''}>
+        <span class="hint">${bdayLocked ? 'Уже указан — изменить может ГИП.' : 'Указывается один раз, потом меняет только ГИП. Год никому не показывается.'}</span></div>
+      <div class="f wide"><label for="pf-progs">Программы, которыми владею</label><textarea id="pf-progs" rows="2" maxlength="2000" placeholder="AutoCAD, Revit, nanoCAD, ГРАНД-Смета — через запятую">${esc((u.programs || []).join(', '))}</textarea></div>
+    </div>
+    <p class="hint">Должность${u.position ? ` (${esc(u.position)})` : ''}, дату приёма${isDate(u.hireDate) ? ` (${fmtDate(u.hireDate)})` : ''}, роль и направления заполняет ГИП.</p>
+    <div class="err" id="pf-err" hidden></div>
+    <div class="modal-f"><button class="btn primary" type="submit">Сохранить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`;
+  document.body.append(root);
+  const q = s => root.querySelector(s), close = () => root.remove();
+  const showPhoto = () => { q('#pf-ava').innerHTML = avatarHtml({ ...u, photo }, 'big'); q('#pf-nophoto').hidden = !photo; };
+  q('#pf-file').addEventListener('change', async e => {
+    try { photo = await photoFromFile(e.target.files[0]); showPhoto(); q('#pf-err').hidden = true; } catch (err) { modalErr(root, '#pf-err', err.message); }
+    e.target.value = '';
+  });
+  q('#pf-nophoto').addEventListener('click', () => { photo = ''; showPhoto(); });
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  root.addEventListener('click', e => { if (e.target === root || e.target.dataset.m === 'cancel') close(); });
+  q('form').addEventListener('submit', async e => {
+    e.preventDefault(); e.stopPropagation();
+    const data = { photo, about: q('#pf-about').value.trim(), phone: q('#pf-phone').value.trim(), email: q('#pf-email').value.trim(), messenger: q('#pf-msg').value.trim(), programs: programsFrom(q('#pf-progs').value) };
+    if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return modalErr(root, '#pf-err', 'Проверьте адрес почты.', '#pf-email');
+    const bd = q('#pf-bday').value;
+    if (!bdayLocked && isDate(bd) && bd !== u.birthday) {
+      if (!gip && !(await confirmBox(`День рождения ${fmtDate(bd)} — после сохранения изменить его сможет только ГИП. Всё верно?`, 'Да, верно'))) return;
+      data.birthday = bd;
+    }
+    if (await write(op.update('users', u.id, data), 'Анкета сохранена')) close();
+  });
+  q('#pf-about').focus();
+}
+
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
   'person-open': ({ id }) => { personPopup(id); },
-  'org-fold': ({ el }) => { const id = el.dataset.id; if (el.dataset.open === 'true') { orgOpen.delete(id); orgOpen.add('x:' + id); } else { orgOpen.add(id); orgOpen.delete('x:' + id); } saveLocal('orgOpen', [...orgOpen]); renderNow(); },
-  'org-people': ({ el }) => { orgToggle('p:' + el.dataset.id); },
-  'org-add': ({ el }) => { askDept(null, el.dataset.parent || ''); },
-  'org-edit': ({ el }) => { const d = state.depts.get(el.dataset.id); if (d) askDept(d); },
-  'org-from-groups': () => { orgFromGroups(); },
+  'my-profile': () => { setUserMenu(false); openProfile(); },
 });
 /* ---------- Gantt chart: drag to pan, Ctrl+wheel or buttons to zoom ---------- */
 const GANTT_MIN_DAYS = 7, GANTT_MAX_DAYS = 730;
@@ -6597,11 +6702,13 @@ function setUserMenu(open) {
       <b>${esc(u.name)}</b><small>${esc(userTag(u))}</small></button>`;
     if (state.remote) {
       menu.innerHTML = `<div class="menu-h">${esc(state.me?.name || '')}</div><p class="role-hint">${esc(userTag(state.me || {}))} · общая база ${esc(state.remote.url || '')}, вход «${esc(state.remote.login || '')}»</p>
+        <button role="menuitem" type="button" data-act="my-profile"><b>Моя анкета</b><small>Фото, о себе, контакты, программы</small></button>
         <button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Связь, пароль${A.isGip(state.me) ? ', кто может входить' : ''}</small></button>`;
       menu.hidden = !open; $('#btn-user').setAttribute('aria-expanded', String(open)); return;
     }
     menu.innerHTML = [['director', 'Директор'], ['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
       .map(([r, l]) => usersByRole(r).length ? `<div class="menu-h">${l}</div>${usersByRole(r).map(item).join('')}` : '').join('')
+      + (state.me ? '<button role="menuitem" type="button" data-act="my-profile"><b>Моя анкета</b><small>Фото, о себе, контакты, программы</small></button>' : '')
       + '<p class="role-hint">Локальная версия: вход без пароля, роли разделяют интерфейс, но не защищают файл данных.</p>'
       + (api.serverInfo ? '<button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Общая база команды: подключиться или перенести</small></button>' : '');
   }
@@ -6729,8 +6836,11 @@ function openUser(id, role = 'specialist', chiefId = '') {
       <div class="f"><label for="u-phone">Телефон</label><input id="u-phone" name="phone" type="tel" value="${esc(u.phone || '')}" maxlength="40"></div>
       <div class="f"><label for="u-email">Почта</label><input id="u-email" name="email" type="email" value="${esc(u.email || '')}" maxlength="120"></div>
       <div class="f"><label for="u-msg">Мессенджер</label><input id="u-msg" name="messenger" value="${esc(u.messenger || '')}" maxlength="120"></div>
-      <div class="f"><label for="u-bday">День рождения</label><input id="u-bday" name="birthday" type="date" value="${esc(u.birthday || '')}"><span class="hint">В «Офисе» в этот день — колпак. Год не показывается.</span></div>
+      <div class="f"><label for="u-pos">Должность</label><input id="u-pos" name="position" value="${esc(u.position || '')}" maxlength="120" placeholder="Ведущий инженер"></div>
+      <div class="f"><label for="u-hire">Дата приёма</label><input id="u-hire" name="hireDate" type="date" value="${esc(u.hireDate || '')}"></div>
+      <div class="f"><label for="u-bday">День рождения</label><input id="u-bday" name="birthday" type="date" value="${esc(u.birthday || '')}"><span class="hint">Сотрудник указывает его сам один раз; исправить можно здесь. Год не показывается.</span></div>
     </div>
+    ${id ? '<p class="hint">Фото, «о себе» и программы сотрудник заполняет сам — «Моя анкета» в меню под своим именем.</p>' : ''}
     <p class="hint">${id ? 'Пульт сотрудника' : 'Пульт для сотрудника создаётся автоматически'}: войти в него — щелчок по имени в заголовке программы.</p>
     <div class="err" id="form-err" hidden></div>
     ${id ? `<p class="hint">Карточек на сотруднике: ${owned}.</p>` : ''}`,
@@ -6750,7 +6860,7 @@ function syncUserForm() {
 async function submitUser() {
   const { id } = state.drawer;
   const role = id === state.me.id ? state.me.role : val('role');
-  const data = { name: val('name'), role, directions: $$('input[name="dir"]:checked').map(i => i.value), phone: val('phone'), email: val('email'), messenger: val('messenger'), birthday: isDate(val('birthday')) ? val('birthday') : '' };
+  const data = { name: val('name'), role, directions: $$('input[name="dir"]:checked').map(i => i.value), phone: val('phone'), email: val('email'), messenger: val('messenger'), birthday: isDate(val('birthday')) ? val('birthday') : '', position: val('position'), hireDate: isDate(val('hireDate')) ? val('hireDate') : '' };
   if (!data.name) return formError('Укажите имя сотрудника.', '', 'name');
   if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.', '', 'email');
   if (!A.ROLES[role]) return formError('Выберите роль.', '', 'role');

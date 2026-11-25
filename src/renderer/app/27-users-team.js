@@ -16,11 +16,13 @@ function setUserMenu(open) {
       <b>${esc(u.name)}</b><small>${esc(userTag(u))}</small></button>`;
     if (state.remote) {
       menu.innerHTML = `<div class="menu-h">${esc(state.me?.name || '')}</div><p class="role-hint">${esc(userTag(state.me || {}))} · общая база ${esc(state.remote.url || '')}, вход «${esc(state.remote.login || '')}»</p>
+        <button role="menuitem" type="button" data-act="my-profile"><b>Моя анкета</b><small>Фото, о себе, контакты, программы</small></button>
         <button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Связь, пароль${A.isGip(state.me) ? ', кто может входить' : ''}</small></button>`;
       menu.hidden = !open; $('#btn-user').setAttribute('aria-expanded', String(open)); return;
     }
     menu.innerHTML = [['director', 'Директор'], ['gip', 'ГИП'], ['chief', 'Главспецы'], ['specialist', 'Специалисты']]
       .map(([r, l]) => usersByRole(r).length ? `<div class="menu-h">${l}</div>${usersByRole(r).map(item).join('')}` : '').join('')
+      + (state.me ? '<button role="menuitem" type="button" data-act="my-profile"><b>Моя анкета</b><small>Фото, о себе, контакты, программы</small></button>' : '')
       + '<p class="role-hint">Локальная версия: вход без пароля, роли разделяют интерфейс, но не защищают файл данных.</p>'
       + (api.serverInfo ? '<button role="menuitem" type="button" data-act="server"><b>Сервер Пульта…</b><small>Общая база команды: подключиться или перенести</small></button>' : '');
   }
@@ -148,8 +150,11 @@ function openUser(id, role = 'specialist', chiefId = '') {
       <div class="f"><label for="u-phone">Телефон</label><input id="u-phone" name="phone" type="tel" value="${esc(u.phone || '')}" maxlength="40"></div>
       <div class="f"><label for="u-email">Почта</label><input id="u-email" name="email" type="email" value="${esc(u.email || '')}" maxlength="120"></div>
       <div class="f"><label for="u-msg">Мессенджер</label><input id="u-msg" name="messenger" value="${esc(u.messenger || '')}" maxlength="120"></div>
-      <div class="f"><label for="u-bday">День рождения</label><input id="u-bday" name="birthday" type="date" value="${esc(u.birthday || '')}"><span class="hint">В «Офисе» в этот день — колпак. Год не показывается.</span></div>
+      <div class="f"><label for="u-pos">Должность</label><input id="u-pos" name="position" value="${esc(u.position || '')}" maxlength="120" placeholder="Ведущий инженер"></div>
+      <div class="f"><label for="u-hire">Дата приёма</label><input id="u-hire" name="hireDate" type="date" value="${esc(u.hireDate || '')}"></div>
+      <div class="f"><label for="u-bday">День рождения</label><input id="u-bday" name="birthday" type="date" value="${esc(u.birthday || '')}"><span class="hint">Сотрудник указывает его сам один раз; исправить можно здесь. Год не показывается.</span></div>
     </div>
+    ${id ? '<p class="hint">Фото, «о себе» и программы сотрудник заполняет сам — «Моя анкета» в меню под своим именем.</p>' : ''}
     <p class="hint">${id ? 'Пульт сотрудника' : 'Пульт для сотрудника создаётся автоматически'}: войти в него — щелчок по имени в заголовке программы.</p>
     <div class="err" id="form-err" hidden></div>
     ${id ? `<p class="hint">Карточек на сотруднике: ${owned}.</p>` : ''}`,
@@ -169,7 +174,7 @@ function syncUserForm() {
 async function submitUser() {
   const { id } = state.drawer;
   const role = id === state.me.id ? state.me.role : val('role');
-  const data = { name: val('name'), role, directions: $$('input[name="dir"]:checked').map(i => i.value), phone: val('phone'), email: val('email'), messenger: val('messenger'), birthday: isDate(val('birthday')) ? val('birthday') : '' };
+  const data = { name: val('name'), role, directions: $$('input[name="dir"]:checked').map(i => i.value), phone: val('phone'), email: val('email'), messenger: val('messenger'), birthday: isDate(val('birthday')) ? val('birthday') : '', position: val('position'), hireDate: isDate(val('hireDate')) ? val('hireDate') : '' };
   if (!data.name) return formError('Укажите имя сотрудника.', '', 'name');
   if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) return formError('Проверьте адрес почты.', '', 'email');
   if (!A.ROLES[role]) return formError('Выберите роль.', '', 'role');

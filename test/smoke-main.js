@@ -602,7 +602,8 @@ app.on('browser-window-created', (_e, win) => {
         check('absence panel', /Срок попадает на отпуск или больничный/.test(ov));
         await shot('40-overview-new-panels');
         await click('[data-act="tab"][data-id="people"]'); await wait(300);
-        await js(`document.querySelector('[data-act="absences"][data-id="demo-u3"]').click()`); await wait(300);
+        await js(`document.querySelector('.pplcard[data-id="demo-u3"]').click()`); await wait(300);
+        await js(`document.querySelector('.person-modal [data-op-abs]').click()`); await wait(300);
         await js(`document.querySelector('[data-m="add"]').click()`); await wait(100);
         await shot('41-absences');
         await js(`document.querySelector('.modal-back form').requestSubmit()`); await wait(600);
@@ -636,20 +637,13 @@ app.on('browser-window-created', (_e, win) => {
 
       await step('folding and moving', async () => {
         await click('[data-act="tab"][data-id="people"]'); await wait(300);
-        await click('[data-act="fold-all"][data-on="1"]'); await wait(200);
-        check('fold all people', await js(`[...document.querySelectorAll('[data-drop^="staff"]')].every(c => c.classList.contains('folded'))`));
-        await shot('33-people-folded');
-        await click('[data-act="fold"][data-key="u:demo-u1"]'); await wait(150);
-        check('unfold one', !(await js(`document.querySelector('[data-drop="staff:demo-u1"]').classList.contains('folded')`)) && (await js(`document.querySelector('[data-drop="staff:demo-u2"]').classList.contains('folded')`)));
-        await click('[data-act="fold-all"][data-on="0"]'); await wait(200);
-        check('unfold all', await js(`![...document.querySelectorAll('[data-drop^="staff"]')].some(c => c.classList.contains('folded'))`));
         // 3.0: contractors are grouped by direction and open on click.
         await js(`document.querySelector('[data-act="cg-all"][data-on="1"]').click()`); await wait(150);
         await js(`document.querySelector('[data-act="co-toggle"][data-id="demo-c1"]').click()`); await wait(150);
         check('contractor opens', await js(`!!document.querySelector('.co-row.open [data-drop="contractor:demo-c1"]')`));
-        check('co-owner shown', await js(`!!document.querySelector('[data-drop="staff:demo-u1"] .co-chip')`));
-        // move by button: ЭОМ/ЭО card to a water specialist → misfit warning, needs «Всё равно назначить»
-        await js(`document.querySelector('[data-drop="staff:demo-u1"] .ct-move[data-id="demo-t1"]').click()`); await wait(300);
+        // move by button (4.19: from the person window): ЭОМ/ЭО card to a water specialist → misfit warning, needs «Всё равно назначить»
+        await js(`document.querySelector('.pplcard[data-id="demo-u1"]').click()`); await wait(300);
+        await js(`document.querySelector('.person-modal [data-op-move="demo-t1"]').click()`); await wait(300);
         await js(`(() => { const s = document.querySelector('#m-to'); s.value = 'demo-u3'; s.dispatchEvent(new Event('change')); })()`); await wait(100);
         const warn = await js(`document.querySelector('#m-warn').hidden ? '' : document.querySelector('#m-warn-text').textContent`);
         check('misfit warning', /Не подходит по специальности/.test(warn) && /делает: Водоснабжение/.test(warn), warn);

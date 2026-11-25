@@ -131,52 +131,8 @@ async function orgFromGroups() {
   await write(ops, `Создано отделов: ${chiefs.length + 1}`);
 }
 
-/* ---------- a person's work: what they are doing now (the «Офис» view itself was removed in 4.18) ---------- */
-// What the person is doing, from the state of their cards (the most urgent wins).
-function personState(u) {
-  const away = A.absencesOf(u).find(a => a.from <= state.today && a.to >= state.today);
-  if (away) return { state: 'away', awayText: `${A.ABSENCE_KINDS[away.kind] || 'нет'} до ${fmtDate(away.to).slice(0, 5)}`, cards: [] };
-  const cards = tasksArr().filter(t => hasOwner(t, u.id) && t.status !== 'done').sort(sortByDeadline);
-  const toCheck = u.role === 'specialist' ? 0 : tasksArr().filter(t => t.status === 'review' && A.reviewersOf(t, liveUsers(), state.projects).includes(u.id)).length;
-  if (cards.some(t => timing(t).overdue)) return { state: 'late', cards };
-  if (toCheck) return { state: 'checking', bubble: [`проверяет ${toCheck}`, '#EDE8F7', '#5A3FA0'], cards };
-  if (cards.some(t => t.status === 'review')) return { state: 'carry', cards };
-  if (cards.some(t => t.status === 'revision')) return { state: 'revision', cards };
-  if (cards.some(t => t.status === 'in_progress')) return { state: 'work', cards };
-  if (cards.length) return { state: 'idle', cards };
-  return { state: 'free', cards };
-}
-const PERSON_STATE_TEXT = { late: 'срок сорван', checking: 'проверяет работы', carry: 'сдал на проверку', revision: 'на доработке', work: 'в работе', idle: 'работы не начаты', free: 'свободен — можно дать работу', away: 'отсутствует' };
-// Click on a person: their open cards, with «передать» and a link to all their cards.
-function personPopup(uid) {
-  const u = state.users.get(uid);
-  if (!u) return;
-  const st = personState(u);
-  const root = document.createElement('div');
-  root.className = 'modal-back';
-  root.innerHTML = `<div class="modal wide-modal" role="dialog" aria-modal="true" aria-labelledby="optitle"><h2 id="optitle"><span class="kicons">${userIcons(u)}</span>${esc(u.name)}</h2>
-    <p class="hint">${esc(A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''} · ${esc(st.awayText || PERSON_STATE_TEXT[st.state])}</p>
-    ${st.cards.length ? `<div class="op-list">${st.cards.map(t => `<div class="op-row"><button class="linkbtn" type="button" data-op-open="${esc(t.id)}">${marksHtml(t)} <span>${esc(projectOf(t)?.name || '')}</span></button>${statusChip(t)}<span class="due ${timing(t).cls}">${esc(timing(t).text)}</span>
-      ${canEditFields() ? `<button class="btn ghostbtn sm" type="button" data-op-move="${esc(t.id)}" title="Передать другому сотруднику">⇄ Передать</button>` : ''}</div>`).join('')}</div>`
-      : `<div class="none">${st.state === 'away' ? 'Сотрудник отсутствует.' : 'Открытых карточек нет — можно дать работу.'}</div>`}
-    <div class="modal-f"><button class="btn" type="button" data-op-all>Все карточки сотрудника</button>${A.canEditAbsences(state.me, u) ? '<button class="btn ghostbtn" type="button" data-op-abs>Отпуска и больничные</button>' : ''}<span class="spacer"></span><button class="btn primary" type="button" data-m="close">Закрыть</button></div></div>`;
-  document.body.append(root);
-  const close = () => root.remove();
-  root.addEventListener('click', e => {
-    const b = e.target.closest('button');
-    if (e.target === root || b?.dataset.m === 'close') return close();
-    if (!b) return;
-    if (b.dataset.opOpen) { close(); openTask(b.dataset.opOpen); }
-    else if (b.dataset.opMove) { close(); reassign(b.dataset.opMove, 'staff', uid); }
-    else if (b.hasAttribute('data-op-all')) { close(); state.filters = { ...EMPTY_FILTERS, owner: uid }; state.tab = 'tasks'; saveLocal('tab', 'tasks'); renderNow(); }
-    else if (b.hasAttribute('data-op-abs')) { close(); openAbsences(uid); }
-  });
-  root.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-  root.querySelector('[data-m="close"]').focus();
-}
 /* ---------- buttons and links of this part: data-act → handler (dispatched in 38-events.js) ---------- */
 onAct({
-  'person-open': ({ id }) => { personPopup(id); },
   'org-fold': ({ el }) => { const id = el.dataset.id; if (el.dataset.open === 'true') { orgOpen.delete(id); orgOpen.add('x:' + id); } else { orgOpen.add(id); orgOpen.delete('x:' + id); } saveLocal('orgOpen', [...orgOpen]); renderNow(); },
   'org-people': ({ el }) => { orgToggle('p:' + el.dataset.id); },
   'org-add': ({ el }) => { askDept(null, el.dataset.parent || ''); },

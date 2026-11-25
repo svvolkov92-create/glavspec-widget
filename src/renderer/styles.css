@@ -2004,3 +2004,30 @@ body.alt-hints [data-alt-key]::after { content: attr(data-alt-key); position: ab
 .settings #set-body { align-content: start }
 @media (max-width: 640px) { .settings .set-wrap { grid-template-columns: 1fr } .set-nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 6px } }
 .cm-pos { display: flex; gap: 4px; align-items: center; padding: 4px 10px }
+/* 4.19: short people cards, the person window, the profile */
+.ava { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; flex: none; object-fit: cover; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 14px; line-height: 1 }
+.ava.big { width: 72px; height: 72px; font-size: 24px }
+.ava.sm { width: 22px; height: 22px; font-size: 10px; margin-right: 6px; vertical-align: middle }
+.pplcards { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)) }
+.card.pplcard { cursor: pointer; transition: border-color .15s }
+.card.pplcard:hover, .card.pplcard:focus-visible { border-color: var(--accent) }
+.card-h .pplcard-row { flex-wrap: nowrap; align-items: center; gap: 10px }
+.pc-name { flex: 1; min-width: 0; display: grid; gap: 1px }
+.card-h .pc-name h3 { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.pplcard-row > .btn { flex: none; align-self: start }
+.pc-state { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px }
+.stats.stats5 { grid-template-columns: repeat(5, minmax(0, 1fr)) }
+.stats5 .stat { padding: 5px 6px }
+.stats5 .stat .k { letter-spacing: 0; white-space: normal; line-height: 1.15; min-height: 2.3em; display: flex; align-items: end }
+.stat.waitv .v { color: var(--warn) }
+@media (max-width: 640px) { .stats.stats5 { grid-template-columns: repeat(3, 1fr) } }
+.pm-head { display: flex; gap: 14px; align-items: center; margin-bottom: 10px }
+.pm-head h2 { margin: 0 0 2px }
+.pm-head .hint { margin: 0 0 6px }
+.pm-h { margin: 14px 0 6px; font-size: 13px }
+.pf { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line) }
+.pf-kv { display: grid; grid-template-columns: 130px 1fr; gap: 3px 12px; font-size: 13px }
+.pf-about { margin: 0; white-space: pre-wrap }
+.pf-progs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center }
+.pf-photo { display: flex; gap: 14px; align-items: center; margin-bottom: 10px }
+.pf-photo .hint { margin: 4px 0 0 }

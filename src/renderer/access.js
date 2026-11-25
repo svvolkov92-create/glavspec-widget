@@ -282,15 +282,37 @@
     if (!user || !target) return false;
     return isGip(user) || user.id === target.id || (isChief(user) && isSpecialist(target) && target.chiefId === user.id);
   }
+  // 4.19: what a person may change in their own profile, and the shape of the profile fields.
+  const SELF_FIELDS = ['photo', 'about', 'phone', 'email', 'messenger', 'programs', 'birthday', 'absences'];
+  const PHOTO_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+  const PHOTO_MAX = 200 * 1024;
+  const isDay = v => v === undefined || v === '' || (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v));
+  function userDataError(u) {
+    if (!u) return null;
+    if (u.photo !== undefined && u.photo !== '' && (typeof u.photo !== 'string' || u.photo.length > PHOTO_MAX || !PHOTO_RE.test(u.photo))) return 'Фото повреждено или слишком большое.';
+    if (u.about !== undefined && (typeof u.about !== 'string' || u.about.length > 1500)) return '«О себе» — не длиннее 1500 знаков.';
+    if (u.position !== undefined && (typeof u.position !== 'string' || u.position.length > 120)) return 'Должность — не длиннее 120 знаков.';
+    if (u.programs !== undefined && (!Array.isArray(u.programs) || u.programs.length > 40 || u.programs.some(x => typeof x !== 'string' || !x || x.length > 80))) return 'Проверьте список программ.';
+    for (const k of ['phone', 'email', 'messenger']) if (u[k] !== undefined && u[k] !== null && (typeof u[k] !== 'string' || u[k].length > 120)) return 'Проверьте контакты.';
+    if (!isDay(u.birthday) || !isDay(u.hireDate)) return 'Проверьте даты в анкете.';
+    return null;
+  }
+  const photoOf = u => (typeof u?.photo === 'string' && u.photo.length <= PHOTO_MAX && PHOTO_RE.test(u.photo) ? u.photo : '');
   function checkWrite(user, col, before, after, users, id = '', projects = null) {
     if (!user) return 'Не выбран пользователь.';
     if (col === 'users') {
       // The director's role is given and taken by a director; while there is none, by a GIP (to appoint the first one).
       const director = liveUsers(users).some(u => isDirector(u) && u.id !== id);
       if ((before?.role === 'director' || after?.role === 'director') && before?.role !== after?.role && !isDirector(user) && director) return 'Роль «Директор» назначает директор.';
-      if (canManageUsers(user)) return null;
-      const target = before && { ...before, id };
-      if (before && after && changedKeys(before, after).every(k => k === 'absences') && canEditAbsences(user, target)) return null;
+      if (canManageUsers(user)) return userDataError(after);
+      const target = before && { ...before, id }, keys = before && after ? changedKeys(before, after).filter(k => k !== 'updatedAt') : [];
+      if (before && after && keys.every(k => k === 'absences') && canEditAbsences(user, target)) return null;
+      // 4.19: the person keeps their own profile — photo, «о себе», contacts, programs; the birthday only the first time.
+      if (before && after && user.id === id && keys.every(k => SELF_FIELDS.includes(k))) {
+        if (keys.includes('birthday') && before.birthday) return 'Дату рождения после первого заполнения меняет ГИП.';
+        return userDataError(after);
+      }
+      if (before && after && user.id === id) return 'Должность, дату приёма, роль и направления меняет ГИП.';
       return 'Состав команды меняет только ГИП.';
     }
     if (col === 'depts') return isGip(user) ? null : 'Оргструктуру ведёт ГИП.';
@@ -402,6 +424,7 @@
   return {
     ROLES, ABSENCE_KINDS, absencesOf, absenceHits, absenceText, isUnread, lastActivity, reviewersOf, canEditAbsences, DIRECTIONS, MONEY_FIELDS, SPECIALIST_FIELDS,
     roleOf, isGip, isDirector, isGipOnly, projectRole, seesProjectMoney, canSeeTaskMoney, isChief, isSpecialist, titleFor, directionLabels,
+    SELF_FIELDS, userDataError, photoOf,
     teamIds, canSeeMoney, canCreateTasks, canManageCatalog, canManageUsers, canUseDataTools, canEditTaskFields,
     ORG_ROLES, orgRoles, isCustomerOrg, canSeeContacts, canSeeOrgs, orgCard, canSeeOrgContracts, orgView,
     canSeeTask, assignableOwners, redactTask, viewFor, canChat, canSeeChat, checkWrite, keepHiddenPhases, projectDataError,
