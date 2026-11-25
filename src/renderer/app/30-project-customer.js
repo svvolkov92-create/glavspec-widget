@@ -17,7 +17,7 @@ function projectDraft(p) {
   return {
     phases, milestones: clone(p.milestones || []), requests: clone(p.requests || []), docs: clone(p.docs || []),
     protocol: clone(p.protocol || { no: '', date: '', items: [] }), advice: clone(p.advice || { title: '', text: '' }),
-    show: { plan: true, sections: true, advice: true, revisions: false, finance: true, ird: true, meetings: true, team: true, soon: true, ...(p.show || {}) }, contactId: p.contactId || (A.isGip(state.me) ? state.me.id : (liveUsers().find(u => u.role === 'gip')?.id || '')),
+    show: { plan: true, sections: true, advice: true, revisions: false, finance: true, ird: true, meetings: true, team: true, soon: true, passport: true, ...(p.show || {}) }, passport: clone(p.passport || {}), tep: clone(p.passport?.tep || []), contactId: p.contactId || (A.isGip(state.me) ? state.me.id : (liveUsers().find(u => u.role === 'gip')?.id || '')),
     ird: clone(p.ird || []), meetings: clone(p.meetings || []),
     contract: { no: '', date: '', subject: '', sum: '', status: 'signed', ...clone(p.contract || {}) }, payments: clone(p.payments || []), bills: clone(p.bills || []),
     composition: p.composition ? clone(p.composition) : null,
@@ -38,7 +38,8 @@ function projectDraftData() {
     requests: keep(d.requests, 'title').map(r => { const row = r.irdId && d.ird.find(x => x.id === r.irdId); return { id: r.id || newId(), title: r.title.trim(), due: r.due || '', why: (r.why || '').trim(), done: !!r.done || !!(row && ['accepted', 'done'].includes(row.status)), irdId: row ? row.id : '' }; }),
     docs: keep(d.docs, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), kind: x.kind || L.docKindOf(x.title), no: String(x.no || '').trim(), issued: x.issued || '', until: x.until || '', remind: Math.max(0, Math.min(730, parseInt(x.remind, 10) || 60)) })),
     protocol: { no: String(d.protocol.no || '').trim(), date: d.protocol.date || '', items: keep(d.protocol.items, 'text').map(i => ({ id: i.id || newId(), text: i.text.trim(), who: i.who === 'customer' ? 'customer' : 'us', status: PROTO_STATUS.some(s => s[0] === i.status) ? i.status : 'work', pct: Math.max(0, Math.min(100, parseInt(i.pct, 10) || 0)), due: i.due || '' })) },
-    advice: { title: (d.advice.title || '').trim(), text: (d.advice.text || '').trim() }, show: d.show, contactId: d.contactId, composition: d.composition,
+    advice: { title: (d.advice.title || '').trim(), text: (d.advice.text || '').trim() }, show: d.show,
+    passport: { ...Object.fromEntries(PASSPORT_FIELDS.map(([k]) => [k, String(d.passport?.[k] ?? '').trim().slice(0, 300)])), tep: (d.tep || []).filter(x => String(x.k || '').trim()).slice(0, 30).map(x => ({ k: String(x.k).trim().slice(0, 80), v: String(x.v || '').trim().slice(0, 80) })) }, contactId: d.contactId, composition: d.composition,
     ird: keep(d.ird, 'title').map(x => ({ id: x.id || newId(), title: x.title.trim(), kind: IRD_KINDS.some(k => k[0] === x.kind) ? x.kind : irdKindOf(x.title), who: String(x.who || '').trim(), status: IRD_STATUS.some(s => s[0] === x.status) ? x.status : 'plan', due: x.due || '', note: String(x.note || '').trim(), for: L.irdForList(x.for) })),
     meetings: d.meetings.filter(x => String(x.title || '').trim() || isDate(x.date)).map(x => ({ id: x.id || newId(), date: x.date || '', from: tm(x.from), to: tm(x.to), title: String(x.title || '').trim(), place: String(x.place || '').trim(), protocolNo: String(x.protocolNo || '').trim() })),
     // The customer's contract and payments: kept only from the GIP (others do not see them, so they never overwrite).
@@ -100,7 +101,9 @@ const pdDate = (path, value) => `<input type="date" data-pd="${path}" value="${e
 const pdSel = (path, opts, cur) => `<select data-pd="${path}">${opts.map(([k, l]) => `<option value="${k}"${cur === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
 const pdChk = (path, on, label = '') => `<label class="chk"><input type="checkbox" data-pd="${path}"${on ? ' checked' : ''}>${label}</label>`;
 /* ---------- 4.6 (item 1): «Для заказчика» by tabs; a mark where the customer has written something new ---------- */
-const CUST_SECS = [['cab', 'Кабинет'], ['plan', 'Этапы и вехи'], ['req', 'Нужно от заказчика'], ['ird', 'Исходные данные'], ['meet', 'Договорённости и встречи'], ['docs', 'Сроки документов'], ['money', 'Договор и финансы'], ['show', 'Что показывать']];
+// 4.17: «Паспорт объекта» — what the customer sees on one page: the object, ТЭП, stages, expertise.
+const PASSPORT_FIELDS = [['address', 'Адрес', 'г. Хабаровск, ул. Северная, 14'], ['purpose', 'Назначение', 'Многоквартирный жилой дом с подземной автостоянкой'], ['level', 'Уровень ответственности', 'нормальный'], ['area', 'Площадь участка', '0,86 га'], ['built', 'Площадь застройки', '1 940 м²'], ['total', 'Общая площадь', '18 450 м²'], ['floors', 'Этажность', '17 эт.'], ['units', 'Квартир / помещений', '236'], ['parking', 'Машино-мест', '84'], ['volume', 'Строительный объём', '62 000 м³']];
+const CUST_SECS = [['cab', 'Кабинет'], ['plan', 'Этапы и вехи'], ['pass', 'Паспорт объекта'], ['req', 'Нужно от заказчика'], ['ird', 'Исходные данные'], ['meet', 'Договорённости и встречи'], ['docs', 'Сроки документов'], ['money', 'Договор и финансы'], ['show', 'Что показывать']];
 let custSec = loadLocal('custSec', 'plan');
 // Unread messages of the customer for this project, by the tab they belong to.
 function custUnread(pid) {
@@ -161,6 +164,10 @@ function renderCustomer() {
       <button class="btn sm" type="button" data-act="pd-add" data-list="protocol.items">+ Пункт</button></div>
     <div class="sub" data-cs="meet"><h3>Встречи</h3><p class="hint">Ближайшая встреча — на главной и во «Встречах» у заказчика, с кнопками «В календарь» и «Перенести»; прошедшие — с номером протокола.</p>${list('meetings', (x, i) => `<td>${pdDate(`meetings.${i}.date`, x.date)}</td><td>${pdIn(`meetings.${i}.from`, x.from, 'class="sm-in" placeholder="11:00" maxlength="5"')}–${pdIn(`meetings.${i}.to`, x.to, 'class="sm-in" placeholder="12:00" maxlength="5"')}</td>
         <td class="grow">${pdIn(`meetings.${i}.title`, x.title, 'placeholder="Совещание по замечаниям экспертизы" maxlength="160"')}</td><td class="grow">${pdIn(`meetings.${i}.place`, x.place, 'placeholder="онлайн или адрес" maxlength="160"')}</td><td>${pdIn(`meetings.${i}.protocolNo`, x.protocolNo, 'class="sm-in" placeholder="№" maxlength="20"')}</td>`, ['Дата', 'Время', 'Тема', 'Где', 'Протокол'], 'Встречи с заказчиком: прошедшие и ближайшая.')}</div>
+    <div class="sub" data-cs="pass"><h3>Паспорт объекта</h3><p class="hint">Заказчик видит его в кабинете отдельной вкладкой «Паспорт объекта» — вместе с этапами, экспертизой и вашим контактом. Пустые поля не показываются.</p>
+      <div class="fgrid pass-grid">${PASSPORT_FIELDS.map(([k, l, ph]) => `<div class="f${['address', 'purpose'].includes(k) ? ' wide' : ''}"><label>${l}</label>${pdIn(`passport.${k}`, d.passport?.[k], `placeholder="${esc(ph)}" maxlength="300"`)}</div>`).join('')}</div>
+      <h4>Другие показатели</h4>${list('tep', (x, i) => `<td class="grow">${pdIn(`tep.${i}.k`, x.k, 'placeholder="Площадь квартир" maxlength="80"')}</td><td>${pdIn(`tep.${i}.v`, x.v, 'placeholder="11 200 м²" maxlength="80"')}</td>`, ['Показатель', 'Значение'], 'Ещё ТЭП, если нужно: площадь квартир, высота, класс энергоэффективности…')}
+      <div class="pd-show">${pdChk('show.passport', d.show.passport !== false, ' показывать паспорт заказчику')}</div></div>
     <div class="sub" data-cs="docs"><h3>Сроки документов</h3>${list('docs', (x, i) => { const kind = x.kind || L.docKindOf(x.title), rule = L.docRule(kind), auto = L.docUntil(kind, x.issued), left = isDate(x.until) ? dayNum(x.until) - dayNum(state.today) : null;
         return `<td>${pdSel(`docs.${i}.kind`, L.DOC_KINDS.map(([k, l]) => [k, l]), kind)}</td><td class="grow">${pdIn(`docs.${i}.title`, x.title, 'placeholder="ТУ на водоснабжение и водоотведение" maxlength="160"')}</td>
           <td>${pdIn(`docs.${i}.no`, x.no, 'class="sm-in" placeholder="№" maxlength="40"')}</td><td>${pdDate(`docs.${i}.issued`, x.issued)}</td>
@@ -215,6 +222,7 @@ function irdLetterText() {
 }
 const PD_NEW = { milestones: () => ({ id: newId(), title: '', date: '', done: false }), requests: () => ({ id: newId(), title: '', due: '', why: '', done: false }),
   docs: () => ({ id: newId(), kind: 'other', title: '', no: '', issued: '', until: '', remind: 60 }), 'protocol.items': () => ({ id: newId(), text: '', who: 'us', status: 'work', pct: '', due: '' }),
+  tep: () => ({ k: '', v: '' }),
   ird: () => ({ id: newId(), title: '', kind: 'doc', who: 'Заказчик', status: 'plan', due: '', note: '' }), meetings: () => ({ id: newId(), date: '', from: '', to: '', title: '', place: '', protocolNo: '' }),
   payments: () => ({ id: newId(), title: '', sum: '', cond: '', status: 'upcoming', date: '' }), bills: () => ({ id: newId(), title: '', date: '', status: 'to_pay', due: '' }) };
 const draftList = key => key.split('.').reduce((o, k) => o[k], state.draft);

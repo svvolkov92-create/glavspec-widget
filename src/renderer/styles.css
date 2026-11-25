@@ -2035,3 +2035,5 @@ html[data-dock-hidden][data-dock-edge="right"] body::after { left: 0 }
 .cm-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)); gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--line); align-items: start }
 .cm-row .r { text-align: right }
 .cm-hd { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted) }
+/* 4.17: passport */
+.pass-grid { margin-bottom: 8px }

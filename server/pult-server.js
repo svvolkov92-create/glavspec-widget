@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.4.1';
+const VERSION = '1.4.2';
 // The version of the exchange with Пульты (src/core/remote-client.js: PROTOCOL). MIN_CLIENT — the oldest one this
 // server still accepts: raise it when old Пульты would write something the server no longer understands.
 const PROTOCOL = 1, MIN_CLIENT = 1;

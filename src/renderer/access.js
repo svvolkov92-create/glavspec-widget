@@ -249,6 +249,12 @@
     for (const r of p.requests || []) if (r.files !== undefined && (!Array.isArray(r.files) || r.files.length > 20 || r.files.some(f => !f || typeof f.id !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(f.id) || typeof f.name !== 'string' || f.name.length > 200 || !(Number(f.size) >= 0)))) return 'Файлы запроса повреждены.';
     for (const d of p.docs || []) if (!d || typeof d.title !== 'string' || !isDateStr(d.until)) return 'Проверьте сроки документов.';
     if (p.protocol !== undefined && p.protocol !== null && (typeof p.protocol !== 'object' || !list(p.protocol.items, 60))) return 'Протокол повреждён.';
+    // 4.17: the object's passport.
+    if (p.passport !== undefined && p.passport !== null) {
+      const pp = p.passport;
+      if (typeof pp !== 'object' || Object.keys(pp).length > 20 || Object.entries(pp).some(([k, v]) => k !== 'tep' && (typeof v !== 'string' || v.length > 300))) return 'Паспорт объекта повреждён.';
+      if (pp.tep !== undefined && (!list(pp.tep, 40) || pp.tep.some(x => !x || String(x.k ?? '').length > 80 || String(x.v ?? '').length > 80))) return 'Проверьте показатели паспорта объекта.';
+    }
     // 4.15: the expertise's remarks by cycles.
     if (p.expertise !== undefined && p.expertise !== null) {
       const ex = p.expertise;

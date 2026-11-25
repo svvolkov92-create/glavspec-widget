@@ -66,7 +66,7 @@ function sectionRows(project, tasks, today) {
 function pageModel({ project: p, tasks, contact, today, team = [] }) {
   const own = tasks.filter(t => t.projectId === p.id && !t.deletedAt);
   const pick = (list, keys) => (Array.isArray(list) ? list : []).map(x => Object.fromEntries(keys.map(k => [k, x?.[k] ?? ''])));
-  const show = { plan: true, sections: true, advice: true, revisions: false, finance: true, ird: true, meetings: true, team: true, soon: true, ...(p.show || {}) };
+  const show = { plan: true, sections: true, advice: true, revisions: false, finance: true, ird: true, meetings: true, team: true, soon: true, passport: true, ...(p.show || {}) };
   const c = p.contract || {};
   const finance = show.finance && String(c.no || '').trim() ? {
     contract: { no: c.no || '', date: c.date || '', subject: c.subject || '', sum: Number(c.sum) || 0, status: c.status || 'signed' },
@@ -84,6 +84,9 @@ function pageModel({ project: p, tasks, contact, today, team = [] }) {
       ird: show.ird ? pick((p.ird || []).filter(x => x.title), ['id', 'title', 'kind', 'who', 'status', 'due', 'note']) : [],
       meetings: show.meetings ? pick((p.meetings || []).filter(x => x.title || L.isDate(x.date)), ['id', 'date', 'from', 'to', 'title', 'place', 'protocolNo']) : [],
       rdMode: p.rdMode || '',
+      // 4.17: «Паспорт объекта»: the object's data and ТЭП as the GIP filled them, the expertise in short.
+      passport: show.passport && p.passport ? { ...Object.fromEntries(Object.entries(p.passport).filter(([k, v]) => k !== 'tep' && typeof v === 'string' && v.trim()).map(([k, v]) => [k, v.slice(0, 300)])), tep: pick(p.passport.tep, ['k', 'v']).filter(x => x.k) } : null,
+      expertiseSum: show.passport && p.expertise?.cycles?.length ? (c => ({ org: p.expertise.org || '', cycle: c.no || '', total: (c.remarks || []).length, closed: (c.remarks || []).filter(r => r.status === 'closed').length }))(p.expertise.cycles[p.expertise.cycles.length - 1]) : null,
       closed: p.status === 'done' || !!p.archived, // 4.11: a finished project — the customer only reads it
       show,
     },
@@ -98,6 +101,7 @@ function pageModel({ project: p, tasks, contact, today, team = [] }) {
 
 /* ---------- icons (stroke, 20×20 box) ---------- */
 const ICONS = {
+  pass: 'M5 3h10a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM7 7h6M7 10h6M7 13h4',
   home: 'M3 9.5 10 4l7 5.5V16a1 1 0 0 1-1 1h-3.5v-4.5h-5V17H4a1 1 0 0 1-1-1z',
   lock: 'M5 9h10v8H5zM7 9V6.5a3 3 0 0 1 6 0V9',
   plan: 'M3 3v14h14M6 7h6M8 10.5h7M6 14h5',
@@ -118,7 +122,7 @@ const ICONS = {
   briefcase: 'M3 6.5h14v10H3zM7.5 6.5V4h5v2.5M3 11h14',
 };
 const ic = k => `<svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="${ICONS[k]}"/></svg>`;
-const TABS = [['home', 'Главная', 'Главная'], ['plan', 'План работ', 'План'], ['finance', 'Договор и финансы', 'Договор'], ['ird', 'Исходные данные', 'Данные'],
+const TABS = [['home', 'Главная', 'Главная'], ['pass', 'Паспорт объекта', 'Паспорт'], ['plan', 'План работ', 'План'], ['finance', 'Договор и финансы', 'Договор'], ['ird', 'Исходные данные', 'Данные'],
   ['q', 'Вопросы', 'Вопросы'], ['meet', 'Встречи и протоколы', 'Встречи'], ['docs', 'Документация', 'Документы'], ['nav', 'Навигатор по проекту', 'Навигатор'], ['model', '3D-модель', '3D']];
 
 /**
@@ -132,7 +136,7 @@ const TABS = [['home', 'Главная', 'Главная'], ['plan', 'План �
  */
 function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos Text', fontUrl = '', cabinet = null }) {
   const p = m.project, contact = m.contact, team = m.team || [], fin = m.finance;
-  const show = { plan: true, sections: true, advice: true, revisions: false, finance: true, ird: true, meetings: true, team: true, soon: true, ...(p.show || {}) };
+  const show = { plan: true, sections: true, advice: true, revisions: false, finance: true, ird: true, meetings: true, team: true, soon: true, passport: true, ...(p.show || {}) };
   const now = L.projectNow(p, today);
   const sections = m.sections || [];
   const pdSecs = sections.filter(s => s.group !== 'rd'), rdSecs = sections.filter(s => s.group === 'rd');
@@ -148,7 +152,8 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
   const meetings = (p.meetings || []).filter(x => L.isDate(x.date)).sort((a, b) => a.date.localeCompare(b.date));
   const nextMeet = meetings.find(x => x.date >= today), pastMeet = meetings.filter(x => x.date < today).reverse();
   const msgs = cabinet?.messages || [];
-  const has = { finance: !!fin, ird: show.ird && ird.length > 0, meet: show.meetings && (meetings.length > 0 || !!proto), docs: show.sections && sections.length > 0, plan: show.plan, nav: show.soon, model: show.soon };
+  const pp = p.passport && (Object.keys(p.passport).some(k => k !== 'tep') || (p.passport.tep || []).length) ? p.passport : null;
+  const has = { pass: !!pp, finance: !!fin, ird: show.ird && ird.length > 0, meet: show.meetings && (meetings.length > 0 || !!proto), docs: show.sections && sections.length > 0, plan: show.plan, nav: show.soon, model: show.soon };
   const tabs = TABS.filter(([k]) => has[k] !== false);
   const badge = { ird: ird.filter(x => ['wait', 'clarify', 'remark'].includes(x.status)).length, q: requests.length };
   const H = (a, b, sub = '', right = '') => `<div class="ph"><div><h2>${esc(a)} <span class="hl">${esc(b)}</span></h2>${sub ? `<p class="mu">${sub}</p>` : ''}</div>${right}</div>`;
@@ -326,6 +331,25 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
         <section class="card sky"><div class="lbl ac"><i class="dot ac"></i>Файлы разделов</div><p class="mu">Скачивание разделов и ссылки для подрядчика появятся в кабинете позже. Сейчас актуальную редакцию присылает ГИП.</p></section></div></div></section>`;
   }
 
+  /* ---------- 4.17: «Паспорт объекта» ---------- */
+  let passPage = '';
+  if (pp) {
+    const PF = [['address', 'Адрес'], ['purpose', 'Назначение'], ['level', 'Уровень ответственности']];
+    const TEP = [['area', 'Площадь участка'], ['built', 'Площадь застройки'], ['total', 'Общая площадь'], ['floors', 'Этажность'], ['units', 'Квартир / помещений'], ['parking', 'Машино-мест'], ['volume', 'Строительный объём']];
+    const kv = PF.filter(([k]) => pp[k]).map(([k, l]) => `<span class="mu">${l}</span><div>${esc(pp[k])}</div>`).join('')
+      + (p.expertiseSum?.org ? `<span class="mu">Экспертиза</span><div>${esc(p.expertiseSum.org)}</div>` : '')
+      + (fin?.contract?.no ? `<span class="mu">Договор</span><div>№ ${esc(fin.contract.no)}${L.isDate(fin.contract.date) ? ` от ${esc(L.fmtDate(fin.contract.date))}` : ''}</div>` : '')
+      + (contact ? `<span class="mu">ГИП</span><div>${esc(contact.name)}${contact.phone ? ` · <a href="tel:${esc(contact.phone)}">${esc(contact.phone)}</a>` : ''}</div>` : '');
+    const tiles = [...TEP.filter(([k]) => pp[k]).map(([k, l]) => [l, pp[k]]), ...(pp.tep || []).map(x => [x.k, x.v])];
+    const stTone = { done: 'ok', late: 'bd', now: 'wk', next: 'neu' };
+    const stages = phases.length ? phases.map(x => `<div class="pst"><b>${esc(x.label)}</b>${chip(stTone[x.state] || 'neu', { done: 'завершён', late: 'просрочен', now: 'идёт', next: 'впереди' }[x.state] || '')}</div>`).join('') : '';
+    const ex = p.expertiseSum ? `<section class="card"><div class="lbl">Экспертиза</div><p>Цикл ${esc(p.expertiseSum.cycle)} · замечаний ${p.expertiseSum.total} · закрыто ${p.expertiseSum.closed}</p></section>` : '';
+    passPage = `<section class="pg" id="pass">${H('Паспорт', 'объекта', esc(p.code ? 'Шифр ' + p.code : ''))}
+      <div class="g2 wide"><div>${kv ? `<section class="card"><div class="lbl">Объект</div><div class="kv">${kv}</div></section>` : ''}
+        ${tiles.length ? `<section class="card"><div class="lbl">Технико-экономические показатели</div><div class="tep">${tiles.map(([l, v]) => `<div><span class="mu">${esc(l)}</span><b>${esc(v)}</b></div>`).join('')}</div></section>` : ''}</div>
+        <div>${stages ? `<section class="card"><div class="lbl">Этапы</div>${stages}</section>` : ''}${ex}</div></div></section>`;
+  }
+
   /* ---------- Навигатор и 3D: «скоро» ---------- */
   const soon = (id, a, b, icon, text) => `<section class="pg" id="${id}">${H(a, b)}<section class="card soon"><span class="soon-ic">${ic(icon)}</span><div><span class="chip neu">Скоро</span><h3>${esc(a)} ${esc(b)}</h3><p class="mu">${text}</p><a class="btn" href="#q">Задать вопрос</a></div></section></section>`;
   const navPage = has.nav ? soon('nav', 'Навигатор', 'по проекту', 'nav', 'Спросите, где что в документации, — покажем раздел, лист и место на листе. Пока задайте вопрос во вкладке «Вопросы».') : '';
@@ -409,6 +433,7 @@ textarea,input[name=text]{width:100%;border:1px solid var(--ln);background:var(-
 .card{background:var(--s);border:1px solid var(--ln);padding:18px;min-width:0;display:flex;flex-direction:column;gap:12px}.card h3{font-size:18px}.card.sky,.panel.sky{background:var(--sky);border-color:var(--sky2)}
 .panel{border:1px solid var(--ln);padding:20px 22px}.stack{display:flex;flex-direction:column;gap:16px;min-width:0}
 .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.kv{display:grid;grid-template-columns:200px 1fr;gap:8px 14px}.pst{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--ln2)}.tep{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}.tep>div{border:1px solid var(--ln);padding:10px 12px}.tep b{display:block;font-size:18px;margin-top:2px}@media (max-width:640px){.kv{grid-template-columns:1fr;gap:2px}.kv .mu{margin-top:8px}}
 .g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}.g2{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}.g2.wide{grid-template-columns:minmax(0,1fr) 340px}
 .hero{display:grid;grid-template-columns:300px minmax(0,1fr);gap:28px;background:var(--sky);border:1px solid var(--sky2);padding:22px 24px}.hero-l{display:flex;flex-direction:column;gap:12px}
 .state{font-size:30px;line-height:1.15}.state span{display:block}.cnt{display:flex;gap:14px;align-items:center}.big{font-size:84px;font-weight:600;color:var(--ac);line-height:.9;letter-spacing:-.04em}.cnt .mu{font-size:13.5px}.cnt b{color:var(--ink)}
@@ -462,7 +487,7 @@ ${activeCss}
 @media print{body{display:block;background:#fff}.side,.bnav,.top-a,.pop,.fm,.burnbox,#nav,#model,#more,.seg,.anchor{display:none!important}.pg{display:flex!important;break-before:page}.pg#home{break-before:auto}.top{position:static}.card,.hero,.panel{break-inside:avoid}}
 </style></head><body>
 ${side}${top}
-<main>${closedBox}${home}${plan}${finance}${irdPage}${qPage}${meetPage}${docsPage}${navPage}${modelPage}${morePage}</main>
+<main>${closedBox}${home}${passPage}${plan}${finance}${irdPage}${qPage}${meetPage}${docsPage}${navPage}${modelPage}${morePage}</main>
 ${bnav}
 </body></html>`;
 }
