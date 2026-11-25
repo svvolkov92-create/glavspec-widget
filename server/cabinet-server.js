@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 // Shared code: in the repository it lives in ../src, in the server package in ./lib.
 const LIB = fs.existsSync(path.join(__dirname, 'lib')) ? path.join(__dirname, 'lib') : path.join(__dirname, '..', 'src');
 const { renderPage, meetingIcs } = require(path.join(LIB, 'report', 'customer.js'));
@@ -272,7 +272,7 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
   }
 
   /* ----- customer side ----- */
-  const KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова' };
+  const KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова', chat: 'Сообщение в чате' };
   function addMessage(s, projectId, kind, text, request, extra = {}) {
     const m = D().projects[projectId];
     D().seq += 1;
@@ -336,6 +336,15 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
           store.save();
           return back('answer', '#q');
         }
+        // 4.24: the project chat. «На контроль» makes it a question with an owner (it stays in the chat too).
+        if (p === '/c/chat') {
+          if (!text) return back('empty', '#chat');
+          const minuteAgo = new Date(Date.now() - 60e3).toISOString();
+          if (D().inbox.filter(x => x.customerId === s.customerId && x.ts > minuteAgo).length >= 10) return back('slow', '#chat');
+          if (f.control === '1') addMessage(s, pid, 'question', text, null, { to: m.contact?.name || '', viaChat: true });
+          else addMessage(s, pid, 'chat', text);
+          return back(f.control === '1' ? 'control' : 'chat', '#chat');
+        }
         if (p === '/c/call') { addMessage(s, pid, 'call', text || 'Перезвоните, пожалуйста'); return back('call'); }
         if (p === '/c/urgent') { if (!text) return back('empty'); addMessage(s, pid, 'urgent', text); return back('urgent', '#q'); }
         // A question to someone of the project team (names come from the published model).
@@ -384,10 +393,14 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
       if (mm) {
         const pid = decodeURIComponent(mm[1]), m = D().projects[pid];
         if (!m || !(s.customer.projectIds || []).includes(pid)) return send(res, 404, shell(cfg.title, '<div class="card"><p>Проект не найден.</p><p><a href="/">← Мои проекты</a></p></div>'));
-        const flash = { answer: 'Ответ отправлен главному инженеру проекта.', call: 'Просьба перезвонить отправлена.', urgent: 'Вопрос отправлен — ГИП увидит его сразу.', question: 'Вопрос отправлен.', meeting: 'Просьба перенести встречу отправлена.', empty: 'Напишите текст сообщения.', reopen: 'Запрос отправлен ГИПу — он ответит.', closed: 'Проект завершён: писать по нему нельзя, можно запросить повторное открытие.' }[url.searchParams.get('ok')] || '';
+        const flash = { answer: 'Ответ отправлен главному инженеру проекта.', call: 'Просьба перезвонить отправлена.', urgent: 'Вопрос отправлен — ГИП увидит его сразу.', question: 'Вопрос отправлен.', meeting: 'Просьба перенести встречу отправлена.', empty: 'Напишите текст сообщения.', reopen: 'Запрос отправлен ГИПу — он ответит.', closed: 'Проект завершён: писать по нему нельзя, можно запросить повторное открытие.', chat: 'Сообщение отправлено.', control: 'Сообщение отправлено и поставлено на контроль — появится в «Вопросах».', slow: 'Слишком много сообщений подряд — подождите минуту.' }[url.searchParams.get('ok')] || '';
         // What this customer sent on this project: shown in «Вопросы» (newest first).
-        const messages = D().inbox.filter(x => x.customerId === s.customerId && x.projectId === pid).slice(-40).reverse().map(x => ({ kind: x.kind, text: x.text, to: x.to || '', requestTitle: x.requestTitle || '', ts: x.ts }));
-        const html = renderPage(m, { today: today(), logoSvg, fontName, fontUrl: '/font.ttf', cabinet: { csrf: s.csrf, base: '', flash, sent: D().sent[s.customerId]?.[pid] || {}, customerName: s.customer.name, projects: list.length, messages, title: cfg.title === 'Кабинет заказчика' ? 'Мой Тандем' : cfg.title } })
+        const messages = D().inbox.filter(x => x.customerId === s.customerId && x.projectId === pid).slice(-40).reverse().map(x => ({ kind: x.kind, text: x.text, to: x.to || '', requestTitle: x.requestTitle || '', decision: x.decision || '', ts: x.ts }));
+        // 4.24: the project chat of all the customer's people (the team's replies come in the published model) and the decisions made.
+        const ofProject = D().inbox.filter(x => x.projectId === pid);
+        const chat = ofProject.filter(x => x.kind === 'chat' || x.viaChat).slice(-100).map(x => ({ text: x.text, ts: x.ts, name: x.customerName || '', mine: x.customerId === s.customerId, control: x.kind === 'question' }));
+        const decisions = ofProject.filter(x => x.kind === 'answer' && x.decision === 'approve').slice(-60).reverse().map(x => ({ title: x.requestTitle || '', ts: x.ts, name: x.customerName || '' }));
+        const html = renderPage(m, { today: today(), logoSvg, fontName, fontUrl: '/font.ttf', cabinet: { csrf: s.csrf, base: '', flash, sent: D().sent[s.customerId]?.[pid] || {}, customerName: s.customer.name, projects: list.length, messages, chat, decisions, title: cfg.title === 'Кабинет заказчика' ? 'Мой Тандем' : cfg.title } })
           .replace('</head>', '<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#F26A1F"><link rel="icon" href="/icon.svg"><script src="/sw-register.js" defer></script></head>');
         return send(res, 200, html);
       }

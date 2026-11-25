@@ -2539,17 +2539,45 @@ function msgTaskHtml(t) {
     <div class="mc-compose"><textarea id="msg-text" rows="2" maxlength="2000" placeholder="Сообщение в обсуждение карточки… Enter — отправить, Shift+Enter — новая строка">${esc(msg.drafts['t:' + t.id] || '')}</textarea><button class="btn primary sm" type="button" data-act="mc-send">Отправить</button></div></div>`;
 }
 // Messages from a project's customer (cabinet): read here, answered by the actions in the project.
+// 4.24: the customer chat — the customer writes from the cabinet, the team replies here: the reply goes to the
+// project's `custChat` and on to the cabinet right away. Every customer message can be sent on: to the internal
+// project chat, into a card's discussion or as a new card «на контроль».
+const custReplies = pid => (Array.isArray(state.projects.get(pid)?.custChat) ? state.projects.get(pid).custChat : []);
+const canCustReply = pid => !!cab?.allowed && !isSpec() && state.projects.has(pid);
 function msgCustHtml(pid, list) {
-  const sorted = [...list].sort((a, b) => a.ts.localeCompare(b.ts));
-  const rows = sorted.map(m => `<div class="chat-msg in cust${m.kind === 'urgent' ? ' urgent' : ''}${m.read ? '' : ' fresh'}"><div class="chat-meta"><b>${esc(m.customerName || 'Заказчик')}</b> <span class="hint">${fmtDate(localTs(m.ts).slice(0, 10))} ${localTs(m.ts).slice(11, 16)}</span>
-      <span class="chip ${m.kind === 'urgent' ? 'tone-bad' : 'tone-idle'}">${esc(CAB_KINDS[m.kind] || 'Сообщение')}</span>${decisionChip(m)}</div>
-    ${m.requestTitle || m.meetingTitle || m.to ? `<div class="hint">${esc(m.requestTitle || m.meetingTitle || '')}${m.to ? ` → ${esc(m.to)}` : ''}</div>` : ''}<div class="chat-text">${esc(m.text || '')}</div></div>`).join('');
-  const name = state.projects.get(pid)?.name || sorted.at(-1)?.projectName || 'Проект';
-  return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку">←</button>' : ''}<span class="mc-ic cust">З</span><span class="mc-ht"><b>${esc(name)}</b><span class="hint">от заказчика · через кабинет</span></span>
+  const items = [...list.map(m => ({ ts: m.ts, m })), ...custReplies(pid).map(r => ({ ts: r.ts, r }))].sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+  const when = ts => `${fmtDate(localTs(ts).slice(0, 10))} ${localTs(ts).slice(11, 16)}`;
+  const can = canCustReply(pid);
+  const rows = items.map(({ m, r }) => r
+    ? `<div class="chat-msg out cust-reply"><div class="chat-meta"><b>${esc(r.user || 'Команда')}</b> <span class="hint">${when(r.ts)} · ответ в кабинет</span></div><div class="chat-text">${esc(r.text)}</div></div>`
+    : `<div class="chat-msg in cust${m.kind === 'urgent' ? ' urgent' : ''}${m.read ? '' : ' fresh'}"><div class="chat-meta"><b>${esc(m.customerName || 'Заказчик')}</b> <span class="hint">${when(m.ts)}</span>
+      ${m.kind === 'chat' ? '' : `<span class="chip ${m.kind === 'urgent' ? 'tone-bad' : 'tone-idle'}">${esc(m.viaChat ? 'Вопрос на контроле' : CAB_KINDS[m.kind] || 'Сообщение')}</span>`}${decisionChip(m)}</div>
+    ${m.requestTitle || m.meetingTitle || m.to ? `<div class="hint">${esc(m.requestTitle || m.meetingTitle || '')}${m.to ? ` → ${esc(m.to)}` : ''}</div>` : ''}<div class="chat-text">${esc(m.text || '')}</div>
+    ${state.projects.has(pid) ? `<div class="cust-acts"><button class="btn ghostbtn xs" type="button" data-act="cust-fwd" data-id="${esc(m.id)}" title="Переслать в чат проекта — для команды, заказчик его не видит">Во внутренний</button><button class="btn ghostbtn xs" type="button" data-act="cust-card" data-id="${esc(m.id)}" title="Добавить в обсуждение карточки">В карточку</button><button class="btn ghostbtn xs" type="button" data-act="cust-ctl" data-id="${esc(m.id)}" title="Новая карточка с ответственным и сроком">На контроль</button></div>` : ''}</div>`).join('');
+  const name = state.projects.get(pid)?.name || list.at(-1)?.projectName || 'Проект';
+  return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку">←</button>' : ''}<span class="mc-ic cust">З</span><span class="mc-ht"><b>${esc(name)}</b><span class="hint">чат с заказчиком · через кабинет</span></span>
       ${msgPinBtn('c:' + pid)}${winBtn('chat', 'c:' + pid)}${state.projects.has(pid) ? `<button class="btn ghostbtn sm" type="button" data-act="msg-cust-project" data-id="${esc(pid)}" title="Открыть проект: принять исходные данные, ответить, перенести встречу">В проект</button>` : ''}</div>
     <div class="mc-msgs" id="mc-msgs">${rows}</div>
-    <p class="hint mc-note">Заказчик пишет из кабинета, ответ ему — действиями в проекте: принять исходные данные, перенести встречу, перезвонить.</p></div>`;
+    ${can ? `<div class="mc-compose"><textarea id="msg-text" rows="2" maxlength="2000" placeholder="Ответ заказчику — увидит в чате кабинета. Enter — отправить, Shift+Enter — новая строка">${esc(msg.drafts['c:' + pid] || '')}</textarea><button class="btn primary sm" type="button" data-act="mc-send">Ответить</button></div>`
+    : '<p class="hint mc-note">Отвечают заказчику ГИП и главспецы.</p>'}</div>`;
 }
+async function msgCustSend() {
+  const key = msg.chatId, pid = key.slice(2), p = state.projects.get(pid), ta = document.getElementById('msg-text');
+  if (!p || !ta || !canCustReply(pid)) return;
+  const text = ta.value.trim().slice(0, 2000);
+  if (!text) return ta.focus();
+  msg.drafts[key] = ''; ta.value = '';
+  const entry = { id: newId(), ts: new Date().toISOString(), user: state.me.name, role: A.ROLES[state.me.role]?.label || '', text };
+  if (!await write(op.update('projects', pid, { custChat: [...custReplies(pid), entry].slice(-300) }), null, { undo: false })) {
+    if (!msg.drafts[key]) { msg.drafts[key] = text; const cur = document.getElementById('msg-text'); if (cur && !cur.value) cur.value = text; }
+    return;
+  }
+  // Published: the cabinet gets it now; otherwise it waits for the project to be published.
+  if (!cab?.published?.[pid]) return toast('Ответ сохранён. Проект ещё не опубликован в кабинете — заказчик увидит ответ после публикации («Для заказчика» → «Опубликовать»).');
+  const r = await api.cabinetPublish(pid).catch(e => ({ ok: false, message: e?.message }));
+  toast(r?.ok ? 'Ответ отправлен в кабинет заказчика' : `Ответ сохранён, в кабинет уйдёт при следующей синхронизации${r?.message ? ': ' + r.message : ''}`, !r?.ok);
+}
+const custQuote = m => `${m.customerName || 'Заказчик'} (${fmtDate(localTs(m.ts).slice(0, 10))}): «${m.text}»`;
 const msgPinBtn = key => { const on = msgPins().has(key); return `<button class="btn ghostbtn sm mc-pinbtn${on ? ' on' : ''}" type="button" data-act="msg-pin" data-id="${esc(key)}" aria-pressed="${on}" title="${on ? 'Открепить' : 'Закрепить сверху списка'}">${icon('pin')}</button>`; };
 function msgNewHtml() {
   const others = liveUsers().filter(u => u.id !== state.me?.id).sort(byName);
@@ -2647,6 +2675,7 @@ function msgOpen(chatId = msg.chatId) {
 }
 async function msgSend() {
   if (msg.chatId.startsWith('t:')) return msgTaskSend();
+  if (msg.chatId.startsWith('c:')) return msgCustSend();
   const c = chatById(msg.chatId), ta = document.getElementById('msg-text');
   if (!c || !ta) return;
   const text = ta.value.trim();
@@ -2782,6 +2811,36 @@ onAct({
   'msg-pin': ({ id }) => { msgTogglePin(id); },
   'msg-cust-project': ({ id }) => { msgClose(); openProject(id, 'cust'); },
   'mc-send': () => { msgSend(); },
+  // 4.24: a customer message sent on.
+  'cust-fwd': async ({ id }) => {
+    const m = cab?.messages.find(x => x.id === id), p = m && state.projects.get(m.projectId);
+    if (!p) return;
+    if (!A.canChat(state.me, p)) return toast('Чат этого проекта вам не открыт.', true);
+    const chatId = projectChatId(p.id), r = await api.chatSend(chatId, `Пишет заказчик — ${custQuote(m)}`.slice(0, 2000), p.id);
+    if (!r?.ok) return toast(r?.message || 'Не отправлено', true);
+    await refresh(); msg.chatId = chatId; renderMsg(); toast('Переслано в чат проекта');
+  },
+  'cust-card': ({ id }) => {
+    const m = cab?.messages.find(x => x.id === id);
+    const list = m ? tasksArr().filter(t => t.projectId === m.projectId && t.kind !== 'assign' && t.status !== 'done').sort(sortByDeadline) : [];
+    if (!list.length) return toast('В проекте нет открытых карточек — поставьте сообщение «На контроль».');
+    const { q, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="cc-t" novalidate><h2 id="cc-t">В обсуждение карточки</h2>
+      <p class="hint">${esc(custQuote(m).slice(0, 200))}</p><div class="f"><label for="cc-task">Карточка</label><select id="cc-task">${list.map(t => `<option value="${esc(t.id)}">${esc(marksText(t))}${t.title ? ' · ' + esc(t.title) : ''}</option>`).join('')}</select></div>
+      <div class="modal-f"><button class="btn primary" type="submit">Добавить</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+    q('form').addEventListener('submit', async e => {
+      e.preventDefault(); e.stopPropagation();
+      const tid = q('#cc-task').value; close();
+      const r = await api.addComment(tid, `Пишет заказчик — ${custQuote(m)}`.slice(0, 2000));
+      if (!r?.ok) return toast(r?.message || 'Не добавлено', true);
+      await refresh(); toast('Добавлено в обсуждение карточки');
+    });
+  },
+  'cust-ctl': ({ id }) => {
+    const m = cab?.messages.find(x => x.id === id);
+    if (!m || !state.projects.has(m.projectId)) return;
+    msgClose();
+    openTask(null, { projectId: m.projectId, draft: { title: `Заказчик: ${m.text.replace(/\s+/g, ' ').slice(0, 100)}`, note: custQuote(m).slice(0, 2000), finish: addDays(todayStr(), 1) } });
+  },
   'mc-edit': ({ id }) => { mcEditStart(id); },
   'mc-edit-save': () => { mcEditSave(); },
   'mc-edit-cancel': () => { mcEditCancel(); },
@@ -7636,7 +7695,7 @@ let cab = null;          // view from the main process: { allowed, configured, u
 let cabCustomers = null; // customer accounts on the server, loaded when the «Для заказчика» tab is shown
 let cabPw = null;        // { name, login, password } — shown once after creating or resetting
 let cabLoadErr = '';
-const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова' };
+const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова', chat: 'Сообщение в чате' };
 // The customer's verdict on files sent for approval.
 const decisionChip = m => (m?.decision === 'approve' ? ' <span class="chip tone-ok">Согласовано</span>' : m?.decision === 'remarks' ? ' <span class="chip tone-warn">Есть замечания</span>' : '');
 const cabTime = ts => { const d = new Date(ts); return Number.isNaN(+d) ? '' : `${fmtDate(ts.slice(0, 10))} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };

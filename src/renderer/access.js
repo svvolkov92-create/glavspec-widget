@@ -253,6 +253,8 @@
     for (const r of p.requests || []) if (r.files !== undefined && (!Array.isArray(r.files) || r.files.length > 20 || r.files.some(f => !f || typeof f.id !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(f.id) || typeof f.name !== 'string' || f.name.length > 200 || !(Number(f.size) >= 0)))) return 'Файлы запроса повреждены.';
     for (const d of p.docs || []) if (!d || typeof d.title !== 'string' || !isDateStr(d.until)) return 'Проверьте сроки документов.';
     if (p.protocol !== undefined && p.protocol !== null && (typeof p.protocol !== 'object' || !list(p.protocol.items, 60))) return 'Протокол повреждён.';
+    // 4.24: the team's replies in the customer chat.
+    if (p.custChat !== undefined && (!list(p.custChat, 300) || p.custChat.some(x => !x || typeof x.text !== 'string' || !x.text || x.text.length > 2000 || String(x.user ?? '').length > 120 || String(x.role ?? '').length > 60 || typeof x.ts !== 'string'))) return 'Переписка с заказчиком повреждена.';
     // 4.17: the object's passport.
     if (p.passport !== undefined && p.passport !== null) {
       const pp = p.passport;

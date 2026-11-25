@@ -201,3 +201,55 @@ test('4.0: files for approval — upload, customer downloads, «Согласов
     assert.equal(fs.existsSync(path.join(t.dir, 'files', 'p1')), false, 'files go with the project');
   } finally { await t.stop(); }
 });
+
+test('4.24: the project chat both ways, «на контроль», decisions registry, phone bottom bar', async () => {
+  const t = await start();
+  try {
+    const p = { ...project, requests: [{ id: 'r2', title: 'Опросный лист ОЛ-03', due: '2026-12-07', files: [{ id: 'f1', name: 'ОЛ-03.pdf', size: 5 }] }],
+      custChat: [{ id: 'x1', ts: '2026-11-05T09:40:00.000Z', user: 'Волков Сергей', role: 'ГИП', text: 'Принял, ворота 10 т.' }, { id: 'x2', ts: 'bad', user: 'Пусто', text: '' }] };
+    const m = pageModel({ project: p, tasks, contact: { name: 'Волков Сергей', role: 'ГИП' }, today: '2026-11-05' });
+    assert.deepEqual(m.chat.map(x => x.text), ['Принял, ворота 10 т.'], 'empty replies are not published');
+    await t.api('PUT', '/projects/p1', { model: m });
+    const a = await t.api('POST', '/customers', { name: 'Петров Андрей', login: 'petrov', projectIds: ['p1'] });
+    const b = await t.api('POST', '/customers', { name: 'Сидоров Кирилл', login: 'sid', projectIds: ['p1'] });
+    await t.web('POST', '/login', { login: 'sid', password: b.password });
+    let page = await t.web('GET', '/p/p1');
+    let csrf = csrfOf(page.text);
+    assert.equal((await t.web('POST', '/c/chat', { csrf, project: 'p1', text: 'Фото ворот пришлю завтра' })).location, '/p/p1?ok=chat#chat');
+    await t.web('POST', '/logout', { csrf });
+    await t.web('POST', '/login', { login: 'petrov', password: a.password });
+    page = await t.web('GET', '/p/p1');
+    csrf = csrfOf(page.text);
+    assert.match((await t.web('POST', '/c/chat', { csrf, project: 'p1', text: '' })).location, /ok=empty#chat/);
+    assert.equal((await t.web('POST', '/c/chat', { csrf, project: 'p1', text: 'Когда решение по трубам?', control: '1' })).location, '/p/p1?ok=control#chat');
+    await t.web('POST', '/c/answer', { csrf, project: 'p1', request: 'r2', decision: 'approve' });
+    const inbox = (await t.api('GET', '/inbox?after=0')).messages;
+    assert.deepEqual(inbox.map(x => [x.kind, !!x.viaChat]), [['chat', false], ['question', true], ['answer', false]]);
+    assert.equal(inbox[1].to, 'Волков Сергей', '«на контроль» goes to the GIP');
+    page = await t.web('GET', '/p/p1');
+    const chat = page.text.slice(page.text.indexOf('id="chat"'), page.text.indexOf('id="dec"'));
+    for (const s of ['Принял, ворота 10 т.', 'Фото ворот пришлю завтра', 'Сидоров К.', 'Когда решение по трубам?', 'на контроле', 'action="/c/chat"']) assert.ok(chat.includes(s), s);
+    assert.ok(chat.indexOf('Когда решение по трубам?') < chat.indexOf('Фото ворот') && chat.indexOf('Фото ворот') < chat.indexOf('Принял'), 'newest first in the markup (shown bottom-up)');
+    const dec = page.text.slice(page.text.indexOf('id="dec"'));
+    assert.match(dec, /Реестр решений[\s\S]*Опросный лист ОЛ-03[\s\S]*Петров Андрей/);
+    assert.match(page.text, /<nav class="bnav"[^]*?t-home[^]*?t-chat[^]*?t-dec[^]*?t-q[^]*?t-more/, 'phone bar: Главная, Чат, Решения, Вопросы, Ещё');
+    for (let i = 0; i < 9; i++) await t.web('POST', '/c/chat', { csrf, project: 'p1', text: 'спам ' + i });
+    assert.match((await t.web('POST', '/c/chat', { csrf, project: 'p1', text: 'ещё' })).location, /ok=slow/, 'ten a minute at most');
+  } finally { await t.stop(); }
+});
+
+test('4.24: a saved customer page has no chat or decisions tabs', () => {
+  const { customerHtml } = require('../src/report/customer.js');
+  const html = customerHtml({ project, tasks, contact: { name: 'ГИП' }, today: '2026-11-05' });
+  assert.doesNotMatch(html, /id="chat"|id="dec"/);
+  assert.match(html, /<nav class="bnav"[^]*?t-plan/);
+});
+
+test('4.24: chat texts and names are escaped on the customer page', () => {
+  const { renderPage } = require('../src/report/customer.js');
+  const X = '<img src=x onerror=alert(1)>';
+  const m = pageModel({ project: { ...project, custChat: [{ id: 'a', ts: '2026-11-05T09:00:00Z', user: X, role: X, text: X }] }, tasks, contact: { name: 'ГИП' }, today: '2026-11-05' });
+  const html = renderPage(m, { today: '2026-11-05', cabinet: { csrf: 'c', base: '', sent: {}, messages: [], chat: [{ text: X, ts: '2026-11-05T10:00:00Z', name: X, mine: false }], decisions: [{ title: X, ts: '2026-11-05T10:00:00Z', name: X }], projects: 1, customerName: 'x' } });
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+});

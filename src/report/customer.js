@@ -97,6 +97,8 @@ function pageModel({ project: p, tasks, contact, today, team = [], remarks = nul
       rev: s.rev ? { no: s.rev.no, date: s.rev.date } : null, revs: show.revisions ? s.revs.slice(-6).map(r => ({ no: r.no, date: r.date, note: r.note || '' })) : [] })),
     contact: contact ? { name: contact.name || '', role: contact.role || '', phone: contact.phone || '', email: contact.email || '' } : null,
     team: show.team ? pick(team, ['name', 'role']).slice(0, 12) : [],
+    // 4.24: the team's replies in the project chat (the customer's own messages are in the cabinet's inbox).
+    chat: pick((Array.isArray(p.custChat) ? p.custChat : []).filter(x => x?.text).slice(-100), ['id', 'ts', 'user', 'role', 'text']),
   };
 }
 
@@ -121,9 +123,11 @@ const ICONS = {
   shield: 'M10 2.5 16 5v5c0 3.6-2.6 6.5-6 7.5-3.4-1-6-3.9-6-7.5V5z',
   out: 'M8 4H4v12h4M13 6.5 16.5 10 13 13.5M16.5 10H8',
   briefcase: 'M3 6.5h14v10H3zM7.5 6.5V4h5v2.5M3 11h14',
+  chat: 'M3.5 4.5h13v9H8l-4.5 3.5z',
+  dec: 'M4.5 10l3.5 3.5 7.5-8M3.5 17h13',
 };
 const ic = k => `<svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="${ICONS[k]}"/></svg>`;
-const TABS = [['home', 'Главная', 'Главная'], ['pass', 'Паспорт объекта', 'Паспорт'], ['plan', 'План работ', 'План'], ['finance', 'Договор и финансы', 'Договор'], ['ird', 'Исходные данные', 'Данные'],
+const TABS = [['home', 'Главная', 'Главная'], ['chat', 'Чат проекта', 'Чат'], ['dec', 'Решения', 'Решения'], ['pass', 'Паспорт объекта', 'Паспорт'], ['plan', 'План работ', 'План'], ['finance', 'Договор и финансы', 'Договор'], ['ird', 'Исходные данные', 'Данные'],
   ['q', 'Вопросы', 'Вопросы'], ['meet', 'Встречи и протоколы', 'Встречи'], ['docs', 'Документация', 'Документы'], ['nav', 'Навигатор по проекту', 'Навигатор'], ['model', '3D-модель', '3D']];
 
 /**
@@ -154,9 +158,10 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
   const nextMeet = meetings.find(x => x.date >= today), pastMeet = meetings.filter(x => x.date < today).reverse();
   const msgs = cabinet?.messages || [];
   const pp = p.passport && (Object.keys(p.passport).some(k => k !== 'tep') || (p.passport.tep || []).length) ? p.passport : null;
-  const has = { pass: !!pp, finance: !!fin, ird: show.ird && ird.length > 0, meet: show.meetings && (meetings.length > 0 || !!proto), docs: show.sections && sections.length > 0, plan: show.plan, nav: show.soon, model: show.soon };
+  const has = { pass: !!pp, finance: !!fin, ird: show.ird && ird.length > 0, meet: show.meetings && (meetings.length > 0 || !!proto), docs: show.sections && sections.length > 0, plan: show.plan, nav: show.soon, model: show.soon, chat: !!cabinet, dec: !!cabinet };
   const tabs = TABS.filter(([k]) => has[k] !== false);
-  const badge = { ird: ird.filter(x => ['wait', 'clarify', 'remark'].includes(x.status)).length, q: requests.length };
+  const toDecide = requests.filter(r => r.files?.length);
+  const badge = { ird: ird.filter(x => ['wait', 'clarify', 'remark'].includes(x.status)).length, q: requests.length, dec: toDecide.filter(r => !cabinet?.sent?.[r.id]).length };
   const H = (a, b, sub = '', right = '') => `<div class="ph"><div><h2>${esc(a)} <span class="hl">${esc(b)}</span></h2>${sub ? `<p class="mu">${sub}</p>` : ''}</div>${right}</div>`;
   const chip = (tone, text) => `<span class="chip ${tone}">${esc(text)}</span>`;
   const form = (action, body, btn, cls = '') => (cab ? `<form class="fm${cls ? ' ' + cls : ''}" method="post" action="${base}${action}">${hid}${body}<button class="btn pri" type="submit">${esc(btn)}</button></form>` : '');
@@ -300,6 +305,26 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
     ${H('Вопросы', 'и ответы', 'У каждого вопроса есть ответственный и срок', `<div class="seg qf"><a href="#q" class="all">Все · ${qItems.length}</a><a href="#q-wait" class="f-wait">Ждут вас · ${nQ('wait')}</a>${cab ? `<a href="#q-tandem" class="f-tandem">Ждут «Тандем» · ${nQ('tandem')}</a><a href="#q-answered" class="f-answered">Отвеченные · ${nQ('answered')}</a>` : ''}</div>`)}
     <div class="g2 wide"><div class="stack ql">${qItems.map(x => x.html).join('') || '<section class="card"><p class="mu">Открытых вопросов нет.</p></section>'}</div>${askBox}</div></section>`;
 
+  /* ---------- 4.24: Чат проекта (cabinet only) ---------- */
+  // Newest first in the markup, shown bottom-up (column-reverse): the page opens at the latest message without scripts.
+  const tm = ts => { const d = new Date(ts); return isNaN(d) ? '' : `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const chatAll = [...(cabinet?.chat || []).map(x => ({ ...x, side: x.mine ? 'me' : 'cu' })), ...(m.chat || []).map(x => ({ ts: x.ts, text: x.text, name: x.user, role: x.role, side: 'tm' }))]
+    .filter(x => x.text).sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+  const chatPage = has.chat ? `<section class="pg" id="chat">${H('Чат', 'проекта', 'Переписка с командой проекта. Нужен ответ со сроком — отметьте «На контроль»: вопрос появится в «Вопросах».')}
+    <div class="g2 wide"><section class="card chatbox"><div class="cl">${chatAll.map(x => `<div class="cm ${x.side}"><div class="cw">${x.side === 'me' ? 'Вы' : esc(shortName(x.name) || (x.side === 'tm' ? 'Команда' : 'Заказчик'))}${x.side === 'tm' && x.role ? ` <span class="mu">· ${esc(x.role)}</span>` : ''}</div><div class="cb">${esc(x.text)}${x.control ? '<span class="chip wk ctl">на контроле</span>' : ''}</div><div class="ct">${tm(x.ts)}</div></div>`).join('') || '<p class="mu cempty">Сообщений пока нет. Напишите команде — ответ придёт сюда.</p>'}</div>
+      ${cab ? `<form class="fm cf" method="post" action="${base}/c/chat">${hid}<textarea name="text" required maxlength="2000" placeholder="Сообщение команде проекта…"></textarea><label class="ctlbox"><input type="checkbox" name="control" value="1"><span>На контроль — нужен ответ со сроком</span></label><button class="btn pri" type="submit">Отправить</button></form>` : ''}</section>
+      <div class="stack">${contact ? `<section class="card"><div class="lbl">Отвечает</div><div class="gip"><span class="ava ac">${esc(initials(contact.name))}</span><span><b>${esc(contact.name)}</b><br><span class="mu">${esc(contact.role || 'Главный инженер проекта')}</span></span></div></section>` : ''}
+        <section class="card sky"><div class="lbl ac"><i class="dot ac"></i>Срочно?</div><p class="mu">Горящий вопрос ГИП увидит сразу — кнопка «Горящий вопрос» вверху страницы.</p></section></div></div></section>` : '';
+
+  /* ---------- 4.24: Решения: files to approve in one click, and the registry of decisions ---------- */
+  const decRegistry = [...(cabinet?.decisions || []).map(x => ({ date: String(x.ts).slice(0, 10), title: x.requestTitle || x.title, who: x.name })),
+    ...(proto ? proto.items.filter(i => i.text && i.status === 'done').map(i => ({ date: proto.date, title: i.text, who: `протокол${proto.no ? ' № ' + proto.no : ''}` })) : [])]
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const decPage = has.dec ? `<section class="pg" id="dec">${H('Ждут вашего', 'решения', 'Файлы на согласование: «Согласовано» — одним нажатием, замечания — текстом')}
+    <div class="g2 wide"><div class="stack">${toDecide.map(r => `<section class="card dec"><div class="row"><span class="lbl">На согласование</span>${dueText(r) ? `<span class="pill">${dueText(r)}</span>` : ''}</div><h3>${esc(r.title)}</h3>${r.why ? `<p class="mu">${esc(r.why)}</p>` : ''}${filesOf(r)}${answerForm(r)}</section>`).join('')
+      || '<section class="card"><p class="mu">Сейчас ничего не ждёт вашего решения.</p></section>'}</div>
+      <section class="card"><div class="lbl">Реестр решений</div>${decRegistry.length ? `<ul class="reg">${decRegistry.slice(0, 40).map(x => `<li><span>${esc(x.title)}</span><span class="mu">${L.isDate(x.date) ? esc(L.fmtDate(x.date)) : ''}${x.who ? ' · ' + esc(x.who) : ''}</span></li>`).join('')}</ul>` : '<p class="mu">Согласованное появится здесь — с датой и тем, кто согласовал.</p>'}</section></div></section>` : '';
+
   /* ---------- Встречи и протоколы ---------- */
   let meetPage = '';
   if (has.meet) {
@@ -374,7 +399,7 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
     ? `${pop(`${ic('phone')}<span>Перезвоните мне</span>`, '', form('/c/call', '<input name="text" maxlength="300" placeholder="Когда удобно и по какому вопросу">', 'Попросить звонок'))}${pop(`${ic('fire')}<span>Горящий вопрос</span>`, 'burn', form('/c/urgent', '<textarea name="text" required maxlength="2000" placeholder="Опишите вопрос — ГИП увидит его сразу"></textarea>', 'Отправить ГИПу'))}`
     : `${contact?.phone ? `<a class="btn" href="tel:${esc(contact.phone)}">${ic('phone')}<span>Позвонить ГИПу</span></a>` : ''}${contact?.email ? `<a class="btn burn" href="mailto:${esc(contact.email)}">${ic('q')}<span>Написать</span></a>` : ''}`;
   const top = `<header class="top"><div class="top-t"><h1>${esc(p.name)}</h1>${p.code ? `<span class="mu">Шифр ${esc(p.code)}</span>` : ''}${stage ? `<span class="chip wk">${esc(stage)}</span>` : ''}</div><div class="top-a">${actions}</div></header>${cab?.flash ? `<div class="flash">${esc(cab.flash)}</div>` : ''}`;
-  const bn = ['home', 'plan', has.ird ? 'ird' : 'docs', 'q'].filter(k => tabs.some(t => t[0] === k));
+  const bn = (cabinet ? ['home', 'chat', 'dec', 'q'] : ['home', 'plan', has.ird ? 'ird' : 'docs', 'q']).filter(k => tabs.some(t => t[0] === k));
   const bnav = `<nav class="bnav" aria-label="Разделы проекта">${bn.map(k => `<a class="bn t-${k}" href="#${k}">${ic(k)}<span>${esc(TABS.find(t => t[0] === k)[2])}</span>${badge[k] ? `<i class="bdg">${badge[k]}</i>` : ''}</a>`).join('')}<a class="bn t-more" href="#more">${ic('more')}<span>Ещё</span></a></nav>`;
 
   // Active section: the target, or «Главная» when nothing is targeted (q-* anchors keep «Вопросы» open).
@@ -467,6 +492,7 @@ textarea,input[name=text]{width:100%;border:1px solid var(--ln);background:var(-
 .note{display:flex;gap:8px;font-size:12.5px;color:var(--mu)}.note .ic{width:16px;height:16px}
 .bignum{font-size:44px;font-weight:500;line-height:1}.bignum .mu{font-size:18px}
 /* questions */
+.chatbox{display:flex;flex-direction:column;gap:10px}.cl{display:flex;flex-direction:column-reverse;gap:10px;max-height:min(60vh,560px);overflow:auto;padding:2px}.cm{max-width:84%;display:flex;flex-direction:column;gap:3px}.cm.me{align-self:flex-end}.cw{font-size:11.5px;font-weight:600;color:var(--act)}.cm.me .cw{text-align:right;color:var(--mu)}.cb{background:var(--s);border:1px solid var(--ln);padding:9px 11px;font-size:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}.cm.me .cb,.cm.cu .cb{background:var(--acs);border-color:var(--acl)}.cm.tm .cb{background:var(--sky);border-color:var(--sky2)}.ct{font-size:10.5px;color:var(--mu)}.cm.me .ct{text-align:right}.ctl{margin-left:8px;vertical-align:middle}.cempty{padding:20px 0;text-align:center}.cf{margin-top:0}.ctlbox{display:flex;gap:8px;align-items:center;font-size:13px}.ctlbox input{width:18px;height:18px;accent-color:var(--ac)}.reg{list-style:none;margin:0;padding:0}.reg li{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;padding:9px 0;border-top:1px solid var(--ln)}.reg li:first-child{border-top:0}.reg li .mu{flex:none;text-align:right}.card.dec h3{margin:4px 0}
 .qi{background:var(--s);border:1px solid var(--ln);padding:16px 18px;display:flex;flex-direction:column;gap:6px}.qi.wait{background:var(--acs);border-color:var(--acl)}.qi .row b{font-weight:600}.qi p{font-size:12.5px}
 .st{font-size:12px;font-weight:600;white-space:nowrap;padding:2px 8px}.st.ac{color:var(--act)}.st.wk{background:var(--wkb);color:var(--wk)}.st.ok{background:var(--okb);color:var(--ok)}
 .ans{background:var(--ln2);padding:10px 12px;font-size:13.5px}
@@ -488,7 +514,7 @@ ${activeCss}
 @media print{body{display:block;background:#fff}.side,.bnav,.top-a,.pop,.fm,.burnbox,#nav,#model,#more,.seg,.anchor{display:none!important}.pg{display:flex!important;break-before:page}.pg#home{break-before:auto}.top{position:static}.card,.hero,.panel{break-inside:avoid}}
 </style></head><body>
 ${side}${top}
-<main>${closedBox}${home}${passPage}${plan}${finance}${irdPage}${qPage}${meetPage}${docsPage}${navPage}${modelPage}${morePage}</main>
+<main>${closedBox}${home}${chatPage}${decPage}${passPage}${plan}${finance}${irdPage}${qPage}${meetPage}${docsPage}${navPage}${modelPage}${morePage}</main>
 ${bnav}
 </body></html>`;
 }

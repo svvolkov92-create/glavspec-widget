@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова' };
+const KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова', chat: 'Сообщение в чате' };
 const MAX_MESSAGES = 2000;
 
 // Accepts «cabinet.example.ru», «http://192.168.1.10:8080/», returns «https://cabinet.example.ru» or null.
@@ -125,7 +125,7 @@ class Cabinet {
       const known = new Set(this.state.messages.map(m => m.id));
       const fresh = (r.messages || []).filter(m => m && m.id && !known.has(m.id))
         .map(m => ({ id: String(m.id), seq: Number(m.seq) || 0, projectId: String(m.projectId || ''), projectName: String(m.projectName || ''), kind: KINDS[m.kind] ? m.kind : 'urgent',
-          text: String(m.text || '').slice(0, 2000), decision: ['approve', 'remarks'].includes(m.decision) ? m.decision : '', requestId: String(m.requestId || ''), requestTitle: String(m.requestTitle || ''), to: String(m.to || '').slice(0, 120), meetingTitle: String(m.meetingTitle || '').slice(0, 200), customerName: String(m.customerName || ''), ts: String(m.ts || ''), read: false }));
+          text: String(m.text || '').slice(0, 2000), decision: ['approve', 'remarks'].includes(m.decision) ? m.decision : '', requestId: String(m.requestId || ''), requestTitle: String(m.requestTitle || ''), to: String(m.to || '').slice(0, 120), meetingTitle: String(m.meetingTitle || '').slice(0, 200), customerName: String(m.customerName || ''), ts: String(m.ts || ''), viaChat: !!m.viaChat, read: false }));
       // The server may have been reinstalled with an empty inbox: its counter is then behind ours,
       // so start over from zero next time (messages are de-duplicated by id).
       const top = Math.max(0, ...(r.messages || []).map(m => Number(m.seq) || 0));

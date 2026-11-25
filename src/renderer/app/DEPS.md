@@ -17,7 +17,7 @@
 | 09-project-page | 01-core (20), 02-render (1), 05-card-widgets (2), 08-overview (4), 10-tabs (3), 12-messages (8), 13-assignments (1), 13-expertise (1), 13-project-data (5), 14-projects (3), 19-task-list (1), 27-users-team (1), 33-project-forms (1), 36-search (1), 37-phone (1) |
 | 10-tabs | 01-core (21), 02-render (2), 05-card-widgets (1), 06-settings (1), 09-project-page (1), 12-messages (8), 20-filters-usage-help (1), 22-card (1), 29-focus-tour-notify (1) |
 | 11-assign | 01-core (12), 05-card-widgets (1), 09-project-page (1), 12-messages (1), 13-project-data (1), 22-card (1), 24-card-marks (1), 27-users-team (1) |
-| 12-messages | 01-core (20), 03-dialogs (1), 05-card-widgets (1), 08-overview (1), 09-project-page (1), 10-tabs (5), 13-project-data (1), 22-card (1), 25-card-talk (1), 27-users-team (1), 29-focus-tour-notify (2), 32-cabinet (3), 33-project-forms (1), 38-events (1) |
+| 12-messages | 01-core (28), 03-dialogs (2), 05-card-widgets (1), 08-overview (1), 09-project-page (1), 10-tabs (5), 13-project-data (1), 22-card (2), 25-card-talk (1), 27-users-team (1), 29-focus-tour-notify (2), 32-cabinet (3), 33-project-forms (1), 38-events (1) |
 | 13-assignments | 01-core (20), 02-render (1), 03-dialogs (1), 05-card-widgets (3), 12-messages (2), 29-focus-tour-notify (1), 34-file-menu (1) |
 | 13-expertise | 01-core (20), 02-render (1), 03-dialogs (1), 05-card-widgets (1), 12-messages (2), 13-project-data (1), 26-card-panels (1), 27-users-team (1), 29-focus-tour-notify (1) |
 | 13-project-data | 01-core (21), 02-render (1), 03-dialogs (2), 05-card-widgets (2), 12-messages (1), 22-card (1), 26-card-panels (3), 29-focus-tour-notify (1), 38-events (1) |

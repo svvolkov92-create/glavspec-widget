@@ -144,6 +144,9 @@ tr.picked td { background: color-mix(in srgb, var(--accent-soft) 70%, transparen
 .mc-ic.cust { border-radius: 8px; background: color-mix(in srgb, #1E7A45 16%, var(--sunk)); color: #1E7A45 }
 .mc-ic.cust.urgent { background: color-mix(in srgb, #B3261E 18%, var(--sunk)); color: #B3261E }
 .mc-n.urgent { background: #B3261E }
+.cust-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px }
+.cust-acts .btn { min-height: 26px; padding: 2px 8px; font-size: 12px }
+.chat-msg.cust-reply { align-self: flex-end }
 .chat-msg.cust.urgent { border-color: color-mix(in srgb, #B3261E 45%, var(--line)) }
 .chat-msg.submit { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)) }
 .mc-note { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line) }

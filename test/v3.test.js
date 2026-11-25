@@ -136,3 +136,13 @@ test('participants: a specialist member sees the project; the list is validated'
   assert.equal(A.projectDataError({ members: ['s'] }), null);
   assert.ok(A.projectDataError({ members: [{}] }));
 });
+
+test('4.24: the team replies to the customer chat are checked', () => {
+  const ok = { id: 'x', ts: '2026-11-05T09:00:00Z', user: 'Волков', role: 'ГИП', text: 'Принял' };
+  assert.equal(A.projectDataError({ custChat: [ok] }), null);
+  assert.ok(A.projectDataError({ custChat: [{ ...ok, text: '' }] }), 'empty');
+  assert.ok(A.projectDataError({ custChat: [{ ...ok, text: 'x'.repeat(2001) }] }), 'too long');
+  assert.ok(A.projectDataError({ custChat: Array(301).fill(ok) }), 'too many');
+  assert.ok(A.projectDataError({ custChat: 'x' }), 'not a list');
+  assert.ok(A.checkWrite({ id: 's', role: 'specialist' }, 'projects', { name: 'P' }, { name: 'P', custChat: [ok] }, []), 'a specialist does not reply');
+});

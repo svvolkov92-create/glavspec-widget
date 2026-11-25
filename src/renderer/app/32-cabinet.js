@@ -3,7 +3,7 @@ let cab = null;          // view from the main process: { allowed, configured, u
 let cabCustomers = null; // customer accounts on the server, loaded when the «Для заказчика» tab is shown
 let cabPw = null;        // { name, login, password } — shown once after creating or resetting
 let cabLoadErr = '';
-const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова' };
+const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова', chat: 'Сообщение в чате' };
 // The customer's verdict on files sent for approval.
 const decisionChip = m => (m?.decision === 'approve' ? ' <span class="chip tone-ok">Согласовано</span>' : m?.decision === 'remarks' ? ' <span class="chip tone-warn">Есть замечания</span>' : '');
 const cabTime = ts => { const d = new Date(ts); return Number.isNaN(+d) ? '' : `${fmtDate(ts.slice(0, 10))} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
