@@ -147,13 +147,15 @@
   });
   const unpublish = projectId => call(async () => { await cabinet.unpublish(projectId); return {}; });
   const customers = () => call(async () => ({ customers: await cabinet.customers() }));
-  const customerCreate = (c = {}) => call(() => cabinet.createCustomer({ name: String(c.name || '').slice(0, 120), login: String(c.login || '').slice(0, 80), projectIds: (c.projectIds || []).map(String) }));
+  const customerCreate = (c = {}) => call(() => cabinet.createCustomer({ name: String(c.name || '').slice(0, 120), login: String(c.login || '').slice(0, 80), projectIds: (c.projectIds || []).map(String), role: String(c.role || '').slice(0, 60), hide: Array.isArray(c.hide) ? c.hide.map(String) : [] }));
   const customerUpdate = (id, patch = {}) => call(() => {
     const allowed = {};
     if (Array.isArray(patch.projectIds)) allowed.projectIds = patch.projectIds.map(String);
     if (patch.name !== undefined) allowed.name = String(patch.name).slice(0, 120);
     if (patch.disabled !== undefined) allowed.disabled = !!patch.disabled;
     if (patch.resetPassword) allowed.resetPassword = true;
+    if (patch.role !== undefined) allowed.role = String(patch.role).slice(0, 60);
+    if (Array.isArray(patch.hide)) allowed.hide = patch.hide.map(String);
     return cabinet.updateCustomer(String(id), allowed);
   });
   const customerDelete = id => call(() => cabinet.deleteCustomer(String(id)));

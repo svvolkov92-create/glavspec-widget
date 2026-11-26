@@ -253,3 +253,48 @@ test('4.24: chat texts and names are escaped on the customer page', () => {
   assert.doesNotMatch(html, /<img src=x/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
 });
+
+test('4.25: «Нужно время», «Пригласить коллегу», closed sections, «Мои проекты» by stage', async () => {
+  const t = await start();
+  try {
+    const p = { ...project, requests: [{ id: 'r2', title: 'Опросный лист ОЛ-03', due: '2026-12-07', files: [{ id: 'f1', name: 'ОЛ-03.pdf', size: 5 }] }],
+      contract: { no: '47-П', sum: 9e6 }, phases: [{ key: 'p', start: '2026-01-01', finish: '2099-01-01' }] };
+    const m = pageModel({ project: p, tasks, contact: { name: 'Волков Сергей', role: 'ГИП' }, today: '2026-11-05' });
+    await t.api('PUT', '/projects/p1', { model: m });
+    await t.api('PUT', '/projects/p9', { model: pageModel({ project: { id: 'p9', name: 'Склад', status: 'done' }, tasks: [], today: '2026-11-05' }) });
+    const a = await t.api('POST', '/customers', { name: 'Петров Андрей', login: 'petrov', projectIds: ['p1', 'p9'], role: 'Директор' });
+    assert.equal(a.customer.role, 'Директор');
+    await t.web('POST', '/login', { login: 'petrov', password: a.password });
+    const list = await t.web('GET', '/');
+    assert.match(list.text, /Здравствуйте[\s\S]*Петров Андрей/);
+    assert.match(list.text, /href="#g-design"[\s\S]*href="#g-done"/, 'chips by stage');
+    assert.match(list.text, /id="g-design"[\s\S]*ЖК «Тест»[\s\S]*ждёт вашего решения: 1[\s\S]*id="g-done"[\s\S]*Склад/);
+    let page = await t.web('GET', '/p/p1');
+    const csrf = csrfOf(page.text);
+    assert.match(page.text, /href="#team"/);
+    assert.match(page.text, /action="\/c\/extend"/);
+    assert.match((await t.web('POST', '/c/extend', { csrf, project: 'p1', request: 'r2', until: '2020-01-01' })).location, /ok=nodate/);
+    assert.match((await t.web('POST', '/c/extend', { csrf, project: 'p1', request: 'r2', until: '2099-12-01', text: 'Ждём директора' })).location, /ok=extend#dec/);
+    page = await t.web('GET', '/p/p1');
+    assert.match(page.text, /Попросили продлить до 01\.12\.99/);
+    assert.match((await t.web('POST', '/c/invite', { csrf, project: 'p1', name: '' })).location, /ok=noname/);
+    assert.match((await t.web('POST', '/c/invite', { csrf, project: 'p1', name: 'Козлов Игорь', contact: '+7 900', role: 'Технадзор', see_docs: '1', see_chat: '1' })).location, /ok=invite#team/);
+    const inbox = (await t.api('GET', '/inbox?after=0')).messages;
+    assert.equal(inbox[0].kind, 'extend'); assert.equal(inbox[0].until, '2099-12-01'); assert.equal(inbox[0].requestId, 'r2');
+    assert.deepEqual(inbox[1].invite, { name: 'Козлов Игорь', contact: '+7 900', role: 'Технадзор', see: ['docs', 'chat'] });
+    page = await t.web('GET', '/p/p1');
+    const team = page.text.slice(page.text.indexOf('id="team"'));
+    assert.match(team, /Петров Андрей[\s\S]*Директор · видит всё[\s\S]*Козлов Игорь[\s\S]*приглашение у ГИПа/);
+    // The GIP opens the login with docs and chat only: no questions, decisions, finance.
+    const k = await t.api('POST', '/customers', { name: 'Козлов Игорь', login: 'kozlov', projectIds: ['p1'], role: 'Технадзор', hide: ['q', 'finance', 'bogus'] });
+    assert.deepEqual(k.customer.hide, ['q', 'finance']);
+    await t.web('POST', '/logout', { csrf });
+    await t.web('POST', '/login', { login: 'kozlov', password: k.password });
+    page = await t.web('GET', '/p/p1');
+    assert.doesNotMatch(page.text, /href="#q"|href="#dec"|href="#finance"|47-П|ОЛ-03/, 'closed sections and their data are not in the page');
+    assert.match(page.text, /href="#chat"/);
+    assert.match(page.text, /Козлов Игорь[\s\S]*не видит: вопросы и решения, договор и финансы/);
+    const c2 = csrfOf(page.text);
+    assert.match((await t.web('POST', '/c/answer', { csrf: c2, project: 'p1', request: 'r2', decision: 'approve' })).location, /ok=noaccess/);
+  } finally { await t.stop(); }
+});

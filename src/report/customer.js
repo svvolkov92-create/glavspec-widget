@@ -124,11 +124,12 @@ const ICONS = {
   out: 'M8 4H4v12h4M13 6.5 16.5 10 13 13.5M16.5 10H8',
   briefcase: 'M3 6.5h14v10H3zM7.5 6.5V4h5v2.5M3 11h14',
   chat: 'M3.5 4.5h13v9H8l-4.5 3.5z',
+  team: 'M7.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM2.5 16.5a5 5 0 0 1 10 0M13.5 9.5a2 2 0 1 0 0-4M14.5 12a4 4 0 0 1 3 4',
   dec: 'M4.5 10l3.5 3.5 7.5-8M3.5 17h13',
 };
 const ic = k => `<svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="${ICONS[k]}"/></svg>`;
 const TABS = [['home', 'Главная', 'Главная'], ['chat', 'Чат проекта', 'Чат'], ['dec', 'Решения', 'Решения'], ['pass', 'Паспорт объекта', 'Паспорт'], ['plan', 'План работ', 'План'], ['finance', 'Договор и финансы', 'Договор'], ['ird', 'Исходные данные', 'Данные'],
-  ['q', 'Вопросы', 'Вопросы'], ['meet', 'Встречи и протоколы', 'Встречи'], ['docs', 'Документация', 'Документы'], ['nav', 'Навигатор по проекту', 'Навигатор'], ['model', '3D-модель', '3D']];
+  ['q', 'Вопросы', 'Вопросы'], ['meet', 'Встречи и протоколы', 'Встречи'], ['docs', 'Документация', 'Документы'], ['team', 'Команда проекта', 'Команда'], ['nav', 'Навигатор по проекту', 'Навигатор'], ['model', '3D-модель', '3D']];
 
 /**
  * Renders the customer page from a page model.
@@ -158,7 +159,8 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
   const nextMeet = meetings.find(x => x.date >= today), pastMeet = meetings.filter(x => x.date < today).reverse();
   const msgs = cabinet?.messages || [];
   const pp = p.passport && (Object.keys(p.passport).some(k => k !== 'tep') || (p.passport.tep || []).length) ? p.passport : null;
-  const has = { pass: !!pp, finance: !!fin, ird: show.ird && ird.length > 0, meet: show.meetings && (meetings.length > 0 || !!proto), docs: show.sections && sections.length > 0, plan: show.plan, nav: show.soon, model: show.soon, chat: !!cabinet, dec: !!cabinet };
+  const hide = new Set(cabinet?.hide || []); // 4.25: sections closed to this person (the server strips their data too)
+  const has = { pass: !!pp, finance: !!fin, ird: show.ird && ird.length > 0, meet: show.meetings && (meetings.length > 0 || !!proto), docs: show.sections && sections.length > 0, plan: show.plan, nav: show.soon, model: show.soon, chat: !!cabinet && !!cabinet.chat, dec: !!cabinet && !hide.has('q'), q: !hide.has('q'), team: !!cabinet };
   const tabs = TABS.filter(([k]) => has[k] !== false);
   const toDecide = requests.filter(r => r.files?.length);
   const badge = { ird: ird.filter(x => ['wait', 'clarify', 'remark'].includes(x.status)).length, q: requests.length, dec: toDecide.filter(r => !cabinet?.sent?.[r.id]).length };
@@ -228,7 +230,7 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
         ? `<div class="req"><h3>${esc(r.title)}</h3>${dueText(r) ? `<span class="pill">${dueText(r)}</span>` : ''}${r.why ? `<p class="mu">${esc(r.why)}</p>` : ''}${filesOf(r)}${answerForm(r)}${!cab && mailHref() ? `<a class="btn pri" href="${mailHref(r.title)}">Ответить ГИПу</a>` : ''}</div>`
         : `<div class="req more"><div class="row"><span><b>${esc(r.title)}</b>${dueText(r) ? `<br><span class="mu">${dueText(r)}</span>` : ''}${filesOf(r)}</span>${cab ? (cab.sent?.[r.id] ? '<span class="chip ok">ответ отправлен</span>' : pop('Ответить', 'sm ghost', answerForm(r))) : ''}</div></div>`).join('')}</section>` : '';
   const protoCard = proto ? `<section class="card"><div class="lbl">Последняя договорённость</div><a class="proto" href="#meet">Протокол${proto.no ? ` № ${esc(proto.no)}` : ''}${L.isDate(proto.date) ? ` · ${esc(L.fmtDate(proto.date))}` : ''}</a>
-      ${proto.items.filter(i => i.text).slice(0, 5).map(i => { const [lbl, tone] = PROTO[i.status] || PROTO.work; return `<div class="li"><span><i class="dot ${tone}"></i>${esc(i.text)}</span><b class="${tone}">${i.status === 'work' && Number(i.pct) ? `${Number(i.pct)} %` : lbl}</b></div>`; }).join('')}</section>` : '';
+      ${proto.items.filter(i => i.text).slice(0, 5).map(i => { const [lbl, tone] = PROTO[i.status] || PROTO.work; return `<div class="tmr"><span><i class="dot ${tone}"></i>${esc(i.text)}</span><b class="${tone}">${i.status === 'work' && Number(i.pct) ? `${Number(i.pct)} %` : lbl}</b></div>`; }).join('')}</section>` : '';
   const docsCard = docs.length ? `<section class="card"><div class="row"><span class="lbl">Сроки документов</span></div>${docs.map(d => {
       const n = L.dayNum(d.until) - L.dayNum(today), r = remainText(n);
       const width = Math.max(4, Math.min(100, 100 - (n / 730) * 100));
@@ -320,10 +322,27 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
   const decRegistry = [...(cabinet?.decisions || []).map(x => ({ date: String(x.ts).slice(0, 10), title: x.requestTitle || x.title, who: x.name })),
     ...(proto ? proto.items.filter(i => i.text && i.status === 'done').map(i => ({ date: proto.date, title: i.text, who: `протокол${proto.no ? ' № ' + proto.no : ''}` })) : [])]
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  // 4.25: «Нужно время» — the customer asks to move the deadline; the GIP decides in the Pult.
+  const tomorrow = L.addDays(today, 1);
+  const extendForm = r => (!cab || cab.sent?.[r.id] ? '' : cab.extend?.[r.id] ? `<p class="mu small">Попросили продлить до ${esc(L.fmtDate(cab.extend[r.id]))} — ждём ответа ГИПа.</p>`
+    : `<details class="inl"><summary class="btn ghost">Нужно время</summary>${form('/c/extend', `<input type="hidden" name="request" value="${esc(r.id)}"><label class="fl">До какого числа<input type="date" name="until" required min="${tomorrow}" value="${esc(L.isDate(r.due) && r.due >= tomorrow ? L.addDays(r.due, 3) : L.addDays(today, 3))}"></label><input name="text" maxlength="300" placeholder="Почему (необязательно)">`, 'Попросить продлить')}</details>`);
   const decPage = has.dec ? `<section class="pg" id="dec">${H('Ждут вашего', 'решения', 'Файлы на согласование: «Согласовано» — одним нажатием, замечания — текстом')}
-    <div class="g2 wide"><div class="stack">${toDecide.map(r => `<section class="card dec"><div class="row"><span class="lbl">На согласование</span>${dueText(r) ? `<span class="pill">${dueText(r)}</span>` : ''}</div><h3>${esc(r.title)}</h3>${r.why ? `<p class="mu">${esc(r.why)}</p>` : ''}${filesOf(r)}${answerForm(r)}</section>`).join('')
+    <div class="g2 wide"><div class="stack">${toDecide.map(r => `<section class="card dec"><div class="row"><span class="lbl">На согласование</span>${dueText(r) ? `<span class="pill">${dueText(r)}</span>` : ''}</div><h3>${esc(r.title)}</h3>${r.why ? `<p class="mu">${esc(r.why)}</p>` : ''}${filesOf(r)}${answerForm(r)}${extendForm(r)}</section>`).join('')
       || '<section class="card"><p class="mu">Сейчас ничего не ждёт вашего решения.</p></section>'}</div>
       <section class="card"><div class="lbl">Реестр решений</div>${decRegistry.length ? `<ul class="reg">${decRegistry.slice(0, 40).map(x => `<li><span>${esc(x.title)}</span><span class="mu">${L.isDate(x.date) ? esc(L.fmtDate(x.date)) : ''}${x.who ? ' · ' + esc(x.who) : ''}</span></li>`).join('')}</ul>` : '<p class="mu">Согласованное появится здесь — с датой и тем, кто согласовал.</p>'}</section></div></section>` : '';
+
+  /* ---------- 4.25: Команда проекта — both sides, «Пригласить коллегу» (cabinet only) ---------- */
+  const SEE = [['docs', 'Документация'], ['q', 'Вопросы и решения'], ['chat', 'Чат'], ['finance', 'Договор и финансы']];
+  const personRow = (name, sub, me = false) => `<div class="tmr"><span class="ava${me ? ' ac' : ''}">${esc(initials(name))}</span><div class="mn"><b>${esc(name)}${me ? ' <span class="mu">· вы</span>' : ''}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div></div>`;
+  const seesText = c => { const closed = SEE.filter(([k]) => (c.hide || []).includes(k)); return closed.length ? 'не видит: ' + closed.map(x => x[1].toLowerCase()).join(', ') : 'видит всё'; };
+  const teamPage = has.team ? `<section class="pg" id="team">${H('Команда', 'проекта', 'Кто работает над проектом с вашей стороны и со стороны «Тандема»')}
+    <div class="g2 wide"><div class="stack"><section class="card"><div class="lbl">Ваша сторона</div><div class="lis">${(cabinet.people || []).map(c => personRow(c.name, [c.role, seesText(c)].filter(Boolean).join(' · '), c.me)).join('')}
+        ${(cabinet.invites || []).map(x => `<div class="tmr"><span class="ava">${esc(initials(x.name))}</span><div class="mn"><b>${esc(x.name)}</b><small>${esc([x.role, 'приглашение у ГИПа', x.by ? 'от ' + shortName(x.by) : ''].filter(Boolean).join(' · '))}</small></div></div>`).join('')}</div>
+      ${cab ? `<details class="inl"><summary class="btn">Пригласить коллегу</summary>${form('/c/invite', `<label class="fl">Имя и фамилия<input name="name" required maxlength="120" placeholder="Козлов Игорь"></label><label class="fl">Телефон или почта<input name="contact" maxlength="120" placeholder="+7 900 000-00-00"></label>
+        <label class="fl">Роль<input name="role" maxlength="60" list="inv-roles" placeholder="Технадзор"></label><datalist id="inv-roles"><option value="Технадзор"><option value="Главный механик"><option value="Главный инженер"><option value="Бухгалтер"><option value="Директор"></datalist>
+        <fieldset class="see"><legend>Что увидит</legend>${SEE.map(([k, l]) => `<label class="ctlbox"><input type="checkbox" name="see_${k}" value="1"${k === 'finance' ? '' : ' checked'}><span>${esc(l)}</span></label>`).join('')}</fieldset>
+        <p class="mu small">ГИП откроет вход и передаст коллеге логин и пароль. Новый участник увидит историю разрешённых разделов.</p>`, 'Отправить приглашение')}</details>` : ''}</section></div>
+      <section class="card"><div class="lbl">«Тандем»</div><div class="lis">${contact ? personRow(contact.name, contact.role || 'Главный инженер проекта') : ''}${team.filter(t => t.name !== contact?.name).map(t => personRow(t.name, t.role)).join('')}</div></section></div></section>` : '';
 
   /* ---------- Встречи и протоколы ---------- */
   let meetPage = '';
@@ -377,7 +396,7 @@ function renderPage(m, { today, logoSvg = '', fontBase64 = '', fontName = 'Golos
   }
 
   /* ---------- Навигатор и 3D: «скоро» ---------- */
-  const soon = (id, a, b, icon, text) => `<section class="pg" id="${id}">${H(a, b)}<section class="card soon"><span class="soon-ic">${ic(icon)}</span><div><span class="chip neu">Скоро</span><h3>${esc(a)} ${esc(b)}</h3><p class="mu">${text}</p><a class="btn" href="#q">Задать вопрос</a></div></section></section>`;
+  const soon = (id, a, b, icon, text) => `<section class="pg" id="${id}">${H(a, b)}<section class="card soon"><span class="soon-ic">${ic(icon)}</span><div><span class="chip neu">Скоро</span><h3>${esc(a)} ${esc(b)}</h3><p class="mu">${text}</p>${has.q ? '<a class="btn" href="#q">Задать вопрос</a>' : ''}</div></section></section>`;
   const navPage = has.nav ? soon('nav', 'Навигатор', 'по проекту', 'nav', 'Спросите, где что в документации, — покажем раздел, лист и место на листе. Пока задайте вопрос во вкладке «Вопросы».') : '';
   const modelPage = has.model ? soon('model', '3D-модель', 'объекта', 'model', 'Просмотр модели здания в браузере — без установки программ. Пока модель показывает ГИП на встрече.') : '';
 
@@ -492,7 +511,8 @@ textarea,input[name=text]{width:100%;border:1px solid var(--ln);background:var(-
 .note{display:flex;gap:8px;font-size:12.5px;color:var(--mu)}.note .ic{width:16px;height:16px}
 .bignum{font-size:44px;font-weight:500;line-height:1}.bignum .mu{font-size:18px}
 /* questions */
-.chatbox{display:flex;flex-direction:column;gap:10px}.cl{display:flex;flex-direction:column-reverse;gap:10px;max-height:min(60vh,560px);overflow:auto;padding:2px}.cm{max-width:84%;display:flex;flex-direction:column;gap:3px}.cm.me{align-self:flex-end}.cw{font-size:11.5px;font-weight:600;color:var(--act)}.cm.me .cw{text-align:right;color:var(--mu)}.cb{background:var(--s);border:1px solid var(--ln);padding:9px 11px;font-size:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}.cm.me .cb,.cm.cu .cb{background:var(--acs);border-color:var(--acl)}.cm.tm .cb{background:var(--sky);border-color:var(--sky2)}.ct{font-size:10.5px;color:var(--mu)}.cm.me .ct{text-align:right}.ctl{margin-left:8px;vertical-align:middle}.cempty{padding:20px 0;text-align:center}.cf{margin-top:0}.ctlbox{display:flex;gap:8px;align-items:center;font-size:13px}.ctlbox input{width:18px;height:18px;accent-color:var(--ac)}.reg{list-style:none;margin:0;padding:0}.reg li{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;padding:9px 0;border-top:1px solid var(--ln)}.reg li:first-child{border-top:0}.reg li .mu{flex:none;text-align:right}.card.dec h3{margin:4px 0}
+.chatbox{display:flex;flex-direction:column;gap:10px}.cl{display:flex;flex-direction:column-reverse;gap:10px;max-height:min(60vh,560px);overflow:auto;padding:2px}.cm{max-width:84%;display:flex;flex-direction:column;gap:3px}.cm.me{align-self:flex-end}.cw{font-size:11.5px;font-weight:600;color:var(--act)}.cm.me .cw{text-align:right;color:var(--mu)}.cb{background:var(--s);border:1px solid var(--ln);padding:9px 11px;font-size:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}.cm.me .cb,.cm.cu .cb{background:var(--acs);border-color:var(--acl)}.cm.tm .cb{background:var(--sky);border-color:var(--sky2)}.ct{font-size:10.5px;color:var(--mu)}.cm.me .ct{text-align:right}.ctl{margin-left:8px;vertical-align:middle}.cempty{padding:20px 0;text-align:center}.cf{margin-top:0}.ctlbox{display:flex;gap:8px;align-items:center;font-size:13px}.ctlbox input{width:18px;height:18px;accent-color:var(--ac)}.tmr{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--ln)}.tmr:first-child{border-top:0}.tmr .ava{margin:0}.tmr .mn{min-width:0;flex:1}.tmr .mn b{display:block;font-weight:600;font-size:13.5px}.tmr .mn small{display:block;color:var(--mu);font-size:12px}.fl{display:grid;gap:4px;font-size:12.5px;color:var(--mu)}.fl input,.fm input[type=date]{color:var(--ink);width:100%;border:1px solid var(--ln);background:var(--s);padding:10px 12px;font-size:13.5px;min-height:42px}.see{border:1px solid var(--ln);padding:8px 10px;display:grid;gap:6px;margin:0}.see legend{font-size:12.5px;color:var(--mu);padding:0 4px}
+.reg{list-style:none;margin:0;padding:0}.reg li{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;padding:9px 0;border-top:1px solid var(--ln)}.reg li:first-child{border-top:0}.reg li .mu{flex:none;text-align:right}.card.dec h3{margin:4px 0}
 .qi{background:var(--s);border:1px solid var(--ln);padding:16px 18px;display:flex;flex-direction:column;gap:6px}.qi.wait{background:var(--acs);border-color:var(--acl)}.qi .row b{font-weight:600}.qi p{font-size:12.5px}
 .st{font-size:12px;font-weight:600;white-space:nowrap;padding:2px 8px}.st.ac{color:var(--act)}.st.wk{background:var(--wkb);color:var(--wk)}.st.ok{background:var(--okb);color:var(--ok)}
 .ans{background:var(--ln2);padding:10px 12px;font-size:13.5px}
@@ -514,9 +534,56 @@ ${activeCss}
 @media print{body{display:block;background:#fff}.side,.bnav,.top-a,.pop,.fm,.burnbox,#nav,#model,#more,.seg,.anchor{display:none!important}.pg{display:flex!important;break-before:page}.pg#home{break-before:auto}.top{position:static}.card,.hero,.panel{break-inside:avoid}}
 </style></head><body>
 ${side}${top}
-<main>${closedBox}${home}${chatPage}${decPage}${passPage}${plan}${finance}${irdPage}${qPage}${meetPage}${docsPage}${navPage}${modelPage}${morePage}</main>
+<main>${closedBox}${home}${chatPage}${decPage}${teamPage}${passPage}${plan}${finance}${irdPage}${has.q ? qPage : ""}${meetPage}${docsPage}${navPage}${modelPage}${morePage}</main>
 ${bnav}
 </body></html>`;
+}
+
+// 4.25: «Мои проекты» in the cabinet — the customer's projects by stage of life (Проработка / Проектирование /
+// Стройка / Завершённые), what waits for the customer on each. No scripts: the chips are links to the groups.
+const LIFE = [['prep', 'Проработка'], ['design', 'Проектирование'], ['build', 'Стройка'], ['done', 'Завершённые']];
+function lifeStage(p, today) {
+  if (p.closed) return 'done';
+  const now = L.projectNow(p, today).current?.key || '';
+  return now === 'an' ? 'build' : ['p', 'expertise', 'r'].includes(now) ? 'design' : 'prep';
+}
+function renderProjects(items, { today, logoSvg = '', fontName = 'Golos Text', fontUrl = '', cabinet }) {
+  const base = cabinet?.base || '';
+  const rows = items.map(({ m, sent = {} }) => {
+    const p = m.project, life = lifeStage(p, today), now = L.projectNow(p, today);
+    const reqs = (p.requests || []).filter(r => !sent[r.id]), dec = reqs.filter(r => r.files?.length).length;
+    const phases = (p.phases || []).filter(ph => L.isDate(ph.start) || L.isDate(ph.finish));
+    const pct = phases.length ? Math.round(100 * phases.filter(ph => L.phaseState(ph, today) === 'done').length / phases.length) : 0;
+    const cur = now.current, next = (p.milestones || []).filter(x => !x.done && L.isDate(x.date) && x.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
+    return { id: p.id, life, html: `<a class="pc" href="${base}/p/${encodeURIComponent(p.id)}"><span class="ill">${ic(life === 'build' ? 'model' : life === 'done' ? 'docs' : life === 'design' ? 'plan' : 'pass')}</span><span class="inf">
+      <span class="chip ${life === 'done' ? 'neu' : life === 'build' ? 'wr' : 'wk'}">${esc(life === 'done' ? 'Завершён' : cur?.label || LIFE.find(x => x[0] === life)[1])}</span>
+      <b>${esc(p.name)}</b><span class="ms">${p.code ? `Шифр ${esc(p.code)} · ` : ''}${next ? `${esc(next.title)} · <b>${esc(L.fmtDate(next.date).slice(0, 5))}</b>` : cur && L.isDate(cur.finish) ? `${esc(cur.label)} до <b>${esc(L.fmtDate(cur.finish).slice(0, 5))}</b>` : `обновлено ${esc(L.isDate(m.publishedAt) ? L.fmtDate(m.publishedAt) : '')}`}</span>
+      ${reqs.length ? `<span class="need">${dec ? `ждёт вашего решения: ${dec}` : ''}${dec && reqs.length > dec ? ' · ' : ''}${reqs.length > dec ? `нужно от вас: ${reqs.length - dec}` : ''}</span>` : ''}
+      ${life === 'done' ? '' : `<span class="prog"><i style="width:${pct}%"></i></span>`}</span></a>`, wait: reqs.length };
+  });
+  const groups = LIFE.map(([k, l]) => [k, l, rows.filter(r => r.life === k)]).filter(g => g[2].length);
+  const waiting = rows.filter(r => r.wait).length;
+  const face = fontUrl ? `@font-face{font-family:"${fontName}";src:url(${esc(fontUrl)}) format("truetype");font-weight:300 900}` : '';
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Мои проекты — ${esc(cabinet?.title || 'Мой Тандем')}</title><style>${face}
+:root{--bg:#F2F4F7;--s:#fff;--ink:#1D1E21;--mu:#5E6673;--ln:#DFE4EA;--ac:#F26A1F;--act:#B04E0D;--hl:#EE6418;--acs:#FFF4EC;--acl:#F6D6C1;--sky:#EAF0F7;--slate:#3B4B60;--wk:#2457A6;--wkb:#E4ECF8;--wr:#A34700;--wrb:#FFF0E3;--neu:#4B5361;--nb:#EDF0F4;color-scheme:light}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14.5px/1.45 "${fontName}","Segoe UI",Arial,sans-serif;-webkit-font-smoothing:antialiased}a{color:inherit;text-decoration:none}
+.ic{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+header{background:var(--s);border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:12px;padding:10px 16px}header svg{height:30px}header b{flex:1;color:var(--act);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+header button{background:none;border:1px solid var(--ln);padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}
+main{max-width:760px;margin:0 auto;padding:16px}h1{font-size:22px;font-weight:500;letter-spacing:-.01em;margin:4px 0 2px}h1 em{font-style:normal;color:var(--hl)}.sub{color:var(--mu);font-size:13px;margin:0 0 14px}
+.chips{display:flex;gap:6px;overflow-x:auto;margin:0 -16px 12px;padding:0 16px;scrollbar-width:none}.chips a{flex:none;height:34px;padding:0 12px;border:1px solid var(--ln);background:var(--s);font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}.chips a b{font-size:11px;color:var(--mu)}
+h2{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--mu);margin:18px 2px 8px;scroll-margin-top:12px}
+.pc{display:flex;gap:12px;background:var(--s);border:1px solid var(--ln);padding:12px;margin-bottom:10px}.pc:hover{border-color:var(--ac)}
+.ill{flex:none;width:64px;height:64px;background:var(--sky);display:grid;place-items:center;color:var(--slate)}.ill .ic{width:34px;height:34px;stroke-width:1.3}
+.inf{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}.inf>b{font-weight:600;font-size:14.5px;line-height:1.25}.ms{font-size:12.5px;color:var(--mu)}.ms b{color:var(--ink);font-weight:600}
+.chip{align-self:flex-start;font-size:11.5px;font-weight:600;padding:2px 8px}.chip.wk{background:var(--wkb);color:var(--wk)}.chip.wr{background:var(--wrb);color:var(--wr)}.chip.neu{background:var(--nb);color:var(--neu)}
+.need{font-size:12.5px;font-weight:600;color:var(--act)}.prog{height:4px;background:var(--nb);margin-top:6px}.prog i{display:block;height:100%;background:var(--ac)}
+.empty{background:var(--s);border:1px solid var(--ln);padding:16px}</style></head><body>
+<header>${logoSvg}<b>${esc(cabinet?.title || 'Мой Тандем')}</b>${cabinet ? `<form method="post" action="${base}/logout"><input type="hidden" name="csrf" value="${esc(cabinet.csrf)}"><button type="submit">Выйти</button></form>` : ''}</header>
+<main><h1>Здравствуйте, <em>${esc(cabinet?.customerName || '')}</em></h1><p class="sub">${items.length ? `${items.length} ${plural(items.length, 'объект', 'объекта', 'объектов')}${waiting ? ` · ${waiting} ${plural(waiting, 'ждёт', 'ждут', 'ждут')} вашего ответа` : ''}` : ''}</p>
+${groups.length > 1 ? `<nav class="chips">${groups.map(([k, l, g]) => `<a href="#g-${k}">${esc(l)} <b>${g.length}</b></a>`).join('')}</nav>` : ''}
+${groups.map(([k, l, g]) => `<h2 id="g-${k}">${esc(l)}</h2>${g.map(r => r.html).join('')}`).join('') || '<div class="empty">Проекты ещё не открыты для вас. Главный инженер проекта откроет доступ.</div>'}
+</main></body></html>`;
 }
 
 // The file version: model and render in one go (desktop «Сохранить и создать страницу»).
@@ -535,4 +602,4 @@ function meetingIcs(m, meeting) {
     meeting.place ? `LOCATION:${icsEsc(meeting.place)}` : '', 'END:VEVENT', 'END:VCALENDAR'].filter(Boolean).join('\r\n');
 }
 
-module.exports = { customerHtml, renderPage, pageModel, customerStatus, sectionRows, meetingIcs };
+module.exports = { customerHtml, renderPage, renderProjects, lifeStage, pageModel, customerStatus, sectionRows, meetingIcs };

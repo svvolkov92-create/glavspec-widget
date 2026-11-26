@@ -2553,6 +2553,8 @@ function msgCustHtml(pid, list) {
     : `<div class="chat-msg in cust${m.kind === 'urgent' ? ' urgent' : ''}${m.read ? '' : ' fresh'}"><div class="chat-meta"><b>${esc(m.customerName || 'Заказчик')}</b> <span class="hint">${when(m.ts)}</span>
       ${m.kind === 'chat' ? '' : `<span class="chip ${m.kind === 'urgent' ? 'tone-bad' : 'tone-idle'}">${esc(m.viaChat ? 'Вопрос на контроле' : CAB_KINDS[m.kind] || 'Сообщение')}</span>`}${decisionChip(m)}</div>
     ${m.requestTitle || m.meetingTitle || m.to ? `<div class="hint">${esc(m.requestTitle || m.meetingTitle || '')}${m.to ? ` → ${esc(m.to)}` : ''}</div>` : ''}<div class="chat-text">${esc(m.text || '')}</div>
+    ${m.kind === 'extend' && m.until && canCustReply(pid) ? `<div class="cust-acts"><button class="btn primary xs" type="button" data-act="cust-extend" data-id="${esc(m.id)}" title="Перенести срок запроса и ответить заказчику в чат">Продлить до ${fmtDate(m.until)}</button></div>` : ''}
+    ${m.kind === 'invite' && m.invite ? `<div class="hint">Что увидит: ${esc(CUST_SEE.filter(([k]) => m.invite.see.includes(k)).map(x => x[1]).join(', ') || 'только главную')}</div>${canCustReply(pid) ? `<div class="cust-acts"><button class="btn primary xs" type="button" data-act="cust-invite" data-id="${esc(m.id)}" title="Создать вход в кабинет — логин и пароль покажем здесь">Открыть вход</button></div>` : ''}` : ''}
     ${state.projects.has(pid) ? `<div class="cust-acts"><button class="btn ghostbtn xs" type="button" data-act="cust-fwd" data-id="${esc(m.id)}" title="Переслать в чат проекта — для команды, заказчик его не видит">Во внутренний</button><button class="btn ghostbtn xs" type="button" data-act="cust-card" data-id="${esc(m.id)}" title="Добавить в обсуждение карточки">В карточку</button><button class="btn ghostbtn xs" type="button" data-act="cust-ctl" data-id="${esc(m.id)}" title="Новая карточка с ответственным и сроком">На контроль</button></div>` : ''}</div>`).join('');
   const name = state.projects.get(pid)?.name || list.at(-1)?.projectName || 'Проект';
   return `<div class="mc-chat"><div class="mc-head">${msg.mode === 'side' ? '<button class="btn ghostbtn sm" type="button" data-act="msg-back" aria-label="К списку">←</button>' : ''}<span class="mc-ic cust">З</span><span class="mc-ht"><b>${esc(name)}</b><span class="hint">чат с заказчиком · через кабинет</span></span>
@@ -2577,6 +2579,10 @@ async function msgCustSend() {
   const r = await api.cabinetPublish(pid).catch(e => ({ ok: false, message: e?.message }));
   toast(r?.ok ? 'Ответ отправлен в кабинет заказчика' : `Ответ сохранён, в кабинет уйдёт при следующей синхронизации${r?.message ? ': ' + r.message : ''}`, !r?.ok);
 }
+// 4.25: what a customer's colleague may see — the same keys as the cabinet's «hide».
+const CUST_SEE = [['docs', 'документация'], ['q', 'вопросы и решения'], ['chat', 'чат'], ['finance', 'договор и финансы']];
+const TRANSLIT = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ы: 'y', э: 'e', ю: 'yu', я: 'ya' };
+const loginFrom = name => String(name || '').toLowerCase().split(/\s+/)[0].split('').map(c => TRANSLIT[c] ?? (/[a-z0-9]/.test(c) ? c : '')).join('').slice(0, 30);
 const custQuote = m => `${m.customerName || 'Заказчик'} (${fmtDate(localTs(m.ts).slice(0, 10))}): «${m.text}»`;
 const msgPinBtn = key => { const on = msgPins().has(key); return `<button class="btn ghostbtn sm mc-pinbtn${on ? ' on' : ''}" type="button" data-act="msg-pin" data-id="${esc(key)}" aria-pressed="${on}" title="${on ? 'Открепить' : 'Закрепить сверху списка'}">${icon('pin')}</button>`; };
 function msgNewHtml() {
@@ -2833,6 +2839,48 @@ onAct({
       const r = await api.addComment(tid, `Пишет заказчик — ${custQuote(m)}`.slice(0, 2000));
       if (!r?.ok) return toast(r?.message || 'Не добавлено', true);
       await refresh(); toast('Добавлено в обсуждение карточки');
+    });
+  },
+  // 4.25: «Нужно время» — move the request's deadline and say so in the chat.
+  'cust-extend': async ({ id }) => {
+    const m = cab?.messages.find(x => x.id === id), p = m && state.projects.get(m.projectId);
+    if (!p || !canCustReply(p.id)) return;
+    const r = (p.requests || []).find(x => x.id === m.requestId);
+    if (!r) return toast('Этого запроса больше нет в проекте.', true);
+    const note = { id: newId(), ts: new Date().toISOString(), user: state.me.name, role: A.ROLES[state.me.role]?.label || '', text: `Срок «${r.title}» продлён до ${fmtDate(m.until)}.` };
+    if (!await write(op.update('projects', p.id, { requests: p.requests.map(x => x.id === r.id ? { ...x, due: m.until } : x), custChat: [...custReplies(p.id), note].slice(-300) }), `Срок «${r.title}» → ${fmtDate(m.until)}`)) return;
+    if (cab?.published?.[p.id]) await api.cabinetPublish(p.id).catch(() => null);
+    toast(`Срок продлён до ${fmtDate(m.until)}, заказчику ответили в чат`);
+  },
+  // 4.25: «Пригласить коллегу» — the GIP opens the login; the password is shown once, to pass on.
+  'cust-invite': async ({ id }) => {
+    const m = cab?.messages.find(x => x.id === id), inv = m?.invite;
+    if (!inv || !canCustReply(m.projectId)) return;
+    await loadCabCustomers();
+    const from = (cabCustomers || []).find(c => c.id === m.customerId);
+    const projectIds = from?.projectIds?.length ? from.projectIds : [m.projectId];
+    const { root, q, close } = openModal(`<form class="modal" role="dialog" aria-modal="true" aria-labelledby="ci-t" novalidate><h2 id="ci-t">Вход в кабинет для коллеги заказчика</h2>
+      <p class="hint">Просит ${esc(m.customerName || 'заказчик')}${inv.contact ? ` · связь: ${esc(inv.contact)}` : ''}. Проекты — как у него: ${projectIds.length}.</p>
+      <div class="f"><label for="ci-name">Имя</label><input id="ci-name" maxlength="120" value="${esc(inv.name)}"></div>
+      <div class="f"><label for="ci-login">Логин</label><input id="ci-login" maxlength="80" value="${esc(loginFrom(inv.name))}"></div>
+      <div class="f"><label for="ci-role">Роль</label><input id="ci-role" maxlength="60" value="${esc(inv.role)}"></div>
+      <fieldset class="f"><legend>Что увидит</legend>${CUST_SEE.map(([k, l]) => `<label class="chk"><input type="checkbox" data-see="${k}"${inv.see.includes(k) ? ' checked' : ''}> ${esc(l)}</label>`).join('')}</fieldset>
+      <div class="err" id="ci-err" hidden></div><div class="modal-f"><button class="btn primary" type="submit">Открыть вход</button><button class="btn" type="button" data-m="cancel">Отмена</button></div></form>`);
+    q('form').addEventListener('submit', async e => {
+      e.preventDefault(); e.stopPropagation();
+      const name = q('#ci-name').value.trim(), login = q('#ci-login').value.trim().toLowerCase();
+      if (!name) return modalErr(root, '#ci-err', 'Укажите имя.', '#ci-name');
+      if (!/^[a-z0-9._@-]{3,80}$/.test(login)) return modalErr(root, '#ci-err', 'Логин — латиница, цифры, точка, дефис; от 3 знаков.', '#ci-login');
+      const hide = CUST_SEE.map(x => x[0]).filter(k => !q(`[data-see="${k}"]`).checked);
+      const r = await api.cabinetCustomerCreate({ name, login, projectIds, role: q('#ci-role').value.trim(), hide });
+      if (!r?.ok) return modalErr(root, '#ci-err', r?.message || 'Не получилось.', '#ci-login');
+      cabPw = { name: r.customer.name, login: r.customer.login, password: r.password };
+      cabCustomers = null; close();
+      const text = `Кабинет заказчика: ${cab.publicUrl || cab.url}\nЛогин: ${cabPw.login}\nПароль: ${cabPw.password}`;
+      const done = openModal(`<div class="modal" role="dialog" aria-modal="true" aria-labelledby="cd-t"><h2 id="cd-t">Вход открыт: ${esc(name)}</h2>
+        <p class="hint">Передайте ${inv.contact ? esc(inv.contact) : 'коллеге заказчика'} — пароль больше не покажем (можно сбросить в «Для заказчика»).</p><pre class="cab-pw-text">${esc(text)}</pre>
+        <div class="modal-f"><button class="btn primary" type="button" data-copy>Скопировать</button><button class="btn" type="button" data-m="close">Готово</button></div></div>`);
+      done.q('[data-copy]').addEventListener('click', async () => toast(await copyText(text) ? 'Скопировано' : 'Не скопировалось — выделите текст', false));
     });
   },
   'cust-ctl': ({ id }) => {
@@ -4187,11 +4235,11 @@ function staffCard(u, list) {
   const work = ownedBy(u.id).filter(t => t.kind !== 'assign'), x = totals(work);
   const wait = asgWaitingFor(u.id).length, give = asgToGive(u.id).length, ab = upcomingAbsences(u)[0];
   const stat = (k, v, cls = '', title = '') => `<div class="stat ${cls}"${title ? ` title="${title}"` : ''}><span class="k">${k}</span><span class="v">${v}</span></div>`;
-  return `<article class="card staff pplcard" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" role="button" tabindex="0" title="Открыть: анкета и чем занят">
+  return `<article class="card staff pplcard" data-act="person-open" data-id="${esc(u.id)}"${dropAttr(u)} role="button" tabindex="0" title="Открыть: анкета и чем занят">
     <div class="card-h"><div class="row1 pplcard-row">${avatarHtml(u)}<div class="pc-name"><h3><span class="kicons">${userIcons(u)}</span>${esc(userLabel(u))}</h3>
       <span class="hint">${esc(u.position || A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''}</span></div>
       ${A.isGip(state.me) ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</div>
-      <div class="pc-state">${personStateChip(personState(u))}${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}${give ? `<span class="chip tone-idle" title="Задания смежникам, которые этот человек ещё не выдал">выдать заданий: ${give}</span>` : ''}</div></div>
+      <div class="pc-state">${A.isGip(u) ? '' : personStateChip(personState(u))}${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}${give ? `<span class="chip tone-idle" title="Задания смежникам, которые этот человек ещё не выдал">выдать заданий: ${give}</span>` : ''}</div></div>
     <div class="stats stats5">${stat('Карточек', x.count)}${stat('В работе', x.active)}${stat('Сорвано', x.overdue, x.overdue ? 'bad' : '')}${stat('На проверке', x.review)}${stat('Ждут заданий', wait, wait ? 'waitv' : '', 'Задания от смежников к карточкам этого человека, ещё не выданные')}</div>
     ${game ? gameStats(u, work) : ''}
   </article>`;
@@ -4266,7 +4314,7 @@ function staffList(staff, list) {
     ${staff.map(u => {
       const ct = ownedBy(u.id).filter(t => t.kind !== 'assign'), x = totals(ct), wait = asgWaitingFor(u.id).length, all = ownedByAll(u.id), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
       const ab = upcomingAbsences(u)[0];
-      return `<tr class="row" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" title="Открыть: анкета и чем занят"><td>${avatarHtml(u, 'sm')}<span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
+      return `<tr class="row" data-act="person-open" data-id="${esc(u.id)}"${dropAttr(u)} title="Открыть: анкета и чем занят"><td>${avatarHtml(u, 'sm')}<span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
         <td class="r num">${x.active || '—'}</td><td class="r num ${x.overdue ? 'neg' : ''}">${x.overdue || '—'}</td><td class="r num">${x.review || '—'}</td><td class="r num">${wait || '—'}</td>
         ${game ? `<td class="r num">${ft.pct === null ? '—' : ft.pct + '%'}</td><td class="r num">${th ? '♥ ' + th : '—'}</td>` : ''}
         <td>${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}</td>
@@ -4275,9 +4323,13 @@ function staffList(staff, list) {
 }
 // «Люди» (4.1, backlog item 17): the GIP sees all staff and all outside people; a chief — all staff and own outside
 // people (added by him or working on his team's cards); a specialist — staff only.
+// 4.25: the GIPs and the director are staff too — shown first (they were left out as «not executors»).
+const STAFF_ORDER = { director: 0, gip: 1, chief: 2, specialist: 3 };
 function peopleStaff() {
-  return liveUsers().filter(u => !A.isGip(u)).sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
+  return liveUsers().sort((a, b) => (STAFF_ORDER[a.role] ?? 9) - (STAFF_ORDER[b.role] ?? 9) || byName(a, b));
 }
+// Cards dropped on a person are given to him; a GIP is not given cards that way (as in the executor pickers).
+const dropAttr = u => A.isGip(u) ? '' : ` data-drop="staff:${esc(u.id)}"`;
 function peopleOutside() {
   if (A.isGip(state.me)) return contractorsArr();
   if (isSpec()) return [];
@@ -7695,7 +7747,7 @@ let cab = null;          // view from the main process: { allowed, configured, u
 let cabCustomers = null; // customer accounts on the server, loaded when the «Для заказчика» tab is shown
 let cabPw = null;        // { name, login, password } — shown once after creating or resetting
 let cabLoadErr = '';
-const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова', chat: 'Сообщение в чате' };
+const CAB_KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова', chat: 'Сообщение в чате', extend: 'Просьба продлить срок', invite: 'Пригласить коллегу' };
 // The customer's verdict on files sent for approval.
 const decisionChip = m => (m?.decision === 'approve' ? ' <span class="chip tone-ok">Согласовано</span>' : m?.decision === 'remarks' ? ' <span class="chip tone-warn">Есть замечания</span>' : '');
 const cabTime = ts => { const d = new Date(ts); return Number.isNaN(+d) ? '' : `${fmtDate(ts.slice(0, 10))} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };

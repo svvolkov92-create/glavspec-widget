@@ -13,10 +13,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 // Shared code: in the repository it lives in ../src, in the server package in ./lib.
 const LIB = fs.existsSync(path.join(__dirname, 'lib')) ? path.join(__dirname, 'lib') : path.join(__dirname, '..', 'src');
-const { renderPage, meetingIcs } = require(path.join(LIB, 'report', 'customer.js'));
+const { renderPage, renderProjects, meetingIcs } = require(path.join(LIB, 'report', 'customer.js'));
 const ASSETS = {
   logo: path.join(LIB, 'renderer', 'brand', 'tandem-logo.svg'),
   golos: path.join(LIB, 'renderer', 'fonts', 'GolosText.ttf'),
@@ -182,7 +182,10 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
     const h = String(req.headers.authorization || '');
     return h.startsWith('Bearer ') && safeEqual(h.slice(7), D().secrets.teamKey);
   }
-  const publicCustomer = c => ({ id: c.id, name: c.name, login: c.login, projectIds: c.projectIds || [], disabled: !!c.disabled, createdAt: c.createdAt, lastLoginAt: c.lastLoginAt || null });
+  // 4.25: a customer's person may see less: «hide» — sections closed to him (the GIP sets it when opening the login).
+  const HIDE_KEYS = ['docs', 'q', 'chat', 'finance'];
+  const hideOf = v => (Array.isArray(v) ? HIDE_KEYS.filter(k => v.includes(k)) : []);
+  const publicCustomer = c => ({ id: c.id, name: c.name, login: c.login, role: c.role || '', hide: hideOf(c.hide), projectIds: c.projectIds || [], disabled: !!c.disabled, createdAt: c.createdAt, lastLoginAt: c.lastLoginAt || null });
   function validModel(id, m) {
     if (!m || typeof m !== 'object' || !m.project || m.project.id !== id) return 'Данные проекта повреждены.';
     if (JSON.stringify(m).length > 1_500_000) return 'Слишком большой проект.';
@@ -242,7 +245,7 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
         if (!login || !name) return json(res, 400, { ok: false, message: 'Укажите имя и логин заказчика.' });
         if (Object.values(D().customers).some(c => c.login === login)) return json(res, 409, { ok: false, message: 'Такой логин уже есть.' });
         const password = newPassword(), cid = token(9);
-        D().customers[cid] = { id: cid, name, login, projectIds: (body.projectIds || []).map(x => str(x, 60)).slice(0, 200), ...hashPassword(password), pwAt: Date.now(), createdAt: new Date().toISOString() };
+        D().customers[cid] = { id: cid, name, login, projectIds: (body.projectIds || []).map(x => str(x, 60)).slice(0, 200), role: str(body.role, 60), hide: hideOf(body.hide), ...hashPassword(password), pwAt: Date.now(), createdAt: new Date().toISOString() };
         store.save();
         return json(res, 200, { ok: true, customer: publicCustomer(D().customers[cid]), password });
       }
@@ -252,6 +255,8 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
         if (body.name !== undefined) c.name = str(body.name, 120) || c.name;
         if (Array.isArray(body.projectIds)) c.projectIds = body.projectIds.map(x => str(x, 60)).slice(0, 200);
         if (body.disabled !== undefined) c.disabled = !!body.disabled;
+        if (body.role !== undefined) c.role = str(body.role, 60);
+        if (body.hide !== undefined) c.hide = hideOf(body.hide);
         let password;
         if (body.resetPassword) { password = newPassword(); Object.assign(c, hashPassword(password), { pwAt: Date.now() }); } // ends all sessions
         store.save();
@@ -272,7 +277,14 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
   }
 
   /* ----- customer side ----- */
-  const KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова', chat: 'Сообщение в чате' };
+  const KINDS = { answer: 'Ответ на запрос', call: 'Просьба перезвонить', urgent: 'Горящий вопрос', question: 'Вопрос', meeting: 'Перенос встречи', reopen: 'Просьба открыть проект снова', chat: 'Сообщение в чате', extend: 'Просьба продлить срок', invite: 'Пригласить коллегу' };
+  // 4.25: a model without what is closed to this person (the page is built from it, so nothing closed leaks into it).
+  function forCustomer(m, c) {
+    const hide = hideOf(c.hide);
+    if (!hide.length) return m;
+    return { ...m, finance: hide.includes('finance') ? null : m.finance, sections: hide.includes('docs') ? [] : m.sections,
+      project: { ...m.project, requests: hide.includes('q') ? [] : m.project.requests } };
+  }
   function addMessage(s, projectId, kind, text, request, extra = {}) {
     const m = D().projects[projectId];
     D().seq += 1;
@@ -325,6 +337,26 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
           addMessage(s, pid, 'reopen', text || 'Просим открыть проект снова.');
           return back('reopen');
         }
+        const hidden = hideOf(s.customer.hide);
+        if ((hidden.includes('q') && ['/c/answer', '/c/question', '/c/extend'].includes(p)) || (hidden.includes('chat') && p === '/c/chat')) return back('noaccess');
+        // 4.25: «Нужно время» — a request to move the deadline of something sent to the customer.
+        if (p === '/c/extend') {
+          const r = (m.project.requests || []).find(x => x.id === f.request);
+          const until = /^\d{4}-\d{2}-\d{2}$/.test(f.until || '') && f.until > today() ? f.until : '';
+          if (!r || !until) return back('nodate', '#dec');
+          addMessage(s, pid, 'extend', `Просим продлить срок до ${until.split('-').reverse().join('.')}${text ? '. ' + text : ''}`, r, { until });
+          return back('extend', '#dec');
+        }
+        // 4.25: «Пригласить коллегу» — the GIP opens the login (and decides what the colleague sees).
+        if (p === '/c/invite') {
+          const name = str(f.name, 120), see = HIDE_KEYS.filter(k => f['see_' + k] === '1');
+          if (!name) return back('noname', '#team');
+          const dayAgo = new Date(Date.now() - 24 * 3600e3).toISOString();
+          if (D().inbox.filter(x => x.customerId === s.customerId && x.kind === 'invite' && x.ts > dayAgo).length >= 5) return back('slow', '#team');
+          const invite = { name, contact: str(f.contact, 120), role: str(f.role, 60), see };
+          addMessage(s, pid, 'invite', `Пригласить: ${name}${invite.role ? ', ' + invite.role : ''}${invite.contact ? ' · ' + invite.contact : ''}`, null, { invite });
+          return back('invite', '#team');
+        }
         if (p === '/c/answer') {
           const r = (m.project.requests || []).find(x => x.id === f.request);
           // Files sent for approval: «Согласовано» needs no text, remarks do.
@@ -366,9 +398,10 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
       const list = visibleProjects(s.customer);
       if (p === '/') {
         if (list.length === 1) return redirect(res, `/p/${encodeURIComponent(list[0].project.id)}`);
-        return send(res, 200, shell(cfg.title, `<div class="top"><b>${esc(s.customer.name)}</b><form method="post" action="/logout"><input type="hidden" name="csrf" value="${esc(s.csrf)}"><button type="submit">Выйти</button></form></div>
-          ${list.length ? list.map(x => `<a class="pr" href="/p/${encodeURIComponent(x.project.id)}"><b>${esc(x.project.name)}</b><span class="mu">${esc(x.project.code ? 'Шифр ' + x.project.code + ' · ' : '')}обновлено ${esc(String(x.publishedAt || '').split('-').reverse().join('.'))}</span></a>`).join('')
-            : '<div class="card"><p>Проекты ещё не открыты для вас. Главный инженер проекта откроет доступ.</p></div>'}`));
+        // 4.25: «Мои проекты» by stage of life, with what waits for the customer on each.
+        const items = list.map(x => ({ m: forCustomer(x, s.customer), sent: D().sent[s.customerId]?.[x.project.id] || {} }));
+        return send(res, 200, renderProjects(items, { today: today(), logoSvg, fontName, fontUrl: '/font.ttf', cabinet: { csrf: s.csrf, base: '', customerName: s.customer.name, title: cfg.title === 'Кабинет заказчика' ? 'Мой Тандем' : cfg.title } })
+          .replace('</head>', '<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#F26A1F"><link rel="icon" href="/icon.svg"><script src="/sw-register.js" defer></script></head>'));
       }
       // A file attached to a request of a project this customer sees.
       const fm = p.match(/^\/p\/([^/]+)\/f\/([^/]+)$/);
@@ -393,14 +426,20 @@ a.pr b{display:block;font-size:16px}.top{display:flex;justify-content:space-betw
       if (mm) {
         const pid = decodeURIComponent(mm[1]), m = D().projects[pid];
         if (!m || !(s.customer.projectIds || []).includes(pid)) return send(res, 404, shell(cfg.title, '<div class="card"><p>Проект не найден.</p><p><a href="/">← Мои проекты</a></p></div>'));
-        const flash = { answer: 'Ответ отправлен главному инженеру проекта.', call: 'Просьба перезвонить отправлена.', urgent: 'Вопрос отправлен — ГИП увидит его сразу.', question: 'Вопрос отправлен.', meeting: 'Просьба перенести встречу отправлена.', empty: 'Напишите текст сообщения.', reopen: 'Запрос отправлен ГИПу — он ответит.', closed: 'Проект завершён: писать по нему нельзя, можно запросить повторное открытие.', chat: 'Сообщение отправлено.', control: 'Сообщение отправлено и поставлено на контроль — появится в «Вопросах».', slow: 'Слишком много сообщений подряд — подождите минуту.' }[url.searchParams.get('ok')] || '';
+        const flash = { answer: 'Ответ отправлен главному инженеру проекта.', call: 'Просьба перезвонить отправлена.', urgent: 'Вопрос отправлен — ГИП увидит его сразу.', question: 'Вопрос отправлен.', meeting: 'Просьба перенести встречу отправлена.', empty: 'Напишите текст сообщения.', reopen: 'Запрос отправлен ГИПу — он ответит.', closed: 'Проект завершён: писать по нему нельзя, можно запросить повторное открытие.', extend: 'Просьба продлить срок отправлена ГИПу.', nodate: 'Укажите новую дату — позже сегодняшней.', invite: 'Приглашение отправлено ГИПу: он откроет вход и передаст коллеге логин и пароль.', noname: 'Укажите имя коллеги.', noaccess: 'Этот раздел вам закрыт — его открывает ГИП.', chat: 'Сообщение отправлено.', control: 'Сообщение отправлено и поставлено на контроль — появится в «Вопросах».', slow: 'Слишком много сообщений подряд — подождите минуту.' }[url.searchParams.get('ok')] || '';
         // What this customer sent on this project: shown in «Вопросы» (newest first).
         const messages = D().inbox.filter(x => x.customerId === s.customerId && x.projectId === pid).slice(-40).reverse().map(x => ({ kind: x.kind, text: x.text, to: x.to || '', requestTitle: x.requestTitle || '', decision: x.decision || '', ts: x.ts }));
         // 4.24: the project chat of all the customer's people (the team's replies come in the published model) and the decisions made.
         const ofProject = D().inbox.filter(x => x.projectId === pid);
         const chat = ofProject.filter(x => x.kind === 'chat' || x.viaChat).slice(-100).map(x => ({ text: x.text, ts: x.ts, name: x.customerName || '', mine: x.customerId === s.customerId, control: x.kind === 'question' }));
         const decisions = ofProject.filter(x => x.kind === 'answer' && x.decision === 'approve').slice(-60).reverse().map(x => ({ title: x.requestTitle || '', ts: x.ts, name: x.customerName || '' }));
-        const html = renderPage(m, { today: today(), logoSvg, fontName, fontUrl: '/font.ttf', cabinet: { csrf: s.csrf, base: '', flash, sent: D().sent[s.customerId]?.[pid] || {}, customerName: s.customer.name, projects: list.length, messages, chat, decisions, title: cfg.title === 'Кабинет заказчика' ? 'Мой Тандем' : cfg.title } })
+        // 4.25: «Нужно время» already asked; the customer's people and the invitations waiting for the GIP.
+        const extend = Object.fromEntries(ofProject.filter(x => x.kind === 'extend' && x.customerId === s.customerId).map(x => [x.requestId, x.until]));
+        const people = Object.values(D().customers).filter(c => !c.disabled && (c.projectIds || []).includes(pid)).map(c => ({ name: c.name, role: c.role || '', me: c.id === s.customerId, hide: hideOf(c.hide) }));
+        const monthAgo = new Date(Date.now() - 30 * 864e5).toISOString();
+        const invites = ofProject.filter(x => x.kind === 'invite' && x.ts > monthAgo && x.invite && !people.some(c => c.name === x.invite.name)).map(x => ({ name: x.invite.name, role: x.invite.role || '', by: x.customerName || '' }));
+        const hidden = hideOf(s.customer.hide);
+        const html = renderPage(forCustomer(m, s.customer), { today: today(), logoSvg, fontName, fontUrl: '/font.ttf', cabinet: { csrf: s.csrf, base: '', flash, sent: D().sent[s.customerId]?.[pid] || {}, customerName: s.customer.name, projects: list.length, messages, chat: hidden.includes('chat') ? null : chat, decisions, extend, people, invites, hide: hidden, title: cfg.title === 'Кабинет заказчика' ? 'Мой Тандем' : cfg.title } })
           .replace('</head>', '<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#F26A1F"><link rel="icon" href="/icon.svg"><script src="/sw-register.js" defer></script></head>');
         return send(res, 200, html);
       }

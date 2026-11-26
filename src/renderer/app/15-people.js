@@ -83,11 +83,11 @@ function staffCard(u, list) {
   const work = ownedBy(u.id).filter(t => t.kind !== 'assign'), x = totals(work);
   const wait = asgWaitingFor(u.id).length, give = asgToGive(u.id).length, ab = upcomingAbsences(u)[0];
   const stat = (k, v, cls = '', title = '') => `<div class="stat ${cls}"${title ? ` title="${title}"` : ''}><span class="k">${k}</span><span class="v">${v}</span></div>`;
-  return `<article class="card staff pplcard" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" role="button" tabindex="0" title="Открыть: анкета и чем занят">
+  return `<article class="card staff pplcard" data-act="person-open" data-id="${esc(u.id)}"${dropAttr(u)} role="button" tabindex="0" title="Открыть: анкета и чем занят">
     <div class="card-h"><div class="row1 pplcard-row">${avatarHtml(u)}<div class="pc-name"><h3><span class="kicons">${userIcons(u)}</span>${esc(userLabel(u))}</h3>
       <span class="hint">${esc(u.position || A.ROLES[u.role]?.label || '')}${A.directionLabels(u).length ? ' · ' + esc(A.directionLabels(u).join(', ')) : ''}</span></div>
       ${A.isGip(state.me) ? `<button class="btn ghostbtn sm" data-act="open-user" data-id="${esc(u.id)}" type="button">Изменить</button>` : ''}</div>
-      <div class="pc-state">${personStateChip(personState(u))}${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}${give ? `<span class="chip tone-idle" title="Задания смежникам, которые этот человек ещё не выдал">выдать заданий: ${give}</span>` : ''}</div></div>
+      <div class="pc-state">${A.isGip(u) ? '' : personStateChip(personState(u))}${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}${give ? `<span class="chip tone-idle" title="Задания смежникам, которые этот человек ещё не выдал">выдать заданий: ${give}</span>` : ''}</div></div>
     <div class="stats stats5">${stat('Карточек', x.count)}${stat('В работе', x.active)}${stat('Сорвано', x.overdue, x.overdue ? 'bad' : '')}${stat('На проверке', x.review)}${stat('Ждут заданий', wait, wait ? 'waitv' : '', 'Задания от смежников к карточкам этого человека, ещё не выданные')}</div>
     ${game ? gameStats(u, work) : ''}
   </article>`;
@@ -162,7 +162,7 @@ function staffList(staff, list) {
     ${staff.map(u => {
       const ct = ownedBy(u.id).filter(t => t.kind !== 'assign'), x = totals(ct), wait = asgWaitingFor(u.id).length, all = ownedByAll(u.id), ft = L.firstTime(all, state.today), th = L.thanksFor(all, u.id);
       const ab = upcomingAbsences(u)[0];
-      return `<tr class="row" data-act="person-open" data-id="${esc(u.id)}" data-drop="staff:${esc(u.id)}" title="Открыть: анкета и чем занят"><td>${avatarHtml(u, 'sm')}<span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
+      return `<tr class="row" data-act="person-open" data-id="${esc(u.id)}"${dropAttr(u)} title="Открыть: анкета и чем занят"><td>${avatarHtml(u, 'sm')}<span class="kicons">${userIcons(u)}</span><b>${esc(userLabel(u))}</b></td><td class="hint">${esc(A.ROLES[u.role]?.label || '')}${u.chiefId && state.users.get(u.chiefId) ? ` · ${esc(state.users.get(u.chiefId).name)}` : ''}</td>
         <td class="r num">${x.active || '—'}</td><td class="r num ${x.overdue ? 'neg' : ''}">${x.overdue || '—'}</td><td class="r num">${x.review || '—'}</td><td class="r num">${wait || '—'}</td>
         ${game ? `<td class="r num">${ft.pct === null ? '—' : ft.pct + '%'}</td><td class="r num">${th ? '♥ ' + th : '—'}</td>` : ''}
         <td>${ab ? `<span class="chip tone-warn">${esc(A.ABSENCE_KINDS[ab.kind] || 'нет')} ${fmtDate(ab.from)}–${fmtDate(ab.to)}</span>` : ''}</td>
@@ -171,9 +171,13 @@ function staffList(staff, list) {
 }
 // «Люди» (4.1, backlog item 17): the GIP sees all staff and all outside people; a chief — all staff and own outside
 // people (added by him or working on his team's cards); a specialist — staff only.
+// 4.25: the GIPs and the director are staff too — shown first (they were left out as «not executors»).
+const STAFF_ORDER = { director: 0, gip: 1, chief: 2, specialist: 3 };
 function peopleStaff() {
-  return liveUsers().filter(u => !A.isGip(u)).sort((a, b) => (a.role === b.role ? byName(a, b) : a.role === 'chief' ? -1 : 1));
+  return liveUsers().sort((a, b) => (STAFF_ORDER[a.role] ?? 9) - (STAFF_ORDER[b.role] ?? 9) || byName(a, b));
 }
+// Cards dropped on a person are given to him; a GIP is not given cards that way (as in the executor pickers).
+const dropAttr = u => A.isGip(u) ? '' : ` data-drop="staff:${esc(u.id)}"`;
 function peopleOutside() {
   if (A.isGip(state.me)) return contractorsArr();
   if (isSpec()) return [];
